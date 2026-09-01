@@ -21,7 +21,7 @@ from applyos_harness.versioning import canonical_hash
 from applyos_agent.config import AgentSettings
 from applyos_agent.runtime import AgentRuntime
 
-from .ai_parser import parse_resume_with_model
+from .ai_parser import parse_resume_with_model, redact_resume_text
 
 
 SECTION_NAMES = {
@@ -562,6 +562,8 @@ class PdfResumeImporter:
             for section in sections
             for index, entry in enumerate(section["entries"])
         ]
+        redacted = redact_resume_text(text, profile)
+        outbound_text = redacted.text[:30000]
         ai_result = parse_resume_with_model(
             text,
             profile,
@@ -589,10 +591,13 @@ class PdfResumeImporter:
             "experiences": experiences,
             "facts": facts,
             "text_preview": text[:6000],
+            "outbound_preview": outbound_text[:6000],
+            "outbound_text_length": len(outbound_text),
+            "outbound_truncated": len(redacted.text) > len(outbound_text),
             "recognition_mode": "ai_enhanced" if ai_experiences else "local",
             "provider": ai_result.provider if ai_result and ai_result.used else "",
             "model": ai_result.model if ai_result and ai_result.used else "",
-            "redacted_fields": ai_result.redacted_fields if ai_result else [],
+            "redacted_fields": ai_result.redacted_fields if ai_result else redacted.categories,
             "warnings": ai_result.warnings if ai_result else [],
         }
         self._preview_cache[cache_key] = deepcopy(result)
@@ -608,8 +613,11 @@ class PdfResumeImporter:
         candidate_name: str | None = None,
         candidate_title: str | None = None,
         ai_enhanced: bool = True,
+        reviewed_preview: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         preview = self.preview(source_path, ai_enhanced=ai_enhanced)
+        if reviewed_preview is not None:
+            preview = self._apply_reviewed_preview(preview, reviewed_preview)
         source = Path(preview["source_path"])
         profile = preview["profile"]
         with self.database.session() as session:
@@ -714,6 +722,71 @@ class PdfResumeImporter:
                 created += 1
             session.flush()
             return {"candidate_id": candidate.id, "resume_id": resume.id, "facts_created": created, "duplicate": False, "preview": preview}
+
+    @staticmethod
+    def _apply_reviewed_preview(base: dict[str, Any], reviewed: dict[str, Any]) -> dict[str, Any]:
+        """Apply only user-reviewable fields while retaining source evidence."""
+
+        if not isinstance(reviewed, dict):
+            raise ValueError("简历核对结果格式无效")
+        source_sha = str(reviewed.get("source_sha256") or base["source_sha256"])
+        if source_sha != base["source_sha256"]:
+            raise ValueError("简历核对结果与当前 PDF 不匹配")
+        raw_items = reviewed.get("experiences")
+        if not isinstance(raw_items, list) or len(raw_items) > 200:
+            raise ValueError("简历经历核对结果无效")
+        allowed_kinds = {"education", "experience", "project", "skill", "award", "summary", "campus", "research", "other"}
+        clean_items = []
+        for index, raw in enumerate(raw_items):
+            if not isinstance(raw, dict):
+                raise ValueError("简历经历条目格式无效")
+            original = (base.get("experiences") or [])
+            source_index = raw.get("_source_index", index)
+            source_index = source_index if isinstance(source_index, int) and 0 <= source_index < len(original) else index
+            evidence = original[source_index].get("details", {}) if source_index < len(original) else {}
+            kind = str(raw.get("kind") or "other")[:40]
+            if kind not in allowed_kinds:
+                kind = "other"
+            section = str(raw.get("section") or SECTION_DEFAULT_TITLES.get(kind) or "其他经历").strip()[:120]
+            fields = {
+                key: str(raw.get(key) or "").strip()[:limit]
+                for key, limit in {
+                    "title": 240,
+                    "organization": 240,
+                    "role": 240,
+                    "start_date": 80,
+                    "end_date": 80,
+                    "summary": 8000,
+                }.items()
+            }
+            content = " ".join(item for item in (fields["title"], fields["organization"], fields["role"], fields["summary"]) if item)
+            if not content:
+                continue
+            clean_items.append({
+                "kind": kind,
+                "section": section,
+                **fields,
+                "details": {
+                    **evidence,
+                    "review_status": "uncertain" if raw.get("review_status") == "uncertain" else "confirmed",
+                    "user_reviewed": True,
+                },
+                "content": content[:10000],
+            })
+        result = deepcopy(base)
+        profile_override = reviewed.get("profile") if isinstance(reviewed.get("profile"), dict) else {}
+        result["profile"] = {
+            **base["profile"],
+            **{
+                key: str(profile_override.get(key) or base["profile"].get(key) or "").strip()[:limit]
+                for key, limit in {"name": 160, "title": 240, "email": 320, "phone": 80}.items()
+            },
+        }
+        result["experiences"] = clean_items
+        result["sections"] = _section_summaries(clean_items)
+        result["facts"] = [{"category": item["kind"], "section": item["section"], "content": item["content"]} for item in clean_items]
+        result["warnings"] = [*(base.get("warnings") or []), "已采用用户在导入核对页确认的字段修正。"]
+        return result
 
     @staticmethod
     def _repair_existing_snapshot(resume: ResumeVersion, preview: dict[str, Any], source: Path) -> None:

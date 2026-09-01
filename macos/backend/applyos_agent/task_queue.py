@@ -18,14 +18,27 @@ from applyos_harness.errors import HarnessError
 from applyos_harness.trace import TraceService
 from applyos_harness.trace import redact_text
 
-from .context import ContextManager
 from .cancellation import provider_requests
-from .engine import build_agent_engine
-from .service import AgentService
 
 
 ACTIVE_TASK_STATUSES = {"queued", "running"}
 RESUMABLE_TASK_STATUSES = {"paused", "failed"}
+
+class AgentService:
+    """Lazy compatibility facade for queued-message processing.
+
+    The concrete service imports the full provider runtime. Keeping this tiny
+    facade lets tests/embedders patch ``AgentService.converse`` as before while
+    avoiding that import until a queued message is actually processed.
+    """
+
+    def __init__(self, session: Session):
+        from .service import AgentService as ConcreteAgentService
+
+        self._service = ConcreteAgentService(session)
+
+    def converse(self, *args, **kwargs):
+        return self._service.converse(*args, **kwargs)
 
 
 class TaskQueue:
@@ -178,6 +191,8 @@ class AgentTaskWorker:
                     return None
 
             try:
+                from .engine import build_agent_engine
+
                 engine = build_agent_engine(session)
                 outcome = engine.retry(run, control=control) if task.kind == "retry" else engine.run(run, control=control)
                 task.result_json = {"stop_reason": outcome.stop_reason, "iterations": outcome.iterations, "stage": run.current_stage, "status": run.status.value}
@@ -223,12 +238,45 @@ class AgentTaskWorker:
                 queued.error = "job_not_found"
                 return WorkerResult("message", queued.id, queued.status)
             try:
+                from .context import ContextManager
+
                 context = ContextManager(session).conversation_context(job=job, run=run, include_job_context=False)
+                processing_trace: list[dict] = []
+
+                def capture_event(item: dict) -> None:
+                    event_id = str(item.get("id") or item.get("type") or "agent")
+                    for index, existing in enumerate(processing_trace):
+                        if existing.get("id") == event_id:
+                            processing_trace[index] = {**existing, **item}
+                            return
+                    processing_trace.append(dict(item))
+
                 user = AgentMessage(candidate_id=job.candidate_id, job_id=job.id, run_id=run.id if run else None, role="user", content=queued.content, metadata_json={"thinking_level": queued.thinking_level, "delivery_status": "queued_completed"})
                 session.add(user)
                 session.flush()
-                result = AgentService(session).converse(job, queued.content, run=run, context=context, thinking_level=queued.thinking_level)
-                assistant = AgentMessage(candidate_id=job.candidate_id, job_id=job.id, run_id=run.id if run else None, role="assistant", content=result["message"], metadata_json={"intent": result["intent"], "suggested_actions": result["suggested_actions"], "runtime": result["runtime"], "thinking_level": queued.thinking_level, "queued_message_id": queued.id})
+                result = AgentService(session).converse(
+                    job,
+                    queued.content,
+                    run=run,
+                    context=context,
+                    thinking_level=queued.thinking_level,
+                    on_event=capture_event,
+                )
+                assistant = AgentMessage(
+                    candidate_id=job.candidate_id,
+                    job_id=job.id,
+                    run_id=run.id if run else None,
+                    role="assistant",
+                    content=result["message"],
+                    metadata_json={
+                        "intent": result["intent"],
+                        "suggested_actions": result["suggested_actions"],
+                        "runtime": result["runtime"],
+                        "thinking_level": queued.thinking_level,
+                        "queued_message_id": queued.id,
+                        "processing_trace": processing_trace,
+                    },
+                )
                 session.add(assistant)
                 session.flush()
                 queued.result_message_id = assistant.id

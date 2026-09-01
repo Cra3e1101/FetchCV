@@ -1,6 +1,7 @@
 import json
 import threading
 import os
+from datetime import date
 
 import httpx
 import pytest
@@ -201,6 +202,7 @@ def test_general_question_omits_job_context_from_provider_prompt(tmp_path):
     assert "<user_message>\n今天北京天气如何？" in prompt
     assert "只有相关时才核对岗位" in system_prompt
     assert "实时天气" in system_prompt
+    assert f"当前本地日期是 {date.today().isoformat()}" in system_prompt
     assert "不可信数据" in system_prompt
     assert "只能讨论求职" in system_prompt
     assert "不得使用关键词匹配代替判断" in system_prompt
@@ -418,6 +420,92 @@ def test_complete_turn_falls_back_when_provider_rejects_native_tools(monkeypatch
     assert len(calls) == 2
     assert result.tool_calls[0].name == "analyze_job"
     assert result.usage["tool_mode"] == "structured_fallback"
+
+
+def test_openai_complete_turn_parses_dsml_without_exposing_protocol(monkeypatch, tmp_path):
+    dsml = (
+        '<|DSML|tool_calls><|DSML|invoke name="search_web">'
+        '<|DSML|parameter name="query" string="true">中国天气网 北京明天天气预报</|DSML|parameter>'
+        '<|DSML|parameter name="max_results" string="false">5</|DSML|parameter>'
+        '</|DSML|invoke></|DSML|tool_calls>'
+    )
+
+    class FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"finish_reason": "stop", "message": {"content": dsml}}], "usage": {}}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def close(self):
+            pass
+
+        def post(self, *_args, **_kwargs):
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "Client", FakeClient)
+    result = CompatibleAgentRuntime(_runtime_settings(tmp_path)).complete_turn(
+        agent_name="agent_loop",
+        system_prompt="Use tools",
+        messages=[{"role": "user", "content": "北京明天天气"}],
+        tools=[RuntimeToolDefinition(
+            name="search_web",
+            description="Search the web",
+            input_schema={"type": "object", "properties": {}},
+        )],
+    )
+
+    assert result.text == ""
+    assert result.tool_calls[0].name == "search_web"
+    assert result.tool_calls[0].arguments == {"query": "中国天气网 北京明天天气预报", "max_results": 5}
+    assert result.usage["tool_mode"] == "dsml"
+
+
+def test_anthropic_complete_turn_parses_full_width_dsml_without_exposing_protocol(monkeypatch, tmp_path):
+    dsml = (
+        '<｜｜DSML｜｜tool_calls><｜｜DSML｜｜invoke name="search_web">'
+        '<｜｜DSML｜｜parameter name="query" string="true">昌平一周天气</｜｜DSML｜｜parameter>'
+        '<｜｜DSML｜｜parameter name="max_results" string="false">5</｜｜DSML｜｜parameter>'
+        '</｜｜DSML｜｜invoke></｜｜DSML｜｜tool_calls>'
+    )
+
+    class FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"content": [{"type": "text", "text": dsml}], "stop_reason": "end_turn", "usage": {}}
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def close(self):
+            pass
+
+        def post(self, *_args, **_kwargs):
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "Client", FakeClient)
+    result = CompatibleAgentRuntime(_runtime_settings(tmp_path, protocol="anthropic")).complete_turn(
+        agent_name="agent_loop",
+        system_prompt="Use tools",
+        messages=[{"role": "user", "content": "昌平一周天气"}],
+        tools=[RuntimeToolDefinition(name="search_web", description="Search the web", input_schema={"type": "object", "properties": {}})],
+    )
+
+    assert result.text == ""
+    assert result.tool_calls[0].name == "search_web"
+    assert result.tool_calls[0].arguments == {"query": "昌平一周天气", "max_results": 5}
+    assert result.usage["tool_mode"] == "dsml"
 
 
 def test_inflight_compatible_request_is_force_cancelled(monkeypatch, tmp_path):

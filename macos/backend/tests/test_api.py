@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 import applyos_api.main as api_main
 from applyos_api.main import create_app
+from applyos_domain.models import ResumeVersion
 
 
 def test_health_and_fact_verification_flow(database):
@@ -49,6 +50,29 @@ def test_job_can_be_renamed_and_deleted_without_deleting_candidate(database):
         assert client.delete(f"/api/jobs/{job['id']}").status_code == 204
         assert client.get(f"/api/candidates/{candidate['id']}").status_code == 200
         assert client.get(f"/api/jobs/{job['id']}/workspace").status_code == 404
+
+
+def test_job_workspace_exposes_base_resume_before_tailored_version_exists(database):
+    with TestClient(create_app(database)) as client:
+        candidate = client.post("/api/candidates", json={"name": "测试候选人"}).json()
+        job = client.post(
+            "/api/jobs",
+            json={"candidate_id": candidate["id"], "company": "示例公司", "role": "策略运营"},
+        ).json()
+        with database.session() as session:
+            base_resume = ResumeVersion(
+                candidate_id=candidate["id"],
+                name="基础简历",
+                content_json={"editor_snapshot": {"profile": {"name": "测试候选人"}, "sections": []}},
+            )
+            session.add(base_resume)
+            session.flush()
+            base_resume_id = base_resume.id
+
+        workspace = client.get(f"/api/jobs/{job['id']}/workspace").json()
+        assert workspace["resumes"] == []
+        assert workspace["base_resumes"][0]["id"] == base_resume_id
+        assert workspace["base_resumes"][0]["name"] == "基础简历"
 
 
 def test_desktop_session_token_protects_local_data(database, monkeypatch):
@@ -98,6 +122,22 @@ def test_permission_settings_are_written_to_json(database, tmp_path, monkeypatch
         assert stored["permissions"] == response.json()
 
 
+def test_general_appearance_settings_persist(database, tmp_path, monkeypatch):
+    settings_path = tmp_path / "settings" / "appearance.json"
+    monkeypatch.setenv("FETCHCV_SETTINGS_FILE", str(settings_path))
+    with TestClient(create_app(database)) as client:
+        initial = client.get("/api/settings/general")
+        assert initial.status_code == 200
+        assert initial.json()["theme"] == "system"
+        response = client.patch(
+            "/api/settings/general",
+            json={"theme": "dark", "accent": "sage", "density": "compact"},
+        )
+        assert response.status_code == 200
+        assert response.json() == {"theme": "dark", "accent": "sage", "density": "compact"}
+        assert json.loads(settings_path.read_text(encoding="utf-8"))["general"] == response.json()
+
+
 def test_streamable_http_mcp_configuration_is_selectable(database):
     with TestClient(create_app(database)) as client:
         response = client.post(
@@ -113,11 +153,14 @@ def test_every_streaming_conversation_uses_semantic_agent_loop(database, monkeyp
         def __init__(self, *_args, **_kwargs):
             pass
 
-        def run(self, **_kwargs):
+        def run(self, *, on_event, **_kwargs):
+            on_event({"type": "model", "id": "plan-1", "status": "active", "label": "分析当前请求", "detail": "正在判断如何完成“请分析”。"})
+            on_event({"type": "model", "id": "plan-1", "status": "completed", "label": "直接形成回答", "detail": "当前问题不需要调用外部工具。"})
             return type("Outcome", (), {
                 "text": "第一段，第二段。",
                 "session_id": "agent-session",
                 "usage": {"runtime": "test_agent_loop"},
+                "tool_results": [],
             })()
 
     monkeypatch.setenv("FETCHCV_AGENT_RUNTIME", "compatible")
@@ -130,7 +173,7 @@ def test_every_streaming_conversation_uses_semantic_agent_loop(database, monkeyp
         job = client.post("/api/jobs", json={"candidate_id": candidate["id"], "company": "A", "role": "B", "jd_raw": "分析数据"}).json()
         response = client.post(
             f"/api/jobs/{job['id']}/messages/stream",
-            json={"content": "请分析", "thinking_level": "balanced"},
+            json={"content": "请分析", "thinking_level": "balanced", "task_kind": "interview_research", "quoted_text": "这是上一条回答中的重点。", "quoted_message_id": "assistant-source"},
         )
         assert response.status_code == 200
         assert "event: delta" in response.text
@@ -141,9 +184,21 @@ def test_every_streaming_conversation_uses_semantic_agent_loop(database, monkeyp
         assert workspace["messages"][0]["metadata_json"]["delivery_status"] == "completed"
         assistant_metadata = workspace["messages"][1]["metadata_json"]
         assert assistant_metadata["processing_duration_ms"] >= 1
-        assert [item["id"] for item in assistant_metadata["processing_trace"]] == ["scope", "context", "model", "answer"]
+        assert [item["id"] for item in assistant_metadata["processing_trace"]] == ["plan-1", "answer"]
         assert all(item["status"] == "completed" for item in assistant_metadata["processing_trace"])
-        assert "完整语义" in assistant_metadata["processing_trace"][0]["detail"]
+        assert assistant_metadata["processing_trace"][0]["label"] == "直接形成回答"
+        assert workspace["messages"][0]["metadata_json"]["quoted_text"] == "这是上一条回答中的重点。"
+        assert workspace["messages"][0]["metadata_json"]["task_kind"] == "interview_research"
+        assert assistant_metadata["task_kind"] == "interview_research"
+        assert assistant_metadata["research_result"] == {
+            "status": "completed_without_brief",
+            "brief_id": None,
+            "source_count": 0,
+            "primary_platform": "xiaohongshu",
+            "primary_source_count": 0,
+            "supplemental_source_count": 0,
+            "evidence_status": "insufficient",
+        }
         assert workspace["run"]["run_type"] == "conversation_tools"
 
 
@@ -159,6 +214,7 @@ def test_streaming_agent_can_choose_web_tools(database, monkeypatch):
                 "text": "北京今天晴。来源：https://weather.example.com/beijing",
                 "session_id": "tool-session",
                 "usage": {"runtime": "test_tool_agent"},
+                "tool_results": [{"tool_name": "search_web"}],
             })()
 
     monkeypatch.setenv("FETCHCV_AGENT_RUNTIME", "compatible")

@@ -79,7 +79,10 @@ class ExperienceCreate(ApiModel):
 class AgentMessageCreate(ApiModel):
     content: str = Field(min_length=1, max_length=12000)
     thinking_level: str = Field(default="balanced", pattern="^(fast|balanced|deep)$")
+    task_kind: str | None = Field(default=None, max_length=80, pattern="^[a-z][a-z0-9_]*$")
     attachment_paths: list[str] = Field(default_factory=list, max_length=10)
+    quoted_text: str | None = Field(default=None, max_length=4000)
+    quoted_message_id: str | None = Field(default=None, max_length=80)
 
 
 class JobCreate(ApiModel):
@@ -133,7 +136,7 @@ class PermissionSettingsRead(ApiModel):
     workspace_read: Literal["allow", "ask", "deny"] = "allow"
     workspace_write: str = "ask"
     file_delete: str = "ask"
-    browser_bridge: Literal["allow", "ask", "deny"] = "deny"
+    browser_bridge: Literal["allow", "ask", "deny"] = "allow"
 
 
 class PermissionSettingsUpdate(ApiModel):
@@ -147,11 +150,13 @@ class PermissionSettingsUpdate(ApiModel):
 class GeneralSettingsRead(ApiModel):
     accent: Literal["coral", "sage", "slate", "amber"] = "coral"
     density: Literal["comfortable", "compact"] = "comfortable"
+    theme: Literal["system", "light", "dark"] = "system"
 
 
 class GeneralSettingsUpdate(ApiModel):
     accent: Literal["coral", "sage", "slate", "amber"] | None = None
     density: Literal["comfortable", "compact"] | None = None
+    theme: Literal["system", "light", "dark"] | None = None
 
 
 class ResumeEditorUpdate(ApiModel):
@@ -258,13 +263,14 @@ class LegacyImportResult(ApiModel):
 
 class PdfResumePreviewRequest(ApiModel):
     source_path: str = Field(min_length=1)
-    ai_enhanced: bool = True
+    ai_enhanced: bool = False
 
 
 class PdfResumeImportRequest(PdfResumePreviewRequest):
     candidate_id: str | None = None
     candidate_name: str | None = None
     candidate_title: str | None = None
+    reviewed_preview: dict[str, Any] | None = None
 
 
 class PdfResumePreviewRead(ApiModel):
@@ -279,6 +285,9 @@ class PdfResumePreviewRead(ApiModel):
     experiences: list[dict[str, Any]] = Field(default_factory=list)
     facts: list[dict[str, Any]]
     text_preview: str
+    outbound_preview: str = ""
+    outbound_text_length: int = 0
+    outbound_truncated: bool = False
     recognition_mode: str = "local"
     provider: str = ""
     model: str = ""
@@ -459,6 +468,12 @@ class ProposalReviewRequest(ApiModel):
     decisions: list[ProposalDecision]
 
 
+class ApprovalDraftRequest(ApiModel):
+    base_revision: int = Field(ge=0)
+    decisions: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    edited_by: str = "local_user"
+
+
 class FactSelectionRequest(ApiModel):
     approval_id: str
     fact_ids: list[str] = Field(min_length=1)
@@ -472,6 +487,11 @@ class ActionApprovalRequest(ApiModel):
 
 class ActionDecisionRequest(ApiModel):
     decision: Literal["approved", "rejected"]
+    decided_by: str = "local_user"
+
+
+class ToolInvocationResolution(ApiModel):
+    decision: Literal["completed", "not_executed", "keep_stopped"]
     decided_by: str = "local_user"
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Any, Callable
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -188,7 +189,16 @@ class AgentService:
             )
         return {"proposals": [item.model_dump(mode="json") for item in valid_proposals], "summary": generation.summary, "runtime": runtime.usage}
 
-    def converse(self, job: Job, message: str, *, run: AgentRun | None = None, context: str = "", thinking_level: str = "balanced") -> dict:
+    def converse(
+        self,
+        job: Job,
+        message: str,
+        *,
+        run: AgentRun | None = None,
+        context: str = "",
+        thinking_level: str = "balanced",
+        on_event: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict:
         if self.suite.settings.runtime == RuntimeMode.MOCK:
             raise HarnessError("model_required", "请先连接并启用一个模型；Agent 对话不会使用本地规则冒充模型回答。")
         if run is None:
@@ -206,12 +216,18 @@ class AgentService:
             context=context,
             thinking_level=thinking_level,
             request_id=f"conversation:{run.id}:{uuid4().hex}",
+            on_event=on_event,
         )
         return {
             "message": outcome.text,
             "intent": "discuss",
             "suggested_actions": [],
-            "runtime": {**outcome.usage, "tool_calls": [item["tool_name"] for item in outcome.tool_results]},
+            "runtime": {
+                **outcome.usage,
+                "tool_calls": [item["tool_name"] for item in outcome.tool_results],
+                "stop_reason": outcome.stop_reason,
+                "evidence": outcome.evidence,
+            },
         }
 
     @staticmethod

@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { _electron as electron } from "playwright";
 import { findFreePort, isFetchCVHealthy } from "../electron/sidecar.mjs";
+import { packagedExecutablePath } from "../scripts/platform-paths.mjs";
 
 const projectRoot = path.resolve(import.meta.dirname, "..");
 const apiPort = await findFreePort();
@@ -53,9 +54,7 @@ const provider = http.createServer((request, response) => {
 });
 await new Promise((resolve) => provider.listen(providerPort, "127.0.0.1", resolve));
 
-const packagedExecutable = process.platform === "darwin"
-  ? path.join(projectRoot, "release", "mac-arm64", "FetchCV.app", "Contents", "MacOS", "FetchCV")
-  : path.join(projectRoot, "release", "win-unpacked", "FetchCV.exe");
+const packagedExecutable = packagedExecutablePath(projectRoot);
 const application = await electron.launch({
   ...(packaged ? { executablePath: packagedExecutable } : { args: [projectRoot] }), cwd: projectRoot,
   env: { ...process.env, FETCHCV_API_PORT: String(apiPort), FETCHCV_E2E_USER_DATA: userData },
@@ -125,8 +124,10 @@ try {
   assert.match(await modelButton.textContent(), /alternate-model/);
   let switchedRuntime = await window.evaluate(async () => fetch(`${window.appRuntime.apiBase}/api/runtime/status`, { headers: { "X-FetchCV-Control-Token": window.appRuntime.apiToken } }).then((response) => response.json()));
   assert.equal(switchedRuntime.model, "alternate-model");
-  await modelButton.click();
+  if (await modelButton.getAttribute("aria-expanded") !== "true") await modelButton.click();
+  await window.waitForTimeout(220);
   settingsDialog = window.getByRole("dialog", { name: "模型与推理设置" });
+  await settingsDialog.waitFor({ state: "visible" });
   await settingsDialog.getByRole("button", { name: "打开模型选择" }).click();
   await settingsDialog.getByRole("menuitemradio", { name: /test-model/ }).click();
   await modelButton.filter({ hasText: "test-model" }).waitFor({ state: "visible" });

@@ -1,30 +1,39 @@
-# Agent runtime compatibility
+# Pi runtime compatibility
 
-## Locked version
+## Locked versions
 
-- Python package: `claude-agent-sdk==0.2.120`
-- Python: 3.12 (project supports 3.11+)
-- Runtime surface: `query()` + `ClaudeAgentOptions`
-- Default FetchCV runtime: `mock`（仅测试）
-- Real runtime: `FETCHCV_AGENT_RUNTIME=claude|compatible`
+- `@earendil-works/pi-agent-core==0.80.10`
+- `@earendil-works/pi-ai==0.80.10`
+- `typebox==1.1.38`
+- Electron `43.1.1` (Node 22.19+ requirement satisfied)
 
-The SDK package bundles a compatible Claude Code CLI. FetchCV does not expose credentials to the Electron renderer. Compatible-provider credentials are passed from Electron safeStorage to the sidecar process environment and are never written to business tables or traces.
+The desktop runtime uses Pi's `AgentHarness`, session abstraction and native
+event protocol. Provider
+adapters are loaded lazily for OpenAI-compatible or Anthropic-compatible
+endpoints. The active API key is decrypted only in Electron and resolved through
+Pi `Models` for the active provider request; it is not sent to the renderer,
+Python tool bridge, business database or trace log.
 
 ## Compatibility boundary
 
-All SDK and provider protocol code is isolated in `applyos_agent/runtime.py`. The rest of FetchCV depends on the internal `AgentRuntime` protocol, `RuntimeTurnResult` and JSON Schema tool definitions, not directly on Anthropic or OpenAI response classes.
+Pi hosting lives in `electron/pi-agent-runtime.mjs`; Harness construction,
+provider adaptation and context policy live under `electron/pi/`.
+Renderer code consumes normalized `status`, `reasoning`, `delta`, `user` and
+`done` events and does not depend on Pi types. Python capabilities are exposed
+as JSON Schema and executed only by the authenticated `/api/pi` bridge.
 
-The wrapper is responsible for:
+Pi is not a business-security boundary. ToolGateway still enforces stage,
+permission, approval, candidate/job scope, path containment, idempotency,
+versioning and trace rules. The model cannot call arbitrary Shell or bypass
+the resume workflow state machine.
 
-- translating Pydantic JSON Schema into SDK structured output;
-- collecting text, structured output, session id and usage;
-- mapping SDK exceptions to FetchCV structured errors;
-- applying allowed/disallowed tools and lifecycle hooks;
-- resuming the job-bound session when available.
-- parsing OpenAI-compatible native `tool_calls`;
-- parsing Anthropic-compatible native `tool_use` and grouping tool results;
-- falling back to a structured decision schema when a provider rejects native tools.
+The desktop task bridge uses `build_pi_task_gateway()` rather than the legacy
+`build_pipeline()` path. Pi itself produces typed job analysis, fact ranking,
+strategy and resume-patch arguments. The corresponding domain tools perform
+only validation, persistence, rendering and approval transitions; they do not
+construct a nested Python Agent runtime.
 
-The SDK is not a business-security boundary. Every persisted output still passes through the Stage 3 state machine, Fact Validator, Approval Service, Version Service and publish gate.
-
-`AgentEngine` owns the provider-independent model/tool/result loop. `ToolGateway` is the only business tool execution boundary and enforces stage, permission, approval, scope, path and idempotency checks. Web tools, Skills, workspace tools and approved MCP tools are exposed only through this boundary; arbitrary Shell and unconstrained filesystem access remain unavailable.
+The old `claude-agent-sdk` dependency and bundled Claude CLI were removed from
+the sidecar build. Legacy Python compatible-provider code remains only as a
+temporary browser-preview/specialized extraction fallback; desktop chat and
+task orchestration do not use it.

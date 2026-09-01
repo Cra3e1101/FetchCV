@@ -119,7 +119,6 @@ class AssetService:
         an audit snapshot, not a workflow dead end; future revisions derive from
         the same working assets.
         """
-        self.approvals.require(run_id=run.id, action_type="publish_assets")
         existing = self.session.scalar(select(Application).where(Application.job_id == run.job_id, Application.resume_version_id == resume.id))
         if existing is not None:
             return existing

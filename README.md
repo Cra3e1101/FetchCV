@@ -21,7 +21,7 @@ FetchCV 是一款本地优先的桌面求职 Agent，围绕“资料整理、岗
 ```text
 FetchCV/
 ├─ windows/    Windows 10/11 x64 版本（当前版本 0.4.19）
-├─ macos/      macOS 版本（当前版本 0.2.24）
+├─ macos/      macOS 版本（当前版本 0.4.19）
 ├─ README.md
 └─ README_en.md
 ```
@@ -97,9 +97,8 @@ FetchCV 支持 OpenAI-compatible 与 Anthropic-compatible 模型配置。模型�
 
 ## 项目状态
 
-FetchCV 仍在积极开发中。Windows 与 macOS 目录目前保留独立演进历史，功能和版本号并不完全一致。正式公开分发前仍需完成对应平台的代码签名与公证流程。
+FetchCV 仍在积极开发中。Windows 与 macOS 当前共享 `0.4.19` 核心能力，并分别保留平台打包与运行适配。正式公开分发前仍需完成对应平台的代码签名与公证流程。
 
 ## 许可
 
 本仓库暂未附带开源许可证。在许可证明确前，代码默认保留全部权利；如需使用、修改或分发，请先联系仓库所有者。
-

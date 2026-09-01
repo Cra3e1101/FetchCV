@@ -121,14 +121,15 @@ class MockPipeline:
                     self.state.transition(run, PipelineStage.FACT_VALIDATING)
                 elif stage == PipelineStage.FACT_VALIDATING:
                     self._run_stage(run, stage, self._validate_resume_facts)
-                    self.state.transition(run, PipelineStage.PORTFOLIO_BUILDING)
+                    self.state.transition(run, PipelineStage.CONSISTENCY_CHECKING)
                 elif stage == PipelineStage.PORTFOLIO_BUILDING:
-                    self._run_stage(run, stage, self._build_mock_portfolio)
+                    # Backward-compatible recovery for runs created before
+                    # portfolios became an optional post-resume capability.
                     self.state.transition(run, PipelineStage.CONSISTENCY_CHECKING)
                 elif stage == PipelineStage.CONSISTENCY_CHECKING:
                     self._run_stage(run, stage, self._run_consistency_and_gate)
-                    self.state.transition(run, PipelineStage.AWAITING_PUBLISH_APPROVAL, reason="wait for publish approval")
-                    self._ensure_publish_approval(run)
+                    self.state.transition(run, PipelineStage.READY_TO_PUBLISH, reason="verified local draft is ready to edit and export")
+                    self._write_report(run)
                     return run
                 elif stage == PipelineStage.AWAITING_PUBLISH_APPROVAL:
                     if not self.approvals.is_approved(run_id=run.id, action_type="publish_assets"):

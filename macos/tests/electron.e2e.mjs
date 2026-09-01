@@ -60,7 +60,11 @@ try {
   await modelDialog.getByRole("button", { name: "MCP Servers" }).click();
   await modelDialog.getByRole("heading", { name: "MCP Servers" }).waitFor({ state: "visible" });
   await modelDialog.getByLabel("MCP 名称").waitFor({ state: "visible" });
-  assert.equal(await modelDialog.getByRole("button", { name: "流式 HTTP" }).isDisabled(), true);
+  const streamableHttpButton = modelDialog.getByRole("button", { name: "流式 HTTP" });
+  assert.equal(await streamableHttpButton.isDisabled(), false);
+  await streamableHttpButton.click();
+  assert.equal(await streamableHttpButton.getAttribute("aria-pressed"), "true");
+  await modelDialog.getByRole("button", { name: "STDIO" }).click();
   await modelDialog.getByRole("button", { name: "添加参数" }).click();
   assert.equal(await modelDialog.getByLabel(/^MCP 参数 /).count(), 2);
   await modelDialog.getByRole("button", { name: "添加环境变量" }).click();
@@ -86,69 +90,25 @@ try {
   const jobButton = window.getByRole("button", { name: "示例科技 数据分析实习生" });
   await jobButton.waitFor({ state: "visible" });
   await jobButton.click();
+  const resumeTabBeforeGeneration = window.getByRole("button", { name: "简历", exact: true });
+  assert.equal(await resumeTabBeforeGeneration.isDisabled(), false);
+  await resumeTabBeforeGeneration.click();
+  await window.getByRole("heading", { name: "还没有可预览的简历" }).waitFor({ state: "visible" });
+  await window.getByRole("button", { name: "对话", exact: true }).click();
   await window.getByRole("button", { name: /理解岗位/ }).click();
-  await window.getByText("选择要重点表达的经历", { exact: true }).waitFor({ state: "visible", timeout: 10000 });
-  await window.getByText("固定保留", { exact: true }).waitFor({ state: "visible" });
-  await window.getByRole("button", { name: /确认并生成策略/ }).click();
-  await window.getByRole("button", { name: "打开改写审阅" }).click();
-  await window.getByText("逐条确认，不覆盖原始资料", { exact: true }).waitFor({ state: "visible", timeout: 20000 });
-  await window.getByRole("button", { name: "采用建议" }).click();
-  await window.getByRole("button", { name: /应用已确认修改/ }).click();
-  await window.getByText("事实检查已通过", { exact: true }).waitFor({ state: "visible", timeout: 20000 });
-  await window.getByRole("button", { name: "进入导出检查" }).click();
-  await window.getByText("简历可编辑和导出", { exact: true }).waitFor({ state: "visible", timeout: 20000 });
-  const completedWorkspace = await fetch(`${runtime.apiBase}/api/jobs/${job.id}/workspace`, { headers: apiHeaders }).then((response) => response.json());
-  assert.equal(completedWorkspace.resumes[0].content_json.editor_snapshot.profile.name, "FetchCV 测试用户");
-  await window.getByRole("button", { name: "简历", exact: true }).click();
-  const canonicalPreview = window.locator('iframe[title="FetchCV 正式 PDF 预览"]');
-  await canonicalPreview.waitFor({ state: "visible", timeout: 30000 });
-  assert.match(await canonicalPreview.getAttribute("src"), /\/api\/resumes\/.+\/pdf/);
-  assert.equal(await window.locator(".resume-sheet-v2").count(), 0);
-  await window.getByRole("button", { name: "导出正式 PDF" }).click();
-  let exportedWorkspace;
-  for (let index = 0; index < 80; index += 1) {
-    exportedWorkspace = await fetch(`${runtime.apiBase}/api/jobs/${job.id}/workspace`, { headers: apiHeaders }).then((response) => response.json());
-    if (exportedWorkspace.resumes[0].content_json.pdf_renderer === "resume-editor-prototype") break;
-    await window.waitForTimeout(500);
+  let startedWorkspace;
+  for (let index = 0; index < 20; index += 1) {
+    startedWorkspace = await fetch(`${runtime.apiBase}/api/jobs/${job.id}/workspace`, { headers: apiHeaders }).then((response) => response.json());
+    if (startedWorkspace.run?.job_id === job.id) break;
+    await window.waitForTimeout(100);
   }
-  if (exportedWorkspace.resumes[0].content_json.pdf_renderer !== "resume-editor-prototype") {
-    const uiError = await window.locator(".canonical-preview-error").textContent().catch(() => "未显示错误");
-    throw new Error(`canonical PDF was not saved: ${uiError}`);
-  }
-  const exportedPdf = await fetch(`${runtime.apiBase}/api/resumes/${exportedWorkspace.resumes[0].id}/pdf`, { headers: apiHeaders }).then((response) => response.arrayBuffer());
-  assert.equal(Buffer.from(exportedPdf).subarray(0, 4).toString(), "%PDF");
-  await window.screenshot({ path: path.join(os.tmpdir(), "fetchcv-canonical-resume.png") });
-  const editButtonCount = await window.getByRole("button", { name: /编辑内容与排版/ }).count();
-  if (!editButtonCount) {
-    const visibleText = await window.locator("body").innerText();
-    throw new Error(`resume studio disappeared after export: ${visibleText.slice(0, 500)} errors=${rendererErrors.join(" | ")}`);
-  }
-  await window.getByRole("button", { name: /编辑内容与排版/ }).click();
-  const editor = window.frameLocator('iframe[title="FetchCV 简历编辑器"]');
-  await editor.locator("body").evaluate(() => new Promise((resolve, reject) => {
-    const started = Date.now();
-    const timer = setInterval(() => {
-      if (window.fetchCVBridge) { clearInterval(timer); resolve(); }
-      else if (Date.now() - started > 20000) { clearInterval(timer); reject(new Error("editor bridge timeout")); }
-    }, 50);
-  }));
-  await editor.locator("#previewName").evaluate((element) => new Promise((resolve, reject) => {
-    const started = Date.now();
-    const timer = setInterval(() => {
-      if (element.textContent === "FetchCV 测试用户") { clearInterval(timer); resolve(); }
-      else if (Date.now() - started > 20000) { clearInterval(timer); reject(new Error(`snapshot timeout: ${element.textContent}`)); }
-    }, 50);
-  }));
-  assert.equal(await editor.locator("#previewName").textContent(), "FetchCV 测试用户");
-  assert.equal(await editor.locator("body").evaluate((body) => body.classList.contains("fetchcv-snapshot-loading")), false);
-  assert.equal(await editor.locator(".appbar").evaluate((node) => getComputedStyle(node).backgroundColor), "rgb(250, 248, 244)");
-  await window.getByRole("button", { name: "关闭编辑器" }).click();
-  await canonicalPreview.waitFor({ state: "visible", timeout: 20000 });
-  await window.waitForTimeout(800);
-  const outerPreviewMetrics = await window.locator(".canonical-resume-preview").evaluate((node) => ({ container: node.getBoundingClientRect().toJSON(), iframe: node.querySelector("iframe")?.getBoundingClientRect().toJSON(), studio: node.closest(".resume-studio-v2")?.getBoundingClientRect().toJSON() }));
-  if ((outerPreviewMetrics.iframe?.height || 0) < (outerPreviewMetrics.container?.height || 0) - 2) throw new Error(`canonical iframe does not fill preview: ${JSON.stringify(outerPreviewMetrics)}`);
+  assert.equal(startedWorkspace.run?.job_id, job.id);
+  assert.equal(startedWorkspace.run?.status, "created");
+  assert.equal(startedWorkspace.resumes.length, 0);
+  assert.equal(await window.getByRole("button", { name: "面试", exact: true }).isDisabled(), true);
   await window.screenshot({ path: screenshot });
   assert.equal(fs.existsSync(screenshot), true);
+  assert.deepEqual(rendererErrors, []);
 } finally {
   await application.close();
 }

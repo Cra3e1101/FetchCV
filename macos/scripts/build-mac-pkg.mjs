@@ -2,11 +2,13 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { packagedExecutablePath } from "./platform-paths.mjs";
 
 const projectRoot = process.cwd();
 const packageJson = JSON.parse(fs.readFileSync(path.join(projectRoot, "package.json"), "utf8"));
 const arch = process.arch === "x64" ? "x64" : "arm64";
-const appPath = path.join(projectRoot, "release", `mac-${arch}`, "FetchCV.app");
+const executablePath = packagedExecutablePath(projectRoot);
+const appPath = path.dirname(path.dirname(path.dirname(executablePath)));
 const outputPath = path.join(projectRoot, "release", `FetchCV-${packageJson.version}-${arch}.pkg`);
 
 if (!fs.existsSync(appPath)) {

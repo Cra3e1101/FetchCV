@@ -73,6 +73,37 @@ async function streamRequest(path, body, { signal, onEvent } = {}) {
   return finalPayload;
 }
 
+async function streamPiMessage(jobId, content, options = {}) {
+  if (!window.appRuntime?.streamPiMessage) {
+    return streamRequest(
+      `/api/jobs/${jobId}/messages/stream`,
+      { content, thinking_level: options.thinkingLevel || "balanced", task_kind: options.taskKind || null, attachment_paths: options.attachmentPaths || [], quoted_text: options.quote?.text || null, quoted_message_id: options.quote?.messageId || null },
+      options,
+    );
+  }
+  const requestId = crypto.randomUUID();
+  const cancel = () => window.appRuntime.cancelPiMessage?.(requestId);
+  if (options.signal?.aborted) {
+    const error = new Error("已停止生成");
+    error.name = "AbortError";
+    throw error;
+  }
+  options.signal?.addEventListener("abort", cancel, { once: true });
+  try {
+    return await window.appRuntime.streamPiMessage({
+      requestId,
+      jobId,
+      content,
+      thinkingLevel: options.thinkingLevel || "balanced",
+      taskKind: options.taskKind || null,
+      attachmentPaths: options.attachmentPaths || [],
+      quote: options.quote || null,
+    }, options.onEvent);
+  } finally {
+    options.signal?.removeEventListener("abort", cancel);
+  }
+}
+
 async function followEvents(path, { signal, onEvent } = {}) {
   const response = await fetch(`${API_BASE}${path}`, {
     headers: { Accept: "text/event-stream", ...(API_TOKEN ? { "X-FetchCV-Control-Token": API_TOKEN } : {}) },
@@ -105,17 +136,17 @@ export const api = {
   runtime: () => request("/api/runtime/status"),
   workspace: () => request("/api/workspace"),
   candidateLibrary: (candidateId) => request(`/api/candidates/${candidateId}/library`),
+  interviewKnowledge: (candidateId, query = "") => request(`/api/candidates/${candidateId}/interview-knowledge?q=${encodeURIComponent(query)}`),
+  interviewSource: (sourceId) => request(`/api/interview-sources/${sourceId}`),
+  deleteInterviewSource: (sourceId) => request(`/api/interview-sources/${sourceId}`, { method: "DELETE" }),
+  deleteInterviewBrief: (briefId) => request(`/api/interview-briefs/${briefId}`, { method: "DELETE" }),
   createMaterial: (candidateId, body) => request(`/api/candidates/${candidateId}/materials`, json("POST", body)),
   importLegacyWorkspace: (sourcePath) => request("/api/imports/legacy-resume", json("POST", { source_path: sourcePath })),
-  previewResumePdf: (sourcePath, options = {}) => request("/api/imports/resume-pdf/preview", json("POST", { source_path: sourcePath, ai_enhanced: options.aiEnhanced ?? true })),
+  previewResumePdf: (sourcePath, options = {}) => request("/api/imports/resume-pdf/preview", { ...json("POST", { source_path: sourcePath, ai_enhanced: options.aiEnhanced ?? false }), signal: options.signal }),
   importResumePdf: (body) => request("/api/imports/resume-pdf", json("POST", body)),
   jobWorkspace: (jobId) => request(`/api/jobs/${jobId}/workspace`),
-  sendMessage: (jobId, content, options = {}) => request(`/api/jobs/${jobId}/messages`, json("POST", { content, thinking_level: options.thinkingLevel || "balanced", attachment_paths: options.attachmentPaths || [] })),
-  streamMessage: (jobId, content, options = {}) => streamRequest(
-    `/api/jobs/${jobId}/messages/stream`,
-    { content, thinking_level: options.thinkingLevel || "balanced", attachment_paths: options.attachmentPaths || [] },
-    options,
-  ),
+  sendMessage: (jobId, content, options = {}) => request(`/api/jobs/${jobId}/messages`, json("POST", { content, thinking_level: options.thinkingLevel || "balanced", task_kind: options.taskKind || null, attachment_paths: options.attachmentPaths || [], quoted_text: options.quote?.text || null, quoted_message_id: options.quote?.messageId || null })),
+  streamMessage: (jobId, content, options = {}) => streamPiMessage(jobId, content, options),
   createJob: (body) => request("/api/jobs", json("POST", body)),
   updateJob: (jobId, body) => request(`/api/jobs/${jobId}`, json("PATCH", body)),
   deleteJob: (jobId) => request(`/api/jobs/${jobId}`, { method: "DELETE" }),
@@ -130,14 +161,23 @@ export const api = {
   createFact: (candidateId, body) => request(`/api/candidates/${candidateId}/facts`, json("POST", body)),
   verifyFact: (factId, body) => request(`/api/facts/${factId}/verification`, json("PATCH", body)),
   createRun: (body) => request("/api/agent-runs", json("POST", body, { "Idempotency-Key": crypto.randomUUID() })),
-  enqueueTask: (runId, body = {}) => request(`/api/agent-runs/${runId}/tasks`, json("POST", body)),
+  enqueueTask: (runId, body = {}) => window.appRuntime?.startPiTask
+    ? window.appRuntime.startPiTask(runId, body.kind || "resume")
+    : request(`/api/agent-runs/${runId}/tasks`, json("POST", body)),
   pauseTask: (taskId) => request(`/api/agent-tasks/${taskId}/pause`, json("POST", {})),
-  resumeTask: (taskId) => request(`/api/agent-tasks/${taskId}/resume`, json("POST", {})),
-  retryTask: (taskId) => request(`/api/agent-tasks/${taskId}/retry`, json("POST", {})),
+  resumeTask: (taskId, runId) => window.appRuntime?.startPiTask && runId
+    ? window.appRuntime.startPiTask(runId, "resume")
+    : request(`/api/agent-tasks/${taskId}/resume`, json("POST", {})),
+  retryTask: (taskId, runId) => window.appRuntime?.startPiTask && runId
+    ? window.appRuntime.startPiTask(runId, "retry")
+    : request(`/api/agent-tasks/${taskId}/retry`, json("POST", {})),
   cancelTask: (taskId) => request(`/api/agent-tasks/${taskId}/cancel`, json("POST", {})),
   followRunEvents: (runId, options = {}) => followEvents(`/api/agent-runs/${runId}/events?follow=true&after_sequence=${options.afterSequence || 0}`, options),
-  queueMessage: (jobId, content, options = {}) => request(`/api/jobs/${jobId}/messages/queue`, json("POST", { content, thinking_level: options.thinkingLevel || "balanced", attachment_paths: options.attachmentPaths || [] })),
+  queueMessage: (jobId, content, options = {}) => request(`/api/jobs/${jobId}/messages/queue`, json("POST", { content, thinking_level: options.thinkingLevel || "balanced", attachment_paths: options.attachmentPaths || [], quoted_text: options.quote?.text || null, quoted_message_id: options.quote?.messageId || null })),
   cancelQueuedMessage: (messageId) => request(`/api/queued-messages/${messageId}`, { method: "DELETE" }),
+  steerTask: (runId, content, options = {}) => window.appRuntime?.steerPiTask
+    ? window.appRuntime.steerPiTask(runId, { content, attachmentPaths: options.attachmentPaths || [], quote: options.quote || null })
+    : Promise.reject(new Error("当前环境不支持运行中追问")),
   skills: () => request("/api/skills"),
   reloadSkills: () => request("/api/skills/reload", json("POST", {})),
   updateSkill: (skillId, enabled) => request(`/api/skills/${skillId}`, json("PATCH", { enabled })),
@@ -153,10 +193,12 @@ export const api = {
   retryRun: (runId) => request(`/api/agent-runs/${runId}/retry`, json("POST", {})),
   cancelRun: (runId) => request(`/api/agent-runs/${runId}/cancel`, json("POST", {})),
   review: (runId, body) => request(`/api/agent-runs/${runId}/proposals/review`, json("POST", body)),
+  saveApprovalDraft: (runId, approvalId, body) => request(`/api/agent-runs/${runId}/approvals/${approvalId}/draft`, json("PATCH", body)),
   reviewFacts: (runId, body) => request(`/api/agent-runs/${runId}/facts/review`, json("POST", body)),
   approvePublish: (runId, body) => request(`/api/agent-runs/${runId}/publish-approval`, json("POST", body)),
   approveJobImport: (runId, body) => request(`/api/agent-runs/${runId}/job-import-approval`, json("POST", body)),
   decideToolApproval: (runId, approvalId, decision) => request(`/api/agent-runs/${runId}/approvals/${approvalId}/decision`, json("POST", { decision, decided_by: "local_user" })),
+  resolveToolInvocation: (operationId, decision) => request(`/api/tool-invocations/${encodeURIComponent(operationId)}/resolve`, json("POST", { decision, decided_by: "local_user" })),
   renderResume: (resumeId, runId) => request(`/api/resumes/${resumeId}/render`, json("POST", { run_id: runId })),
   uploadResumePdf: (resumeId, pdfBytes, pageCount = 1) => request(`/api/resumes/${resumeId}/pdf`, { method: "PUT", body: pdfBytes, headers: { "Content-Type": "application/pdf", "X-FetchCV-Page-Count": String(pageCount) } }),
   getResume: (resumeId) => request(`/api/resumes/${resumeId}`),

@@ -107,6 +107,27 @@ def register_browser_tools(gateway: ToolGateway, *, bridge: BrowserBridgeClient 
             "url": WebClient.redact_url(str(state.get("url") or "")),
             "title": str(state.get("title") or "")[:500],
             "text": str(state.get("text") or "")[:50000],
+            "links": [
+                {
+                    "url": WebClient.redact_url(str(item.get("url") or "")),
+                    "title": str(item.get("title") or "")[:300],
+                }
+                for item in (state.get("links") or [])[:120]
+                if isinstance(item, dict) and str(item.get("url") or "").startswith("https://")
+            ],
+            "candidates": [
+                {
+                    "url": WebClient.redact_url(str(item.get("url") or "")),
+                    "title": str(item.get("title") or "")[:300],
+                }
+                for item in (state.get("candidates") or [])[:40]
+                if isinstance(item, dict) and str(item.get("url") or "").startswith("https://")
+            ],
+            "platform": str(state.get("platform") or "")[:80],
+            "page_kind": str(state.get("page_kind") or "")[:80],
+            "note_ready": bool(state.get("note_ready")),
+            "image_count": max(0, int(state.get("image_count") or 0)),
+            "description": str(state.get("description") or "")[:1000],
             "truncated": bool(state.get("truncated")),
             "login_required": login_required,
             "user_action": str(state.get("user_action") or "") if login_required else "",

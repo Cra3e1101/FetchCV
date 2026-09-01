@@ -33,14 +33,20 @@ test("choosePort never reuses another healthy desktop process", async () => {
 test("development sidecar starts, becomes healthy, and stops", { timeout: 35000 }, async () => {
   const port = await findFreePort();
   const userDataPath = fs.mkdtempSync(path.join(os.tmpdir(), "job-agent-sidecar-"));
+  let spawned = null;
   const sidecar = await startSidecar({
     isPackaged: false,
     projectRoot,
     resourcesPath: projectRoot,
     userDataPath,
+    port,
+    onSpawn: (value) => { spawned = value; },
     env: { ...process.env, FETCHCV_API_PORT: String(port) },
   });
+  assert.equal(spawned?.port, port);
+  assert.equal(spawned?.ready, false);
   assert.equal(sidecar.ownsProcess, true);
+  assert.equal(sidecar.ready, true);
   assert.equal(await isFetchCVHealthy(sidecar.apiBase), true);
   stopSidecar(sidecar);
   await new Promise((resolve) => sidecar.child.once("exit", resolve));

@@ -14,6 +14,7 @@ def test_stage_two_schema_contains_all_prd_entities(database):
         "portfolio_versions", "applications", "agent_runs", "agent_run_steps", "approvals",
         "version_snapshots", "quality_reports", "material_assets", "experiences", "agent_messages",
         "agent_tasks", "queued_agent_messages", "agent_context_snapshots", "agent_skills", "mcp_server_configs", "workspace_settings",
+        "interview_sources", "interview_briefs", "tool_invocations",
     }
     assert expected == set(Base.metadata.tables)
 

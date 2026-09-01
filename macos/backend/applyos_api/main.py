@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
-from importlib.metadata import PackageNotFoundError, version
 import hmac
 import hashlib
 import json
@@ -26,20 +25,12 @@ from sqlalchemy.inspection import inspect
 from sqlalchemy.orm import Session
 
 from applyos_agent.config import AgentSettings, RuntimeMode
-from applyos_agent.context import ContextManager
-from applyos_agent.browser_tools import BrowserBridgeClient
 from applyos_agent.cancellation import provider_requests
-from applyos_agent.conversation_tools import ConversationToolAgent, build_conversation_gateway
-from applyos_agent.agents import AgentSuite
 from applyos_agent.schemas import JobPostingExtraction
-from applyos_agent.engine import build_agent_engine
-from applyos_agent.mcp_tools import McpManager
-from applyos_agent.service import AgentService
-from applyos_agent.skills import SkillLoader
-from applyos_agent.task_queue import AgentTaskWorker, TaskQueue
+from applyos_agent.model_protocol import strip_model_protocol
 from applyos_domain.database import Database, get_database
 from applyos_domain.enums import FactSourceType
-from applyos_domain.models import AgentMessage, AgentRun, AgentRunStep, AgentSkill, AgentTask, Application, Approval, Candidate, Experience, Fact, Job, JobProfile, MaterialAsset, McpServerConfig, PortfolioVersion, QualityReport, QueuedAgentMessage, ResumeVersion, RewriteProposal, VersionSnapshot
+from applyos_domain.models import AgentMessage, AgentRun, AgentRunStep, AgentSkill, AgentTask, Application, Approval, Candidate, Experience, Fact, InterviewBrief, InterviewSource, Job, JobProfile, MaterialAsset, McpServerConfig, PortfolioVersion, QualityReport, QueuedAgentMessage, ResumeVersion, RewriteProposal, ToolInvocation, VersionSnapshot
 from applyos_domain.paths import artifact_root
 from applyos_domain.repositories import CandidateRepository, FactRepository, JobRepository, ResumeVersionRepository
 from applyos_harness.approval import ApprovalService
@@ -50,13 +41,9 @@ from applyos_harness.policy import general_settings, permission_settings, save_g
 from applyos_harness.state_machine import PipelineStage, RunStateMachine
 from applyos_harness.trace import TraceService
 from applyos_harness.versioning import VersionService
-from integrations.legacy_resume.importer import LegacyWorkspaceImporter
-from integrations.resume_pdf.importer import PdfResumeImporter
-from integrations.resume.renderer import ResumeRenderer
-from integrations.web import FirecrawlClient, JobPostingImporter, WebClient
-from integrations.web.job_posting import looks_like_job_content
 
 from .deps import get_session
+from .pi_bridge import router as pi_agent_router
 from .schemas import (
     ActionApprovalRequest,
     ActionDecisionRequest,
@@ -69,6 +56,7 @@ from .schemas import (
     AgentRunRead,
     AgentRunStepRead,
     ApprovalRead,
+    ApprovalDraftRequest,
     CandidateCreate,
     CandidateRead,
     FactCreate,
@@ -104,6 +92,7 @@ from .schemas import (
     QueuedMessageRead,
     AgentSkillRead,
     SkillStateUpdate,
+    ToolInvocationResolution,
     WebPageReadRequest,
     WebSearchRequest,
     JobPostingPreviewRequest,
@@ -116,6 +105,91 @@ from .schemas import (
 
 SessionDep = Annotated[Session, Depends(get_session)]
 
+# Backwards-compatible injection point used by integration tests. The real
+# class is loaded only when a semantic conversation actually runs.
+ConversationToolAgent = None
+
+
+# Endpoint capabilities are intentionally imported on first use. Importing the
+# complete Agent/PDF/MCP graph before /health is available added several seconds
+# to every desktop launch even when the user only opened the workspace.
+def _browser_bridge():
+    from applyos_agent.browser_tools import BrowserBridgeClient
+
+    return BrowserBridgeClient()
+
+
+def _context_manager(session: Session):
+    from applyos_agent.context import ContextManager
+
+    return ContextManager(session)
+
+
+def _agent_service(session: Session):
+    from applyos_agent.service import AgentService
+
+    return AgentService(session)
+
+
+def _task_queue(session: Session):
+    from applyos_agent.task_queue import TaskQueue
+
+    return TaskQueue(session)
+
+
+def _agent_engine(session: Session):
+    from applyos_agent.engine import build_agent_engine
+
+    return build_agent_engine(session)
+
+
+def _agent_run_evaluator(session: Session):
+    from applyos_agent.evaluation import AgentRunEvaluator
+
+    return AgentRunEvaluator(session)
+
+
+def _ats_readiness_evaluator(session: Session):
+    from applyos_agent.ats import AtsReadinessEvaluator
+
+    return AtsReadinessEvaluator(session)
+
+
+def _mcp_manager(session: Session):
+    from applyos_agent.mcp_tools import McpManager
+
+    return McpManager(session)
+
+
+def _skill_loader(session: Session, project_root):
+    from applyos_agent.skills import SkillLoader
+
+    return SkillLoader(session, project_root=project_root)
+
+
+def _pdf_importer(database: Database):
+    from integrations.resume_pdf.importer import PdfResumeImporter
+
+    return PdfResumeImporter(database)
+
+
+def _web_client():
+    from integrations.web import WebClient
+
+    return WebClient()
+
+
+def _job_posting_importer(session: Session):
+    from integrations.web import JobPostingImporter
+
+    return JobPostingImporter(session)
+
+
+def _looks_like_job_content(text: str) -> bool:
+    from integrations.web.job_posting import looks_like_job_content
+
+    return looks_like_job_content(text)
+
 
 def create_app(database: Database | None = None) -> FastAPI:
     db = database or get_database()
@@ -123,21 +197,39 @@ def create_app(database: Database | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI):
         db.create_schema()
-        PdfResumeImporter(db).repair_imported_snapshots()
+        from applyos_agent.task_queue import AgentTaskWorker
+
         worker = AgentTaskWorker(db)
         worker_thread = None
         if os.getenv("FETCHCV_DISABLE_TASK_WORKER", "").strip() != "1":
             worker_thread = threading.Thread(target=worker.run_forever, name="fetchcv-agent-worker", daemon=True)
             worker_thread.start()
         application.state.agent_worker = worker
+        # Legacy snapshot repair is maintenance, not a prerequisite for serving
+        # the workspace. Run it after the API is available so pypdf does not
+        # block every cold launch.
+        def repair_imported_snapshots() -> None:
+            try:
+                _pdf_importer(db).repair_imported_snapshots()
+            except Exception:
+                # A failed repair is retried on the next launch and must never
+                # make the local API unavailable.
+                return
+
+        repair_timer = threading.Timer(5.0, repair_imported_snapshots)
+        repair_timer.name = "fetchcv-resume-repair"
+        repair_timer.daemon = True
+        repair_timer.start()
         try:
             yield
         finally:
+            repair_timer.cancel()
             worker.stop()
             if worker_thread:
                 worker_thread.join(timeout=3)
 
-    app = FastAPI(title="FetchCV Local API", version="0.3.0", lifespan=lifespan)
+    app = FastAPI(title="FetchCV Local API", version="0.4.1", lifespan=lifespan)
+    app.include_router(pi_agent_router)
     app.state.database = db
     control_token = os.getenv("FETCHCV_CONTROL_TOKEN", "").strip()
     configured_origins = [item.strip() for item in os.getenv("FETCHCV_ALLOWED_ORIGINS", "null,http://127.0.0.1:4173").split(",") if item.strip()]
@@ -168,7 +260,7 @@ def create_app(database: Database | None = None) -> FastAPI:
             code = 404
         elif "permission" in exc.code or "approval_required" in exc.code:
             code = 403
-        elif exc.code in {"illegal_state_transition", "terminal_state", "idempotency_conflict"}:
+        elif exc.code in {"illegal_state_transition", "terminal_state", "idempotency_conflict", "approval_revision_conflict"}:
             code = 409
         else:
             code = 422
@@ -181,15 +273,11 @@ def create_app(database: Database | None = None) -> FastAPI:
     @app.get("/api/runtime/status", response_model=RuntimeStatusRead)
     def runtime_status():
         settings = AgentSettings.from_env()
-        try:
-            sdk_version = version("claude-agent-sdk")
-        except PackageNotFoundError:
-            sdk_version = "not-installed"
         return {
             "runtime": settings.runtime.value,
             "model": settings.model,
             "configured": settings.runtime.value != "mock" and settings.api_key_configured,
-            "sdk_version": sdk_version,
+            "sdk_version": "pi-agent-core@0.80.10",
             "provider_name": settings.provider_name,
             "provider_protocol": settings.provider_protocol if settings.runtime.value == "compatible" else "",
             "provider_base_url": settings.provider_base_url if settings.runtime.value == "compatible" else "",
@@ -241,20 +329,20 @@ def create_app(database: Database | None = None) -> FastAPI:
 
     @app.get("/api/skills", response_model=list[AgentSkillRead])
     def list_skills(session: SessionDep):
-        loader = SkillLoader(session, project_root=AgentSettings.from_env().workspace_root)
+        loader = _skill_loader(session, AgentSettings.from_env().workspace_root)
         return loader.sync()
 
     @app.post("/api/skills/reload", response_model=list[AgentSkillRead])
     def reload_skills(session: SessionDep):
-        return SkillLoader(session, project_root=AgentSettings.from_env().workspace_root).sync()
+        return _skill_loader(session, AgentSettings.from_env().workspace_root).sync()
 
     @app.get("/api/browser/status")
     def browser_status():
-        return BrowserBridgeClient().status()
+        return _browser_bridge().status()
 
     @app.post("/api/browser/close")
     def browser_close():
-        return BrowserBridgeClient().close()
+        return _browser_bridge().close()
 
     @app.patch("/api/skills/{skill_id}", response_model=AgentSkillRead)
     def update_skill(skill_id: str, payload: SkillStateUpdate, session: SessionDep):
@@ -264,6 +352,12 @@ def create_app(database: Database | None = None) -> FastAPI:
         if not (skill.metadata_json or {}).get("available", True) and payload.enabled:
             raise HTTPException(status_code=409, detail="skill_file_unavailable")
         skill.enabled = payload.enabled
+        skill.metadata_json = {
+            **(skill.metadata_json or {}),
+            "trusted_hash": skill.content_hash if payload.enabled else (skill.metadata_json or {}).get("trusted_hash"),
+            "trust_pending": False if payload.enabled else (skill.metadata_json or {}).get("trust_pending", False),
+            "change_reason": None if payload.enabled else (skill.metadata_json or {}).get("change_reason"),
+        }
         session.flush()
         return skill
 
@@ -272,7 +366,7 @@ def create_app(database: Database | None = None) -> FastAPI:
         if session.scalar(select(McpServerConfig).where(McpServerConfig.name == payload.name)):
             raise HTTPException(status_code=409, detail="mcp_server_name_exists")
         server = McpServerConfig(name=payload.name, transport=payload.transport, command=payload.command, args_json=payload.args, cwd=payload.cwd, env_keys=payload.env_keys)
-        McpManager(session).validate(server)
+        _mcp_manager(session).validate(server)
         session.add(server)
         session.flush()
         return server
@@ -290,7 +384,7 @@ def create_app(database: Database | None = None) -> FastAPI:
     @app.post("/api/mcp/servers/{server_id}/approve", response_model=McpServerRead)
     def approve_mcp_server(server_id: str, session: SessionDep):
         server = require_mcp(session, server_id)
-        McpManager(session).validate(server)
+        _mcp_manager(session).validate(server)
         server.approved = True
         server.status = "approved"
         session.flush()
@@ -299,7 +393,7 @@ def create_app(database: Database | None = None) -> FastAPI:
     @app.post("/api/mcp/servers/{server_id}/probe", response_model=McpServerRead)
     def probe_mcp_server(server_id: str, session: SessionDep):
         server = require_mcp(session, server_id)
-        McpManager(session).probe(server)
+        _mcp_manager(session).probe(server)
         return server
 
     @app.patch("/api/mcp/servers/{server_id}", response_model=McpServerRead)
@@ -458,14 +552,14 @@ def create_app(database: Database | None = None) -> FastAPI:
     def search_public_web(payload: WebSearchRequest, session: SessionDep):
         if permission_settings(session).get("web_access") == "deny":
             raise HTTPException(status_code=403, detail="web_access_disabled")
-        results = WebClient().search(payload.query, max_results=payload.max_results)
+        results = _web_client().search(payload.query, max_results=payload.max_results)
         return {"query": payload.query, "results": [item.__dict__ for item in results]}
 
     @app.post("/api/web/read")
     def read_public_web(payload: WebPageReadRequest, session: SessionDep):
         if permission_settings(session).get("web_access") == "deny":
             raise HTTPException(status_code=403, detail="web_access_disabled")
-        page = WebClient().read_page(payload.url, max_chars=payload.max_chars)
+        page = _web_client().read_page(payload.url, max_chars=payload.max_chars)
         return {
             "url": page.final_url,
             "title": page.title,
@@ -481,13 +575,15 @@ def create_app(database: Database | None = None) -> FastAPI:
     def preview_job_posting(payload: JobPostingPreviewRequest, session: SessionDep):
         if permission_settings(session).get("web_access") == "deny":
             raise HTTPException(status_code=403, detail="web_access_disabled")
-        posting = JobPostingImporter(session).preview(payload.url, allow_insufficient=True)
+        from integrations.web import FirecrawlClient, WebClient
+
+        posting = _job_posting_importer(session).preview(payload.url, allow_insufficient=True)
         firecrawl = FirecrawlClient()
         browser_warning = ""
-        if firecrawl.configured and not looks_like_job_content(posting.description):
+        if firecrawl.configured and not _looks_like_job_content(posting.description):
             try:
                 crawled = firecrawl.scrape(payload.url)
-                if looks_like_job_content(crawled.text):
+                if _looks_like_job_content(crawled.text):
                     posting = {
                         **posting.as_dict(),
                         "source_url": crawled.source_url or posting.source_url,
@@ -504,15 +600,15 @@ def create_app(database: Database | None = None) -> FastAPI:
         # Some recruitment sites return only a JavaScript shell to the HTTP
         # reader. In the desktop app, use the already-isolated hidden browser
         # bridge as a second pass; it never opens a user-facing window.
-        bridge = BrowserBridgeClient()
+        bridge = _browser_bridge()
         posting_text = posting.get("description", "") if isinstance(posting, dict) else posting.description
-        if bridge.configured and (len(posting_text) < 1200 or not looks_like_job_content(posting_text)):
+        if bridge.configured and (len(posting_text) < 1200 or not _looks_like_job_content(posting_text)):
             try:
                 state = bridge.open(payload.url)
                 if state.get("login_required"):
                     raise HTTPException(status_code=409, detail="job_page_requires_user_login")
                 text = str(state.get("text") or "").strip()
-                if looks_like_job_content(text) and (len(text) > len(posting_text) or not looks_like_job_content(posting_text)):
+                if _looks_like_job_content(text) and (len(text) > len(posting_text) or not _looks_like_job_content(posting_text)):
                     posting = {
                         **posting.as_dict(),
                         # Keep SPA route fragments (the job id lives after #)
@@ -525,7 +621,7 @@ def create_app(database: Database | None = None) -> FastAPI:
                         "content_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
                         "page_title": str(state.get("title") or posting.page_title)[:500],
                     }
-                elif not looks_like_job_content(text):
+                elif not _looks_like_job_content(text):
                     browser_warning = "页面已打开，但只返回招聘网站导航或宣传文案，未得到可用岗位正文。"
             except HTTPException:
                 raise
@@ -548,6 +644,8 @@ def create_app(database: Database | None = None) -> FastAPI:
         try:
             if not model_structured:
                 raise HarnessError("model_required", "当前未连接模型，暂不进行模型语义清洗")
+            from applyos_agent.agents import AgentSuite
+
             extracted, _ = AgentSuite(settings=extraction_settings).extract_job_posting(raw_text, page_title=page_title)
             used_model = True
         except Exception as error:
@@ -591,7 +689,7 @@ def create_app(database: Database | None = None) -> FastAPI:
     def import_job_from_web(job_id: str, payload: JobPageImportRequest, session: SessionDep):
         if permission_settings(session).get("web_access") == "deny":
             raise HTTPException(status_code=403, detail="web_access_disabled")
-        return JobPostingImporter(session).import_into_job(
+        return _job_posting_importer(session).import_into_job(
             _require_job(session, job_id),
             url=payload.url,
             overwrite=payload.overwrite,
@@ -638,7 +736,64 @@ def create_app(database: Database | None = None) -> FastAPI:
         experiences = list(session.scalars(select(Experience).where(Experience.candidate_id == candidate_id).order_by(Experience.sort_order, Experience.updated_at.desc())).all())
         materials = list(session.scalars(select(MaterialAsset).where(MaterialAsset.candidate_id == candidate_id).order_by(MaterialAsset.updated_at.desc())).all())
         resumes = list(session.scalars(select(ResumeVersion).where(ResumeVersion.candidate_id == candidate_id, ResumeVersion.job_id.is_(None)).order_by(ResumeVersion.updated_at.desc())).all())
-        return {"candidate": _row(candidate), "facts": [_row(item) for item in facts], "experiences": [_row(item) for item in experiences], "materials": [_row(item) for item in materials], "resumes": [_row(item) for item in resumes]}
+        interview_sources = list(session.scalars(select(InterviewSource).where(InterviewSource.candidate_id == candidate_id).order_by(InterviewSource.updated_at.desc())).all())
+        interview_briefs = list(session.scalars(select(InterviewBrief).where(InterviewBrief.candidate_id == candidate_id).order_by(InterviewBrief.updated_at.desc())).all())
+        return {"candidate": _row(candidate), "facts": [_row(item) for item in facts], "experiences": [_row(item) for item in experiences], "materials": [_row(item) for item in materials], "resumes": [_row(item) for item in resumes], "interview_sources": [_interview_source_row(item) for item in interview_sources], "interview_briefs": [_row(item) for item in interview_briefs]}
+
+    @app.get("/api/candidates/{candidate_id}/interview-knowledge")
+    def get_interview_knowledge(candidate_id: str, session: SessionDep, q: str = Query(default="", max_length=500)):
+        candidate = CandidateRepository(session).get(candidate_id)
+        if candidate is None:
+            raise HTTPException(status_code=404, detail="candidate_not_found")
+        sources = list(session.scalars(select(InterviewSource).where(InterviewSource.candidate_id == candidate_id).order_by(InterviewSource.updated_at.desc())).all())
+        briefs = list(session.scalars(select(InterviewBrief).where(InterviewBrief.candidate_id == candidate_id).order_by(InterviewBrief.updated_at.desc())).all())
+        query_tokens = [item for item in " ".join(q.split()).casefold().split(" ") if item]
+        if query_tokens:
+            sources = [item for item in sources if all(token in " ".join([item.company, item.role, item.business_unit or "", item.title, item.summary, " ".join(item.tags or [])]).casefold() for token in query_tokens)]
+            briefs = [item for item in briefs if all(token in " ".join([item.company, item.role, item.business_unit or "", item.summary]).casefold() for token in query_tokens)]
+        return {"sources": [_interview_source_row(item) for item in sources], "briefs": [_row(item) for item in briefs], "query": q}
+
+    @app.get("/api/interview-sources/{source_id}")
+    def get_interview_source(source_id: str, session: SessionDep):
+        source = session.get(InterviewSource, source_id)
+        if source is None:
+            raise HTTPException(status_code=404, detail="interview_source_not_found")
+        return _row(source)
+
+    @app.delete("/api/interview-sources/{source_id}", status_code=status.HTTP_204_NO_CONTENT)
+    def delete_interview_source(source_id: str, session: SessionDep):
+        source = session.get(InterviewSource, source_id)
+        if source is None:
+            raise HTTPException(status_code=404, detail="interview_source_not_found")
+        briefs = list(session.scalars(select(InterviewBrief).where(InterviewBrief.candidate_id == source.candidate_id)).all())
+        for brief in briefs:
+            if source_id not in (brief.source_ids or []):
+                continue
+            brief.source_ids = [item for item in brief.source_ids if item != source_id]
+            questions = []
+            for question in brief.common_questions or []:
+                remaining_ids = [item for item in question.get("source_ids", []) if item != source_id]
+                if not remaining_ids:
+                    continue
+                questions.append({
+                    **question,
+                    "source_ids": remaining_ids,
+                    "frequency": len(remaining_ids),
+                    "confidence": "recurring" if len(remaining_ids) >= 2 else "single_source",
+                })
+            brief.common_questions = questions
+            brief.metadata_json = {
+                **(brief.metadata_json or {}),
+                "recurring_question_count": sum(1 for item in questions if item["frequency"] >= 2),
+            }
+        session.delete(source)
+
+    @app.delete("/api/interview-briefs/{brief_id}", status_code=status.HTTP_204_NO_CONTENT)
+    def delete_interview_brief(brief_id: str, session: SessionDep):
+        brief = session.get(InterviewBrief, brief_id)
+        if brief is None:
+            raise HTTPException(status_code=404, detail="interview_brief_not_found")
+        session.delete(brief)
 
     @app.get("/api/workspace")
     def get_workspace(session: SessionDep):
@@ -671,12 +826,38 @@ def create_app(database: Database | None = None) -> FastAPI:
         proposals = [] if run is None else list(session.scalars(select(RewriteProposal).where(RewriteProposal.run_id == run.id).order_by(RewriteProposal.created_at)).all())
         approvals = [] if run is None else list(session.scalars(select(Approval).where(Approval.run_id == run.id).order_by(Approval.created_at)).all())
         resumes = list(session.scalars(select(ResumeVersion).where(ResumeVersion.job_id == job.id).order_by(ResumeVersion.updated_at.desc())).all())
+        base_resumes = list(
+            session.scalars(
+                select(ResumeVersion)
+                .where(
+                    ResumeVersion.candidate_id == job.candidate_id,
+                    ResumeVersion.job_id.is_(None),
+                )
+                .order_by(ResumeVersion.updated_at.desc())
+            ).all()
+        )
         portfolios = list(session.scalars(select(PortfolioVersion).where(PortfolioVersion.job_id == job.id).order_by(PortfolioVersion.updated_at.desc())).all())
         applications = list(session.scalars(select(Application).where(Application.job_id == job.id).order_by(Application.updated_at.desc())).all())
         quality = [] if run is None else list(session.scalars(select(QualityReport).where(QualityReport.run_id == run.id).order_by(QualityReport.created_at.desc())).all())
+        materials = list(
+            session.scalars(
+                select(MaterialAsset)
+                .where(MaterialAsset.candidate_id == job.candidate_id)
+                .order_by(MaterialAsset.updated_at.desc())
+            ).all()
+        )
         messages = list(session.scalars(select(AgentMessage).where(AgentMessage.job_id == job.id).order_by(AgentMessage.created_at)).all())
         tasks = [] if run is None else list(session.scalars(select(AgentTask).where(AgentTask.run_id == run.id).order_by(AgentTask.created_at)).all())
+        tool_invocations = [] if run is None else list(
+            session.scalars(
+                select(ToolInvocation)
+                .where(ToolInvocation.run_id == run.id)
+                .order_by(ToolInvocation.created_at.desc())
+            ).all()
+        )
         queued_messages = list(session.scalars(select(QueuedAgentMessage).where(QueuedAgentMessage.job_id == job.id).order_by(QueuedAgentMessage.sequence)).all())
+        interview_sources = list(session.scalars(select(InterviewSource).where(InterviewSource.job_id == job.id).order_by(InterviewSource.updated_at.desc())).all())
+        interview_briefs = list(session.scalars(select(InterviewBrief).where(InterviewBrief.job_id == job.id).order_by(InterviewBrief.updated_at.desc())).all())
         profile = session.scalar(select(JobProfile).where(JobProfile.job_id == job.id))
         _backfill_candidate_experiences(session, job.candidate_id)
         facts = list(session.scalars(select(Fact).where(Fact.candidate_id == job.candidate_id).order_by(Fact.verified.desc(), Fact.updated_at.desc())).all())
@@ -685,11 +866,22 @@ def create_app(database: Database | None = None) -> FastAPI:
             "job": _row(job), "candidate": _row(candidate), "profile": _row(profile), "facts": [_row(item) for item in facts], "experiences": [_row(item) for item in experiences],
             "run": _row(run), "steps": [_row(item) for item in steps], "proposals": [_row(item) for item in proposals],
             "approvals": [_row(item) for item in approvals], "resumes": [_row(item) for item in resumes],
+            "base_resumes": [_row(item) for item in base_resumes],
             "portfolios": [_row(item) for item in portfolios], "applications": [_row(item) for item in applications],
             "quality_reports": [_row(item) for item in quality],
+            "materials": [_row(item) for item in materials],
             "messages": [_row(item) for item in messages],
             "tasks": [_row(item) for item in tasks],
+            "tool_invocations": [_row(item) for item in tool_invocations],
             "queued_messages": [_row(item) for item in queued_messages],
+            "interview_sources": [_interview_source_row(item) for item in interview_sources],
+            "interview_briefs": [_row(item) for item in interview_briefs],
+            "run_evaluation": _agent_run_evaluator(session).evaluate(job=job, run=run),
+            "ats_readiness": _ats_readiness_evaluator(session).evaluate(
+                job=job,
+                run=run,
+                resume=resumes[0] if resumes else (base_resumes[0] if base_resumes else None),
+            ),
         }
 
     @app.post("/api/jobs/{job_id}/messages", status_code=status.HTTP_201_CREATED)
@@ -708,23 +900,26 @@ def create_app(database: Database | None = None) -> FastAPI:
                 .limit(12)
             ).all()
         )
-        user_message = AgentMessage(candidate_id=job.candidate_id, job_id=job.id, run_id=run.id, role="user", content=payload.content.strip(), metadata_json={"thinking_level": payload.thinking_level, "context_scope": "agent", "attachment_paths": payload.attachment_paths})
+        quoted_text = (payload.quoted_text or "").strip()
+        user_message = AgentMessage(candidate_id=job.candidate_id, job_id=job.id, run_id=run.id, role="user", content=payload.content.strip(), metadata_json={"thinking_level": payload.thinking_level, "task_kind": payload.task_kind, "context_scope": "agent", "attachment_paths": payload.attachment_paths, "quoted_text": quoted_text or None, "quoted_message_id": payload.quoted_message_id})
         session.add(user_message)
         session.flush()
         latest_resume = session.scalar(select(ResumeVersion).where(ResumeVersion.job_id == job.id).order_by(ResumeVersion.updated_at.desc()))
         strategy = (latest_resume.content_json or {}).get("strategy", {}) if latest_resume else {}
         resume_snapshot = (latest_resume.content_json or {}).get("editor_snapshot", {}) if latest_resume else {}
-        conversation_context = ContextManager(session).conversation_context(job=job, run=run, include_job_context=False)
+        conversation_context = _context_manager(session).conversation_context(job=job, run=run, include_job_context=False)
+        if quoted_text:
+            conversation_context += f"\n<quoted_assistant_text>\n{quoted_text}\n</quoted_assistant_text>"
         if payload.attachment_paths:
             conversation_context += "\n<attached_workspace_files>\n" + "\n".join(payload.attachment_paths) + "\n</attached_workspace_files>"
-        result = AgentService(session).converse(job, payload.content.strip(), run=run, context=conversation_context, thinking_level=payload.thinking_level)
+        result = _agent_service(session).converse(job, payload.content.strip(), run=run, context=conversation_context, thinking_level=payload.thinking_level)
         assistant_message = AgentMessage(
             candidate_id=job.candidate_id,
             job_id=job.id,
             run_id=run.id if run else None,
             role="assistant",
             content=result["message"],
-            metadata_json={"intent": result["intent"], "suggested_actions": result["suggested_actions"], "runtime": result["runtime"], "thinking_level": payload.thinking_level},
+            metadata_json={"intent": result["intent"], "suggested_actions": result["suggested_actions"], "runtime": result["runtime"], "thinking_level": payload.thinking_level, "task_kind": payload.task_kind},
         )
         session.add(assistant_message)
         session.flush()
@@ -762,10 +957,8 @@ def create_app(database: Database | None = None) -> FastAPI:
                 return item
 
             try:
-                scope_detail = "正在根据完整语义判断是直接回答，还是读取岗位、网页、附件或本地工作区。"
-                yield event("reasoning", {"event": update_processing("scope", "理解问题", scope_detail, "completed")})
                 yield event("status", {
-                    "label": "正在理解你的问题",
+                    "label": "Agent 正在处理当前请求",
                     "context_scope": "agent",
                 })
                 with database.session() as message_session:
@@ -775,17 +968,12 @@ def create_app(database: Database | None = None) -> FastAPI:
                         run = AgentRun(candidate_id=job.candidate_id, job_id=job.id, run_type="conversation_tools", current_stage=PipelineStage.CREATED.value)
                         message_session.add(run)
                         message_session.flush()
-                    previous_messages = list(
-                        message_session.scalars(
-                            select(AgentMessage)
-                            .where(AgentMessage.job_id == job.id)
-                            .order_by(AgentMessage.created_at.desc())
-                            .limit(12)
-                        ).all()
-                    )
                     latest_resume = message_session.scalar(select(ResumeVersion).where(ResumeVersion.job_id == job.id).order_by(ResumeVersion.updated_at.desc()))
                     resume_content = latest_resume.content_json or {} if latest_resume else {}
-                    conversation_context = ContextManager(message_session).conversation_context(job=job, run=run, include_job_context=False)
+                    conversation_context = _context_manager(message_session).conversation_context(job=job, run=run, include_job_context=False)
+                    quoted_text = (payload.quoted_text or "").strip()
+                    if quoted_text:
+                        conversation_context += f"\n<quoted_assistant_text>\n{quoted_text}\n</quoted_assistant_text>"
                     if payload.attachment_paths:
                         conversation_context += "\n<attached_workspace_files>\n" + "\n".join(payload.attachment_paths) + "\n</attached_workspace_files>"
                     user_message = AgentMessage(
@@ -794,7 +982,7 @@ def create_app(database: Database | None = None) -> FastAPI:
                         run_id=run.id if run else None,
                         role="user",
                         content=payload.content.strip(),
-                        metadata_json={"thinking_level": payload.thinking_level, "context_scope": "agent", "delivery_status": "streaming", "attachment_paths": payload.attachment_paths},
+                        metadata_json={"thinking_level": payload.thinking_level, "task_kind": payload.task_kind, "context_scope": "agent", "delivery_status": "streaming", "attachment_paths": payload.attachment_paths, "quoted_text": quoted_text or None, "quoted_message_id": payload.quoted_message_id},
                     )
                     message_session.add(user_message)
                     message_session.flush()
@@ -803,8 +991,6 @@ def create_app(database: Database | None = None) -> FastAPI:
                     detached_job = job
                     run_id = run.id if run else None
                     session_id = run.session_id if run else None
-                    context_detail = f"已载入最近 {len(previous_messages)} 条对话；更详细的岗位和材料上下文由模型按需读取。"
-                yield event("reasoning", {"event": update_processing("context", "准备上下文", context_detail, "completed")})
                 yield event("user", {"message": user_payload})
 
                 settings = AgentSettings.from_env()
@@ -812,9 +998,7 @@ def create_app(database: Database | None = None) -> FastAPI:
                     raise HarnessError("model_required", "请先连接并启用一个模型；Agent 对话不会使用本地规则冒充模型回答。")
                 thinking_label = {"fast": "快速", "balanced": "平衡", "deep": "深度"}.get(payload.thinking_level, payload.thinking_level)
                 provider_label = settings.provider_name or ("Claude" if settings.runtime == RuntimeMode.CLAUDE else "自定义模型")
-                model_detail = f"正在使用 {provider_label} / {settings.model}，推理强度为{thinking_label}。"
-                yield event("reasoning", {"event": update_processing("model", "调用模型", model_detail, "active")})
-                yield event("status", {"label": "正在等待模型响应"})
+                yield event("status", {"label": f"正在由 {provider_label} 执行本轮任务", "thinking_level": thinking_label})
                 text_parts: list[str] = []
                 runtime_usage: dict = {}
                 final_session_id = session_id
@@ -832,7 +1016,11 @@ def create_app(database: Database | None = None) -> FastAPI:
                             tool_run = tool_session.get(AgentRun, run_id)
                             if tool_run is None:
                                 raise HarnessError("agent_run_not_found", "岗位 Agent 运行不存在")
-                            return ConversationToolAgent(tool_session, settings=settings).run(
+                            tool_agent_class = ConversationToolAgent
+                            if tool_agent_class is None:
+                                from applyos_agent.conversation_tools import ConversationToolAgent as tool_agent_class
+
+                            return tool_agent_class(tool_session, settings=settings).run(
                                 job=tool_job,
                                 run=tool_run,
                                 message=payload.content.strip(),
@@ -871,18 +1059,18 @@ def create_app(database: Database | None = None) -> FastAPI:
                         )})
                     runtime_usage = outcome.usage
                     final_session_id = outcome.session_id or final_session_id
-                    chunk = outcome.text.strip()
+                    chunk = strip_model_protocol(outcome.text).strip()
                     if chunk:
                         first_delta = False
-                        yield event("reasoning", {"event": update_processing("model", "调用模型", f"{provider_label} / {settings.model} 已完成工具调用与回答。", "completed")})
-                        yield event("reasoning", {"event": update_processing("answer", "组织回答", "已根据本轮语义判断和真实工具结果整理回答。", "completed")})
+                        result_count = len(getattr(outcome, "tool_results", []) or [])
+                        answer_detail = f"已核对并整合 {result_count} 项真实工具结果。" if result_count else "当前请求不需要外部工具，模型已直接完成回答。"
+                        yield event("reasoning", {"event": update_processing("answer", "完成本轮回答", answer_detail, "completed")})
                         yield event("status", {"label": "正在生成回答"})
                         text_parts.append(chunk)
                         yield event("delta", {"text": chunk})
                 full_text = "".join(text_parts).strip()
                 if not full_text:
                     raise HarnessError("empty_model_response", "模型没有返回可显示的内容", retryable=True)
-                yield event("reasoning", {"event": update_processing("answer", "组织回答", "回答内容已生成并完成流式输出。", "completed")})
                 processing_duration_ms = max(1, round((time.monotonic() - processing_started) * 1000))
 
                 with database.session() as result_session:
@@ -899,6 +1087,34 @@ def create_app(database: Database | None = None) -> FastAPI:
                             event_type="conversation",
                             usage=runtime_usage,
                         )
+                    research_result = None
+                    if payload.task_kind == "interview_research":
+                        brief_query = select(InterviewBrief).where(InterviewBrief.job_id == detached_job.id)
+                        if stored_user is not None:
+                            brief_query = brief_query.where(InterviewBrief.updated_at >= stored_user.created_at)
+                        latest_brief = result_session.scalar(brief_query.order_by(InterviewBrief.updated_at.desc()))
+                        saved_sources = list(result_session.scalars(
+                            select(InterviewSource).where(
+                                InterviewSource.job_id == detached_job.id,
+                            )
+                        ).all())
+                        primary_source_count = sum(1 for item in saved_sources if item.platform == "xiaohongshu")
+                        supplemental_source_count = len(saved_sources) - primary_source_count
+                        evidence_status = (latest_brief.metadata_json or {}).get("evidence_status") if latest_brief else None
+                        research_result = {
+                            "status": (
+                                "brief_ready" if latest_brief and evidence_status == "sufficient"
+                                else "brief_limited" if latest_brief
+                                else "sources_saved" if saved_sources
+                                else "completed_without_brief"
+                            ),
+                            "brief_id": latest_brief.id if latest_brief else None,
+                            "source_count": len(saved_sources),
+                            "primary_platform": "xiaohongshu",
+                            "primary_source_count": primary_source_count,
+                            "supplemental_source_count": supplemental_source_count,
+                            "evidence_status": evidence_status or ("limited" if saved_sources else "insufficient"),
+                        }
                     assistant_message = AgentMessage(
                         candidate_id=detached_job.candidate_id,
                         job_id=detached_job.id,
@@ -908,6 +1124,8 @@ def create_app(database: Database | None = None) -> FastAPI:
                         metadata_json={
                             "runtime": runtime_usage,
                             "thinking_level": payload.thinking_level,
+                            "task_kind": payload.task_kind,
+                            "research_result": research_result,
                             "delivery_status": "completed",
                             "processing_trace": processing_trace,
                             "processing_duration_ms": processing_duration_ms,
@@ -942,21 +1160,23 @@ def create_app(database: Database | None = None) -> FastAPI:
     @app.post("/api/jobs/{job_id}/analyze")
     def analyze_job(job_id: str, payload: RunBoundAction | None, session: SessionDep):
         run = _require_run(session, payload.run_id) if payload else None
-        return _row(AgentService(session).analyze_job(_require_job(session, job_id), run=run))
+        return _row(_agent_service(session).analyze_job(_require_job(session, job_id), run=run))
 
     @app.post("/api/jobs/{job_id}/resume-strategy")
     def create_resume_strategy(job_id: str, payload: RunBoundAction | None, session: SessionDep):
         run = _require_run(session, payload.run_id) if payload else None
-        return AgentService(session).resume_strategy(_require_job(session, job_id), run=run)
+        return _agent_service(session).resume_strategy(_require_job(session, job_id), run=run)
 
     @app.post("/api/imports/legacy-resume", response_model=LegacyImportResult)
     def import_legacy(payload: LegacyImportRequest, request: Request):
+        from integrations.legacy_resume.importer import LegacyWorkspaceImporter
+
         return LegacyWorkspaceImporter(request.app.state.database).import_file(payload.source_path)
 
     @app.post("/api/imports/resume-pdf/preview", response_model=PdfResumePreviewRead)
     def preview_pdf_resume(payload: PdfResumePreviewRequest, request: Request):
         try:
-            return PdfResumeImporter(request.app.state.database).preview(
+            return _pdf_importer(request.app.state.database).preview(
                 payload.source_path,
                 ai_enhanced=payload.ai_enhanced,
             )
@@ -966,19 +1186,20 @@ def create_app(database: Database | None = None) -> FastAPI:
     @app.post("/api/imports/resume-pdf", response_model=PdfResumeImportRead)
     def import_pdf_resume(payload: PdfResumeImportRequest, request: Request):
         try:
-            return PdfResumeImporter(request.app.state.database).import_file(
+            return _pdf_importer(request.app.state.database).import_file(
                 payload.source_path,
                 candidate_id=payload.candidate_id,
                 candidate_name=payload.candidate_name,
                 candidate_title=payload.candidate_title,
                 ai_enhanced=payload.ai_enhanced,
+                reviewed_preview=payload.reviewed_preview,
             )
         except (ValueError, OSError) as exc:
             raise HarnessError("pdf_import_invalid", str(exc)) from exc
 
     @app.post("/api/agent-runs", response_model=AgentRunRead, status_code=status.HTTP_201_CREATED)
     def create_agent_run(payload: AgentRunCreate, session: SessionDep, idempotency_key: Annotated[str, Header(alias="Idempotency-Key")]):
-        engine = build_agent_engine(session)
+        engine = _agent_engine(session)
         run = engine.create_run(candidate_id=payload.candidate_id, job_id=payload.job_id, idempotency_key=idempotency_key)
         return engine.run(run).run if payload.auto_start else run
 
@@ -1037,7 +1258,7 @@ def create_app(database: Database | None = None) -> FastAPI:
 
     @app.post("/api/agent-runs/{run_id}/tasks", response_model=AgentTaskRead, status_code=status.HTTP_202_ACCEPTED)
     def enqueue_agent_task(run_id: str, payload: AgentTaskCreate, session: SessionDep):
-        return TaskQueue(session).enqueue(_require_run(session, run_id), kind=payload.kind, priority=payload.priority, payload=payload.payload)
+        return _task_queue(session).enqueue(_require_run(session, run_id), kind=payload.kind, priority=payload.priority, payload=payload.payload)
 
     @app.get("/api/agent-runs/{run_id}/tasks", response_model=list[AgentTaskRead])
     def list_agent_tasks(run_id: str, session: SessionDep):
@@ -1052,19 +1273,19 @@ def create_app(database: Database | None = None) -> FastAPI:
 
     @app.post("/api/agent-tasks/{task_id}/pause", response_model=AgentTaskRead)
     def pause_agent_task(task_id: str, session: SessionDep):
-        return TaskQueue(session).request_pause(require_task(session, task_id))
+        return _task_queue(session).request_pause(require_task(session, task_id))
 
     @app.post("/api/agent-tasks/{task_id}/resume", response_model=AgentTaskRead)
     def resume_agent_task(task_id: str, session: SessionDep):
-        return TaskQueue(session).resume(require_task(session, task_id))
+        return _task_queue(session).resume(require_task(session, task_id))
 
     @app.post("/api/agent-tasks/{task_id}/retry", response_model=AgentTaskRead)
     def retry_agent_task(task_id: str, session: SessionDep):
-        return TaskQueue(session).resume(require_task(session, task_id), retry=True)
+        return _task_queue(session).resume(require_task(session, task_id), retry=True)
 
     @app.post("/api/agent-tasks/{task_id}/cancel", response_model=AgentTaskRead)
     def cancel_agent_task(task_id: str, session: SessionDep):
-        return TaskQueue(session).request_cancel(require_task(session, task_id))
+        return _task_queue(session).request_cancel(require_task(session, task_id))
 
     @app.post("/api/jobs/{job_id}/messages/queue", response_model=QueuedMessageRead, status_code=status.HTTP_202_ACCEPTED)
     def queue_job_message(job_id: str, payload: AgentMessageCreate, session: SessionDep):
@@ -1074,7 +1295,10 @@ def create_app(database: Database | None = None) -> FastAPI:
             run = AgentRun(candidate_id=job.candidate_id, job_id=job.id, run_type="conversation_tools", current_stage=PipelineStage.CREATED.value)
             session.add(run)
             session.flush()
-        return TaskQueue(session).enqueue_message(job=job, run=run, content=payload.content, thinking_level=payload.thinking_level)
+        queued_content = payload.content
+        if payload.quoted_text:
+            queued_content = f"引用此前回答：\n{payload.quoted_text.strip()}\n\n用户追问：\n{payload.content}"
+        return _task_queue(session).enqueue_message(job=job, run=run, content=queued_content, thinking_level=payload.thinking_level)
 
     @app.get("/api/jobs/{job_id}/messages/queue", response_model=list[QueuedMessageRead])
     def list_queued_messages(job_id: str, session: SessionDep):
@@ -1093,11 +1317,11 @@ def create_app(database: Database | None = None) -> FastAPI:
 
     @app.post("/api/agent-runs/{run_id}/resume", response_model=AgentRunRead)
     def resume_agent_run(run_id: str, session: SessionDep):
-        return build_agent_engine(session).run(_require_run(session, run_id)).run
+        return _agent_engine(session).run(_require_run(session, run_id)).run
 
     @app.post("/api/agent-runs/{run_id}/retry", response_model=AgentRunRead)
     def retry_agent_run(run_id: str, session: SessionDep):
-        return build_agent_engine(session).retry(_require_run(session, run_id)).run
+        return _agent_engine(session).retry(_require_run(session, run_id)).run
 
     @app.post("/api/agent-runs/{run_id}/cancel", response_model=AgentRunRead)
     def cancel_agent_run(run_id: str, session: SessionDep):
@@ -1155,6 +1379,34 @@ def create_app(database: Database | None = None) -> FastAPI:
             approved_by=payload.approved_by,
         )
 
+    @app.patch("/api/agent-runs/{run_id}/approvals/{approval_id}/draft", response_model=ApprovalRead)
+    def save_approval_draft(run_id: str, approval_id: str, payload: ApprovalDraftRequest, session: SessionDep):
+        run = _require_run(session, run_id)
+        approval = session.get(Approval, approval_id)
+        if approval is None or approval.run_id != run.id or approval.action_type != "apply_resume_changes":
+            raise HarnessError("approval_not_found", "修改建议审批不存在", run_id=run.id)
+        if getattr(approval.status, "value", approval.status) != "pending":
+            raise HarnessError("approval_already_decided", "审批已经完成，不能再修改草稿", run_id=run.id)
+        current_payload = dict(approval.decision_payload or {})
+        current_draft = dict(current_payload.get("draft") or {})
+        current_revision = int(current_draft.get("revision") or 0)
+        if payload.base_revision != current_revision:
+            raise HarnessError(
+                "approval_revision_conflict",
+                "审批草稿已在其他窗口更新，请刷新后继续",
+                run_id=run.id,
+                details={"current_revision": current_revision},
+            )
+        current_payload["draft"] = {
+            "revision": current_revision + 1,
+            "decisions": payload.decisions,
+            "edited_by": payload.edited_by,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        approval.decision_payload = current_payload
+        session.flush()
+        return approval
+
     @app.post("/api/agent-runs/{run_id}/publish-approval", response_model=ApprovalRead)
     def approve_run_publish(run_id: str, payload: ActionApprovalRequest, session: SessionDep):
         run = _require_run(session, run_id)
@@ -1193,6 +1445,8 @@ def create_app(database: Database | None = None) -> FastAPI:
             arguments = item.get("arguments") or {}
             approved = service.approve_action(approval_id=approval.id, approved_by=payload.decided_by, payload=decision_payload)
             if approval.action_type.startswith("workspace_") or approval.action_type.startswith("permission:"):
+                from applyos_agent.conversation_tools import build_conversation_gateway
+
                 result = build_conversation_gateway(session, AgentSettings.from_env()).execute(
                     tool_name=tool_name,
                     run=run,
@@ -1205,6 +1459,38 @@ def create_app(database: Database | None = None) -> FastAPI:
             return approved
         return service.reject_action(approval_id=approval.id, approved_by=payload.decided_by, payload=decision_payload)
 
+    @app.post("/api/tool-invocations/{operation_id}/resolve")
+    def resolve_tool_invocation(operation_id: str, payload: ToolInvocationResolution, session: SessionDep):
+        invocation = session.scalar(select(ToolInvocation).where(ToolInvocation.operation_id == operation_id))
+        if invocation is None:
+            raise HarnessError("tool_invocation_not_found", "工具操作记录不存在")
+        if invocation.status not in {"running", "outcome_unknown"}:
+            raise HarnessError(
+                "tool_invocation_not_resolvable",
+                "当前工具操作不需要人工核对",
+                run_id=invocation.run_id,
+                details={"operation_id": operation_id, "status": invocation.status},
+            )
+        if payload.decision == "completed":
+            invocation.status = "completed_verified"
+            invocation.result_json = {
+                **(invocation.result_json or {}),
+                "verified_by_user": True,
+                "resolution": "completed",
+                "decided_by": payload.decided_by,
+            }
+        elif payload.decision == "not_executed":
+            invocation.status = "retry_authorized"
+            invocation.error_json = {
+                **(invocation.error_json or {}),
+                "resolution": "not_executed",
+                "decided_by": payload.decided_by,
+            }
+        else:
+            invocation.status = "outcome_unknown"
+        session.flush()
+        return _row(invocation)
+
     @app.get("/api/agent-runs/{run_id}/report", response_model=PipelineReportRead)
     def get_run_report(run_id: str, session: SessionDep):
         return TraceService(session).pipeline_report(_require_run(session, run_id))
@@ -1214,6 +1500,8 @@ def create_app(database: Database | None = None) -> FastAPI:
         run = _require_run(session, payload.run_id)
         resume = _require_resume(session, resume_id)
         _assert_run_asset_scope(run, resume.candidate_id, resume.job_id)
+        from integrations.resume.renderer import ResumeRenderer
+
         result = ResumeRenderer(session).render(resume, run_id=run.id)
         return {"resume": _row(resume), "pdf_url": f"/api/resumes/{resume.id}/pdf", "bridge_payload_path": str(result.bridge_payload_path), "page_count": result.page_count}
 
@@ -1252,6 +1540,24 @@ def create_app(database: Database | None = None) -> FastAPI:
             media_type="application/pdf",
             filename=f"{resume.name}.pdf",
             content_disposition_type="inline",
+        )
+
+    @app.get("/api/resumes/{resume_id}/docx")
+    def get_resume_docx(resume_id: str, session: SessionDep):
+        """Export a parser-friendly Word copy without replacing the canonical PDF."""
+        resume = _require_resume(session, resume_id)
+        from integrations.resume.docx_export import DOCX_MIME, render_resume_docx
+
+        target = (artifact_root() / "resumes" / resume.id / "resume-ats.docx").resolve()
+        resume_root = (artifact_root() / "resumes").resolve()
+        if not target.is_relative_to(resume_root):
+            raise HarnessError("path_outside_workspace", "简历产物路径越界")
+        render_resume_docx(resume, target)
+        return FileResponse(
+            target,
+            media_type=DOCX_MIME,
+            filename=f"{resume.name}-ATS.docx",
+            content_disposition_type="attachment",
         )
 
     @app.put("/api/resumes/{resume_id}/pdf")
@@ -1433,7 +1739,19 @@ def _row(entity):
             value = value.value
         elif isinstance(value, datetime):
             value = value.isoformat()
+        elif isinstance(entity, AgentMessage) and column.key == "content" and entity.role == "assistant":
+            value = strip_model_protocol(value)
         output[column.key] = value
+    return output
+
+
+def _interview_source_row(source: InterviewSource) -> dict:
+    """Return list-safe source metadata; full captured text is opt-in by ID."""
+    output = _row(source)
+    raw_text = output.pop("raw_text", "")
+    output.pop("content_hash", None)
+    output.pop("url_hash", None)
+    output["text_preview"] = raw_text[:800]
     return output
 
 

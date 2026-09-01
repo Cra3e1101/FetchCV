@@ -7,15 +7,16 @@ import pytest
 from sqlalchemy import select
 
 from applyos_agent.config import AgentSettings, RuntimeMode
+from applyos_agent.browser_tools import BrowserBridgeClient
 from applyos_agent.engine import AgentEngine
 from applyos_agent.schemas import RuntimeToolCall, RuntimeTurnResult
 from applyos_agent.tools import register_pipeline_tools
 from applyos_agent.web_tools import register_web_tools
 from applyos_domain.enums import StepStatus
-from applyos_domain.models import AgentRunStep, Approval, Candidate, Fact, Job, MaterialAsset
+from applyos_domain.models import AgentRun, AgentRunStep, Approval, Candidate, Fact, Job, MaterialAsset
 from applyos_harness.approval import ApprovalService
 from applyos_harness.errors import HarnessError
-from applyos_harness.permissions import ToolGateway
+from applyos_harness.permissions import ToolGateway, ToolPermission
 from applyos_harness.pipeline import MockPipeline
 from integrations.web import JobPostingImporter, WebClient
 
@@ -106,6 +107,83 @@ def test_web_page_read_and_search_return_public_sources(monkeypatch):
     assert page.content_sha256
     results = client.search("示例科技 数据分析", max_results=5)
     assert [(item.title, item.url) for item in results] == [("数据分析实习生", "https://jobs.example.com/123")]
+
+
+def test_web_read_automatically_uses_embedded_browser_for_javascript_shell(database, tmp_path):
+    def static_handler(request):
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/html"},
+            text="<html><title>职位详情</title><body><div id='app'>加载中</div></body></html>",
+            request=request,
+        )
+
+    def browser_handler(request):
+        assert request.headers["authorization"] == "Bearer bridge-token"
+        payload = json.loads(request.content.decode("utf-8"))
+        assert payload == {"command": "open", "url": "https://jobs.example.com/spa#/job/123"}
+        return httpx.Response(200, json={
+            "ok": True,
+            "result": {
+                "open": True,
+                "url": payload["url"],
+                "title": "数据分析实习生",
+                "text": "岗位职责：使用 SQL 和 Python 分析业务指标。任职要求：能够完成专题分析并推动策略落地。" * 12,
+                "login_required": False,
+                "truncated": False,
+            },
+        }, request=request)
+
+    with database.session() as session:
+        candidate = Candidate(name="Browser candidate")
+        session.add(candidate)
+        session.flush()
+        job = Job(candidate_id=candidate.id, company="Example", role="Analyst")
+        session.add(job)
+        session.flush()
+        run = AgentRun(candidate_id=candidate.id, job_id=job.id, run_type="conversation", current_stage="created")
+        session.add(run)
+        session.flush()
+        web_client = _client(static_handler)
+        browser_client = BrowserBridgeClient(
+            base_url="http://127.0.0.1:43199",
+            token="bridge-token",
+            transport=httpx.MockTransport(browser_handler),
+            web_client=web_client,
+        )
+        gateway = ToolGateway(session, workspace_root=tmp_path)
+        register_web_tools(gateway, web_client=web_client, browser_client=browser_client)
+        result = gateway.execute(
+            tool_name="read_web_page",
+            run=run,
+            arguments={"url": "https://jobs.example.com/spa#/job/123"},
+            granted_permissions={ToolPermission.NETWORK_READ},
+            idempotency_key="browser-fallback",
+        )
+
+        assert result["data"]["provider"] == "controlled-browser"
+        assert "SQL" in result["data"]["text"]
+        assert result["requires_user_action"] is False
+
+
+def test_web_gateway_keeps_realtime_questions_provider_independent(database, tmp_path):
+    with database.session() as session:
+        candidate = Candidate(name="General web candidate")
+        session.add(candidate)
+        session.flush()
+        job = Job(candidate_id=candidate.id, company="Example", role="Analyst")
+        session.add(job)
+        session.flush()
+        run = AgentRun(candidate_id=candidate.id, job_id=job.id, run_type="conversation", current_stage="created")
+        session.add(run)
+        session.flush()
+        gateway = ToolGateway(session, workspace_root=tmp_path)
+        register_web_tools(gateway, web_client=_client(lambda request: httpx.Response(200, text="", request=request)))
+
+        definitions = {item["name"]: item for item in gateway.definitions(run)}
+        assert "get_weather" not in definitions
+        assert {"search_web", "read_web_page"}.issubset(definitions)
+        assert "天气" in definitions["search_web"]["description"]
 
 
 def test_job_posting_import_uses_json_ld_and_never_silently_overwrites(database):

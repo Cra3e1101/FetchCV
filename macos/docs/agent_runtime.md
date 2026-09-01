@@ -1,76 +1,109 @@
-# FetchCV Agent Runtime
+# FetchCV Pi Agent Runtime
 
-Updated: 2026-07-19
+Updated: 2026-07-21
 
-## Implemented in this phase
+## Runtime boundary
 
-`AgentEngine` now runs a provider-independent loop:
+The desktop application uses Pi as its only interactive Agent Loop:
 
 ```text
-model turn -> structured tool call -> ToolGateway -> persisted tool result -> next model turn
+React renderer
+  -> Electron IPC
+  -> Pi Agent Runtime (@earendil-works/pi-agent-core)
+  -> provider adapter (@earendil-works/pi-ai)
+  -> structured tool call
+  -> authenticated loopback bridge
+  -> FetchCV ToolGateway
+  -> domain/PDF/web/workspace/MCP capability
+  -> persisted tool result and trace
+  -> next Pi model turn
 ```
 
-The loop persists model turns, tool calls, tool results, usage, duration and failures in `AgentRunStep`. It stops at user approval stages, can recover a failed stage with retry, rejects stage-invalid tools and duplicate calls, and limits each model turn to one side-effecting tool.
+Pi owns model streaming, tool-call parsing, multi-turn continuation, steering,
+follow-up queues, provider cancellation and per-turn context transformation.
+The Python sidecar does not own the desktop Agent Loop. It remains the local
+domain service for SQLite data, resume parsing/rendering, workflow state,
+version snapshots and bounded capabilities.
 
-Provider adapters support OpenAI-compatible `tool_calls`, Anthropic-compatible `tool_use`, and a JSON Schema decision fallback for providers that reject native tool definitions. Hidden chain-of-thought is neither requested nor stored; the UI may show only actual tool events and concise action summaries.
+## Why ToolGateway remains
 
-## Registered business tools
+Pi intentionally does not provide an application permission system. FetchCV
+therefore keeps ToolGateway as the only tool execution path. The gateway
+enforces:
 
-- `validate_run_input`
-- `analyze_job`
-- `match_candidate_experiences`
-- `generate_resume_strategy`
-- `propose_resume_rewrites`
-- `apply_approved_resume_changes`
-- `validate_resume`
-- `build_portfolio_preview`
-- `run_consistency_checks`
-- `finalize_publish_ready`
-- `inspect_job_context`
-- `search_web`
-- `read_web_page`
-- `import_job_posting`
-- `list_skills`
-- `read_skill`
-- approved read-only MCP tools under `mcp__<server>__<tool>`
+- stage and candidate/job scope;
+- read/network/write/delete permissions;
+- persisted user approvals;
+- path containment and SSRF protection;
+- side-effect idempotency;
+- before/after version snapshots;
+- durable tool traces.
 
-The tools wrap the existing state machine, approval service, fact validator, version service and publish gate. The model has no direct database, Shell or arbitrary file access.
+The model never receives a database handle, API key, arbitrary HTTP client or
+Shell. API keys stay in Electron `safeStorage`; only the Pi provider adapter
+receives the decrypted key for the active request.
 
-Job-specific resumes branch from the latest base `ResumeVersion`, preserve its editor template and unchanged content, and apply only approved fact-bound rewrites to the corresponding experience body.
+## Conversation execution
 
-## Acceptance coverage
+`electron/pi-agent-runtime.mjs` creates a Pi `AgentHarness` for each user turn. The
+backend returns a compacted conversation envelope, current system contract and
+the ToolGateway definitions. The Harness owns its in-run session tree, provider
+authentication, steering/follow-up queues and dynamic active-tool set; SQLite
+remains authoritative across application restarts. Pi events are normalized
+directly into the UI:
 
-Automated tests cover:
+- provider `thinking_delta` -> visible, collapsible processing detail;
+- `text_delta` -> assistant stream;
+- tool start/update/end -> real activity events;
+- abort -> provider and active tools receive the same abort signal.
 
-- OpenAI and Anthropic native tool parsing;
-- structured fallback and API-key non-leakage;
-- model -> tool -> model progression;
-- stage restrictions, duplicate-call rejection and persisted tool results;
-- approval pauses, tool failure, retry and model failure;
-- cancellation while no model is connected;
-- the real files in `test use/`, including PDF import, JD analysis flow, three approval gates, base-template inheritance, one targeted rewrite and publish readiness.
-- SSRF blocking, redirect revalidation, response limits, real search-provider smoke testing, JSON-LD job import, recoverable empty-JD import and approved JD replacement.
+No DSML/XML text protocol is parsed. Tool calls are native structured provider
+events, so malformed protocol text cannot appear as an assistant answer.
 
-## Durable execution and context
+Provider credentials are resolved through Pi `Models` at request time. FetchCV
+does not replace the Harness stream function with a bare provider stream, which
+would bypass provider-aware authentication and retry hooks.
 
-`AgentTask` persists queued, running, paused, failed, cancelled and completed work. A single local worker claims tasks, recovers orphaned running records after sidecar restart, and cooperatively checks pause/cancel requests between model turns and before each tool. Messages submitted while a task is active are stored in `QueuedAgentMessage` and processed in sequence after the task stops.
+## Resume task execution
 
-`AgentContextSnapshot` compacts old conversation messages while pinning the full current JD, source URL, latest base and job resume structures, verified facts and material provenance. Hidden chain-of-thought is never placed in snapshots.
+Resume optimization tasks are also started by the Electron Pi runtime. A task
+is atomically persisted as `running` before Pi begins, so the legacy Python
+queue worker cannot claim it. High-level domain tools are refreshed after every
+turn. Pi submits semantic analysis and resume patches as typed tool arguments;
+Python does not start a nested model call inside those tools.
 
-The run event endpoint supports `after_sequence` and `follow=true`. The desktop client renders only persisted `AgentRunStep` model/tool/task events and reconnects by sequence; it does not synthesize pipeline progress.
+The state machine is a background policy/checkpoint service rather than the
+model-visible workflow. Pi works with four business outcomes:
+`prepare_job_review`, `prepare_resume_review`, `apply_and_verify_resume` and
+`finalize_resume_version`. It cannot skip fact confirmation, proposal review,
+publish approval, validation or version gates. Messages sent while a Pi task is
+active use Pi steering instead of a second chat runtime.
 
-## Skills and MCP
+## Context and recovery
 
-The Skill loader scans project `skills/`, `~/.fetchcv/skills/` and `FETCHCV_SKILL_ROOTS`, reads complete `SKILL.md` files up to 128 KB, blocks symlink/path escapes and preserves enable state across reloads. Skill text is untrusted instruction context and cannot grant permissions.
+Recent cross-turn history is hydrated into Pi as native user/assistant
+messages; older history is compacted in `AgentContextSnapshot`. JD, resume,
+facts and materials are read on demand through `inspect_application_workspace`
+instead of being copied into every task prompt. Within a single Pi run,
+unusually large earlier tool results are trimmed head-and-tail before the next
+provider request. Newest tool evidence is retained first, older reasoning blocks
+are removed, and full results remain in local traces.
 
-MCP supports explicit stdio configurations only. Commands and working directories must be absolute, and child processes receive a minimal environment plus only explicitly named variables. A server must be approved and probed before it can be enabled. Read-only tools require `readOnlyHint=true` and a whitelist. Write tools must additionally declare non-destructive closed-world annotations, a FetchCV resume/portfolio target argument, global tool approval and per-run approval; local versions receive before/after snapshots and a rollback reference.
+Tasks and messages are persisted before execution. Pause/cancel flags are
+polled while Pi is active and abort the provider plus active tool signal.
+Approvals survive a blocked tool call and can replay the exact idempotent action
+after user confirmation.
 
-Provider requests register cancellable transports for the full Agent run. Pause or cancel closes an in-flight compatible-provider HTTP client or interrupts `ClaudeSDKClient`, and the resulting transport exception is normalized to task pause/cancel instead of model failure.
+## Provider support
 
-The desktop also owns an isolated persistent browser partition behind a loopback bearer-token bridge. It can open and read client-rendered HTTPS pages. Visible login or CAPTCHA controls pause the task for the user; FetchCV does not bypass challenges or return cookies/credentials to the model. Arbitrary Shell remains unavailable; the workspace command tool accepts only fixed hash, JSON validation and text-count operations.
+The current desktop provider store supports OpenAI-compatible and
+Anthropic-compatible endpoints. Pi receives a normalized model descriptor and
+uses the corresponding lazy provider adapter. Provider modules are warmed only
+after the desktop window and local API are ready so they do not delay the first
+visible window.
 
-## Controlled web boundary
-
-The Agent does not receive SDK-native WebFetch or arbitrary HTTP access. `WebClient` allows public HTTPS on ports 80/443 only, resolves and rejects non-public addresses, revalidates redirects, disables environment proxies, limits content types and caps responses at 2 MB. Search uses configurable HTTPS endpoints with Bing/DuckDuckGo fallback.
-
-Recruiting-page import prefers Schema.org `JobPosting` JSON-LD and records the final URL and SHA-256 in a `job_posting_page` material. Existing JD text cannot be overwritten without a persisted `replace_job_description` approval. When static HTTP cannot read a page, the Agent may use the Electron-controlled browser and pause for user login/CAPTCHA.
+The Python package no longer depends on `claude-agent-sdk`, and the packaged
+sidecar no longer bundles the Claude CLI. Legacy Python compatible-provider
+classes remain temporarily for browser API fallback and isolated extraction
+tests; they are not reachable from the desktop Pi conversation or task routes.
+See `docs/pi_native_architecture.md`.

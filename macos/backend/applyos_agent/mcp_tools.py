@@ -8,9 +8,6 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
-from mcp.client.session import ClientSession
-from mcp.client.stdio import StdioServerParameters, stdio_client
-from mcp.client.streamable_http import streamablehttp_client
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -48,13 +45,15 @@ class McpManager:
     @staticmethod
     def validate(config: McpServerConfig) -> None:
         if config.transport == "streamable_http":
-            from urllib.parse import urlsplit
+            from urllib.parse import parse_qs, urlsplit
             parsed = urlsplit(config.command.strip())
             local_http = parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost", "::1"}
             if parsed.scheme != "https" and not local_http:
                 raise HarnessError("mcp_url_invalid", "流式 HTTP MCP 地址必须使用 HTTPS，或仅使用本机回环 HTTP")
             if not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
                 raise HarnessError("mcp_url_invalid", "流式 HTTP MCP 地址无效")
+            if any(re.search(r"password|passwd|secret|token|api[_-]?key|apikey|authorization|cookie", key, re.IGNORECASE) for key in parse_qs(parsed.query)):
+                raise HarnessError("mcp_url_secret_denied", "MCP URL 不能在查询参数中携带密钥；请使用受控环境变量或安全认证配置")
             return
         if config.transport != "stdio":
             raise HarnessError("mcp_transport_invalid", "MCP Server 类型不受支持")
@@ -73,7 +72,15 @@ class McpManager:
             raise HarnessError("mcp_approval_required", "必须先明确批准 MCP Server 才能启动")
         self.validate(config)
         try:
+            previous = config.discovered_tools or []
             discovered = asyncio.run(self._list_tools(config))
+            if previous and json.dumps(previous, ensure_ascii=False, sort_keys=True) != json.dumps(discovered, ensure_ascii=False, sort_keys=True):
+                # Trust is bound to the exact discovered capability surface.
+                # A server update may turn a previously harmless tool into a
+                # different operation while retaining the same name.
+                config.allowed_tools = []
+                config.tool_policies = {}
+                config.enabled = False
             config.discovered_tools = discovered
             config.status = "ready"
             config.last_error = None
@@ -90,6 +97,10 @@ class McpManager:
             raise HarnessError("mcp_probe_failed", "MCP Server 连接或工具发现失败", retryable=True, details={"error_type": type(exc).__name__}) from exc
 
     async def _list_tools(self, config: McpServerConfig) -> list[dict[str, Any]]:
+        from mcp.client.session import ClientSession
+        from mcp.client.stdio import stdio_client
+        from mcp.client.streamable_http import streamablehttp_client
+
         client_transport = stdio_client(self._parameters(config)) if config.transport == "stdio" else streamablehttp_client(config.command)
         async with client_transport as transport:
             reader, writer = transport[0], transport[1]
@@ -121,6 +132,10 @@ class McpManager:
         return result
 
     async def _call_tool(self, config: McpServerConfig, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        from mcp.client.session import ClientSession
+        from mcp.client.stdio import stdio_client
+        from mcp.client.streamable_http import streamablehttp_client
+
         client_transport = stdio_client(self._parameters(config)) if config.transport == "stdio" else streamablehttp_client(config.command)
         async with client_transport as transport:
             reader, writer = transport[0], transport[1]
@@ -133,7 +148,9 @@ class McpManager:
                 return {"content": encoded[:MAX_MCP_OUTPUT_CHARS], "truncated": len(encoded) > MAX_MCP_OUTPUT_CHARS, "is_error": bool(response.isError)}
 
     @staticmethod
-    def _parameters(config: McpServerConfig) -> StdioServerParameters:
+    def _parameters(config: McpServerConfig):
+        from mcp.client.stdio import StdioServerParameters
+
         # Never inherit the sidecar environment implicitly: it contains model
         # credentials and browser/control tokens. Users must name each value a
         # server is allowed to receive.

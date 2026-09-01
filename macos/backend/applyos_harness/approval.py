@@ -78,7 +78,14 @@ class ApprovalService:
         approval.status = ApprovalStatus.APPROVED
         approval.approved_by = approved_by
         approval.approved_at = datetime.now(timezone.utc)
-        approval.decision_payload = {"items": decisions, "high_risk_individually_confirmed": high_risk}
+        draft_revision = int(((approval.decision_payload or {}).get("draft") or {}).get("revision") or 0)
+        approval.decision_payload = {
+            "items": decisions,
+            "revision": draft_revision + 1,
+            "previous_draft_revision": draft_revision,
+            "event_type": "proposal_review_approved",
+            "high_risk_individually_confirmed": high_risk,
+        }
         self.session.flush()
         return approval
 

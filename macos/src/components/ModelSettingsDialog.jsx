@@ -6,6 +6,8 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../lib/api";
+import { applyAppearance, DEFAULT_APPEARANCE } from "../lib/appearance";
+import { useModalFocusTrap } from "../lib/modal-focus";
 
 const empty = {
   id: "", providerName: "", protocol: "openai", baseUrl: "", model: "", apiKey: "", hasApiKey: false,
@@ -29,14 +31,6 @@ const accentOptions = [
   { id: "amber", label: "琥珀", color: "#b8884a" },
 ];
 
-function applyAccent(accent) {
-  const value = accentOptions.find((item) => item.id === accent) || accentOptions[0];
-  const root = document.documentElement;
-  root.style.setProperty("--coral", value.color);
-  root.style.setProperty("--coral-dark", value.color);
-  root.style.setProperty("--coral-soft", `${value.color}18`);
-}
-
 const settingsSections = [
   { id: "general", label: "常规", icon: Settings2, group: "个人" },
   { id: "models", label: "模型 API", icon: SlidersHorizontal, group: "集成" },
@@ -45,13 +39,20 @@ const settingsSections = [
   { id: "permissions", label: "权限与浏览器", icon: ShieldCheck, group: "安全" },
 ];
 
+function publishAppearance(value) {
+  const appearance = applyAppearance(value);
+  window.dispatchEvent(new CustomEvent("fetchcv:appearance", { detail: appearance }));
+  return appearance;
+}
+
 function healthCopy(profile) {
   if (profile.health === "healthy") return profile.latencyMs ? `${profile.latencyMs} ms` : "已验证";
   if (profile.health === "error") return "需检查";
   return "未验证";
 }
 
-function McpServerRow({ server, busy, onConnect, onDisable, onApproveWrite, onRevokeWrite }) {
+function McpServerRow({ server, busy, onConnect, onDisable, onToggleRead, onApproveWrite, onRevokeWrite }) {
+  const readTools = (server.discovered_tools || []).filter((tool) => tool.read_only);
   const writeTools = (server.discovered_tools || []).filter((tool) => !tool.read_only);
   const [drafts, setDrafts] = useState({});
   const draftFor = (tool) => {
@@ -62,6 +63,10 @@ function McpServerRow({ server, busy, onConnect, onDisable, onApproveWrite, onRe
   const updateDraft = (tool, patch) => setDrafts((current) => ({ ...current, [tool.name]: { ...draftFor(tool), ...patch } }));
   return <div className="mcp-server-row">
     <div className="mcp-server-head"><span><strong>{server.name}</strong><small>{server.status} · {(server.allowed_tools || []).length} 只读 · {Object.keys(server.tool_policies || {}).length} 写入</small></span>{server.enabled ? <button type="button" onClick={() => onDisable(server)}>停用</button> : <button type="button" disabled={busy} onClick={() => onConnect(server)}>批准并连接</button>}</div>
+    {!!readTools.length && <div className="mcp-read-tools"><small>Server 声明为只读；仍需逐项授权</small>{readTools.map((tool) => {
+      const allowed = (server.allowed_tools || []).includes(tool.name);
+      return <button type="button" key={tool.name} aria-pressed={allowed} disabled={busy || !server.enabled} onClick={() => onToggleRead(server, tool, !allowed)}><span><strong>{tool.name}</strong><small>{tool.description || "未提供能力说明"}</small></span><i /></button>;
+    })}</div>}
     {!!writeTools.length && <div className="mcp-write-tools">{writeTools.map((tool) => {
       const policy = server.tool_policies?.[tool.name];
       const draft = draftFor(tool);
@@ -85,10 +90,12 @@ export function ModelSettingsDialog({ open, user, runtime, stats = {}, onClose, 
   const [mcpServers, setMcpServers] = useState([]);
   const [mcpForm, setMcpForm] = useState(emptyMcpForm);
   const [permissionSettings, setPermissionSettings] = useState({
-    web_access: "allow", workspace_read: "allow", workspace_write: "ask", file_delete: "ask", browser_bridge: "deny",
+    web_access: "allow", workspace_read: "allow", workspace_write: "ask", file_delete: "ask", browser_bridge: "allow",
   });
-  const [generalSettings, setGeneralSettings] = useState({ accent: "coral", density: "comfortable" });
+  const [generalSettings, setGeneralSettings] = useState(DEFAULT_APPEARANCE);
   const statusTimer = useRef(null);
+  const dialog = useRef(null);
+  useModalFocusTrap(dialog, open);
 
   const load = async () => {
     const store = await window.appRuntime?.listModelProviders?.();
@@ -108,7 +115,7 @@ export function ModelSettingsDialog({ open, user, runtime, stats = {}, onClose, 
     setStatus(null); setShowKey(false); setModelQuery(""); setSettingsQuery(""); setActiveSection("general");
     load().catch((error) => setStatus({ type: "error", message: error.message }));
     Promise.all([api.skills(), api.mcpServers(), api.permissionSettings(), api.generalSettings()]).then(([nextSkills, nextServers, nextPermissions, nextGeneral]) => {
-      setSkills(nextSkills); setMcpServers(nextServers); setPermissionSettings(nextPermissions); setGeneralSettings(nextGeneral); applyAccent(nextGeneral.accent);
+      setSkills(nextSkills); setMcpServers(nextServers); setPermissionSettings(nextPermissions); setGeneralSettings(nextGeneral); publishAppearance(nextGeneral);
     }).catch((error) => setStatus({ type: "error", message: error.message }));
     const escape = (event) => { if (event.key === "Escape" && !busy && !fetchingModels) onClose(); };
     window.addEventListener("keydown", escape);
@@ -249,10 +256,21 @@ export function ModelSettingsDialog({ open, user, runtime, stats = {}, onClose, 
     try {
       if (!server.approved) await api.approveMcpServer(server.id);
       const probed = await api.probeMcpServer(server.id);
-      const allowed = (probed.discovered_tools || []).filter((tool) => tool.read_only).map((tool) => tool.name);
+      const declaredReadTools = new Set((probed.discovered_tools || []).filter((tool) => tool.read_only).map((tool) => tool.name));
+      const allowed = (server.allowed_tools || []).filter((name) => declaredReadTools.has(name));
       const enabled = await api.updateMcpServer(server.id, { allowed_tools: allowed, enabled: true });
       setMcpServers((items) => items.map((item) => item.id === enabled.id ? enabled : item));
-      setStatus({ type: "success", message: `${server.name} 已启用 ${allowed.length} 个只读工具。` });
+      setStatus({ type: "success", message: `${server.name} 已连接；请逐项启用你信任的只读工具。` });
+    } catch (error) { setStatus({ type: "error", message: error.message }); } finally { setBusy(false); }
+  };
+  const toggleMcpRead = async (server, tool, enabled) => {
+    setBusy(true);
+    try {
+      const allowed = new Set(server.allowed_tools || []);
+      if (enabled) allowed.add(tool.name); else allowed.delete(tool.name);
+      const updated = await api.updateMcpServer(server.id, { allowed_tools: [...allowed], enabled: true });
+      setMcpServers((items) => items.map((item) => item.id === updated.id ? updated : item));
+      setStatus({ type: "success", message: `${tool.name} 已${enabled ? "授权" : "停用"}；Server 的只读声明不等同于 FetchCV 信任。` });
     } catch (error) { setStatus({ type: "error", message: error.message }); } finally { setBusy(false); }
   };
   const disableMcp = async (server) => {
@@ -291,10 +309,10 @@ export function ModelSettingsDialog({ open, user, runtime, stats = {}, onClose, 
   };
   const updateGeneral = async (patch) => {
     const next = { ...generalSettings, ...patch };
-    setGeneralSettings(next); applyAccent(next.accent);
+    setGeneralSettings(next); publishAppearance(next);
     try {
       const saved = await api.updateGeneralSettings(patch);
-      setGeneralSettings(saved); applyAccent(saved.accent);
+      setGeneralSettings(saved); publishAppearance(saved);
     } catch (error) {
       setStatus({ type: "error", message: error.message });
     }
@@ -311,7 +329,7 @@ export function ModelSettingsDialog({ open, user, runtime, stats = {}, onClose, 
   const validMcp = validMcpName && validMcpCommand;
 
   return <AnimatePresence>{open && <motion.div className="model-settings-backdrop" onMouseDown={(event) => event.target === event.currentTarget && !busy && !fetchingModels && onClose()} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-    <motion.section role="dialog" aria-modal="true" aria-labelledby="model-settings-title" className="model-settings-dialog settings-window" initial={{ opacity: 0, y: 8, scale: .995 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 6, scale: .995 }} transition={{ duration: .16 }}>
+    <motion.section ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="model-settings-title" className="model-settings-dialog settings-window" initial={{ opacity: 0, y: 8, scale: .995 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 6, scale: .995 }} transition={{ duration: .16 }}>
       <aside className="settings-sidebar">
         <button type="button" className="settings-back" onClick={onClose}><ArrowLeft size={16} />返回应用</button>
         <label className="settings-search"><Search size={14} /><input aria-label="搜索设置" value={settingsQuery} onChange={(event) => setSettingsQuery(event.target.value)} placeholder="搜索设置" /></label>
@@ -329,9 +347,9 @@ export function ModelSettingsDialog({ open, user, runtime, stats = {}, onClose, 
         {activeSection === "general" && <section className="settings-pane" aria-labelledby="settings-general-title">
           <header><p>个人</p><h2 id="settings-general-title">常规</h2><span>调整 FetchCV 的外观和工作区偏好。</span></header>
           <div className="settings-profile-row"><span>{(user?.name || "本").trim().slice(0, 1)}</span><div><strong>{user?.name || "本地用户"}</strong><small>{user?.title || "当前求职资料库"}</small></div><UserRound size={18} /></div>
-          <div className="settings-group"><h3>外观</h3><div className="settings-detail-row settings-accent-row"><span><strong>主题色</strong><small>用于按钮、状态和当前任务标记</small></span><div className="accent-swatches">{accentOptions.map((item) => <button type="button" key={item.id} className={generalSettings.accent === item.id ? "active" : ""} aria-label={item.label} title={item.label} onClick={() => updateGeneral({ accent: item.id })}><i style={{ background: item.color }} /></button>)}</div></div><div className="settings-detail-row"><span><strong>界面密度</strong><small>调整岗位列表和设置页的留白</small></span><select aria-label="界面密度" value={generalSettings.density} onChange={(event) => updateGeneral({ density: event.target.value })}><option value="comfortable">舒适</option><option value="compact">紧凑</option></select></div></div>
+          <div className="settings-group"><h3>外观</h3><div className="settings-detail-row"><span><strong>明暗模式</strong><small>跟随系统，或固定使用浅色 / 深色界面</small></span><select aria-label="明暗模式" value={generalSettings.theme || "system"} onChange={(event) => updateGeneral({ theme: event.target.value })}><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></select></div><div className="settings-detail-row settings-accent-row"><span><strong>主题色</strong><small>用于按钮、状态和当前任务标记</small></span><div className="accent-swatches">{accentOptions.map((item) => <button type="button" key={item.id} className={generalSettings.accent === item.id ? "active" : ""} aria-label={item.label} title={item.label} onClick={() => updateGeneral({ accent: item.id })}><i style={{ background: item.color }} /></button>)}</div></div><div className="settings-detail-row"><span><strong>界面密度</strong><small>调整岗位列表和设置页的留白</small></span><select aria-label="界面密度" value={generalSettings.density} onChange={(event) => updateGeneral({ density: event.target.value })}><option value="comfortable">舒适</option><option value="compact">紧凑</option></select></div></div>
           <div className="settings-group settings-workspace-overview"><h3>工作区</h3><div className="settings-overview-grid"><div><strong>{stats.jobs ?? 0}</strong><small>岗位项目</small></div><div><strong>{stats.resumes ?? user?.resume_count ?? 0}</strong><small>简历版本</small></div><div><strong>{stats.materials ?? user?.material_count ?? 0}</strong><small>资料</small></div></div></div>
-          <footer className="settings-version">FetchCV Desktop · 0.2.24</footer>
+          <footer className="settings-version">FetchCV Desktop · 0.4.18</footer>
         </section>}
 
         {activeSection === "models" && <section className="settings-pane provider-manager" aria-labelledby="settings-model-title">
@@ -363,7 +381,7 @@ export function ModelSettingsDialog({ open, user, runtime, stats = {}, onClose, 
         {activeSection === "mcp" && <section className="settings-pane" aria-labelledby="settings-mcp-title">
           <header><p>集成</p><h2 id="settings-mcp-title">MCP Servers</h2><span>连接外部工具。只读能力可单独启用，写入能力仍需逐次批准。</span></header>
           <div className="settings-section-toolbar"><span><strong>{enabledMcp} 个已连接</strong><small>{mcpServers.length} 个已保存的服务器</small></span></div>
-          <div className="mcp-list settings-mcp-list">{mcpServers.map((server) => <McpServerRow key={server.id} server={server} busy={busy} onConnect={approveAndEnableMcp} onDisable={disableMcp} onApproveWrite={approveMcpWrite} onRevokeWrite={revokeMcpWrite} />)}{!mcpServers.length && <p className="settings-empty-state">还没有 MCP Server。添加后会先验证配置，再请求连接批准。</p>}</div>
+          <div className="mcp-list settings-mcp-list">{mcpServers.map((server) => <McpServerRow key={server.id} server={server} busy={busy} onConnect={approveAndEnableMcp} onDisable={disableMcp} onToggleRead={toggleMcpRead} onApproveWrite={approveMcpWrite} onRevokeWrite={revokeMcpWrite} />)}{!mcpServers.length && <p className="settings-empty-state">还没有 MCP Server。添加后会先验证配置，再请求连接批准。</p>}</div>
           <form className="mcp-config-form" onSubmit={(event) => { event.preventDefault(); addMcp(); }}>
             <div className="mcp-form-title"><span><strong>连接自定义 MCP</strong><small>添加后先验证配置，再由你批准启动与工具权限。</small></span></div>
             <section className="mcp-form-section mcp-identity-section">
@@ -390,7 +408,7 @@ export function ModelSettingsDialog({ open, user, runtime, stats = {}, onClose, 
             <div><FolderLock size={17} /><span><strong>本地资料读取</strong><small>只读取 FetchCV 隔离工作区中的简历、作品和岗位资料。</small></span><select aria-label="本地资料读取权限" value={permissionSettings.workspace_read} onChange={(event) => updatePermission({ workspace_read: event.target.value })}><option value="allow">允许</option><option value="ask">每次询问</option><option value="deny">关闭</option></select></div>
             <div><ShieldCheck size={17} /><span><strong>写入与移动文件</strong><small>即使允许，具体文件操作也必须逐次审批；关闭后 Agent 只能读取。</small></span><select aria-label="文件写入权限" value={permissionSettings.workspace_write} onChange={(event) => updatePermission({ workspace_write: event.target.value })}><option value="ask">每次询问</option><option value="deny">始终拒绝</option></select></div>
             <div><Trash2 size={17} /><span><strong>删除文件</strong><small>删除会先创建可恢复备份，并在执行前请求批准。</small></span><select aria-label="文件删除权限" value={permissionSettings.file_delete} onChange={(event) => updatePermission({ file_delete: event.target.value })}><option value="ask">每次询问</option><option value="deny">始终拒绝</option></select></div>
-            <div><Globe2 size={17} /><span><strong>登录浏览器</strong><small>默认关闭。公开招聘网页使用内置读取器，不需要弹出浏览器。</small></span><select aria-label="登录浏览器权限" value={permissionSettings.browser_bridge} onChange={(event) => updatePermission({ browser_bridge: event.target.value })}><option value="allow">允许</option><option value="ask">每次询问</option><option value="deny">关闭</option></select></div>
+            <div><Globe2 size={17} /><span><strong>受控浏览器</strong><small>默认在 Agent 内后台读取网页；涉及登录态或敏感页面时仍受权限控制。</small></span><select aria-label="受控浏览器权限" value={permissionSettings.browser_bridge} onChange={(event) => updatePermission({ browser_bridge: event.target.value })}><option value="allow">允许</option><option value="ask">每次询问</option><option value="deny">关闭</option></select></div>
             {status && <div className="settings-inline-status" role="status">{status.message}</div>}
           </div>
         </section>}

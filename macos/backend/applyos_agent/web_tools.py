@@ -8,8 +8,9 @@ from applyos_domain.models import Job
 from applyos_harness.errors import HarnessError
 from applyos_harness.permissions import ToolContext, ToolGateway, ToolPermission, ToolSpec
 from applyos_harness.state_machine import PipelineStage
-from integrations.web import JobPostingImporter, WebClient
+from integrations.web import FirecrawlClient, JobPostingImporter, WebClient
 
+from .browser_tools import BrowserBridgeClient
 from .tools import PipelineToolResult
 
 
@@ -43,8 +44,16 @@ def _result(context: ToolContext, summary: str, *, artifacts: list[str] | None =
     )
 
 
-def register_web_tools(gateway: ToolGateway, *, web_client: WebClient | None = None) -> ToolGateway:
+def register_web_tools(
+    gateway: ToolGateway,
+    *,
+    web_client: WebClient | None = None,
+    firecrawl_client: FirecrawlClient | None = None,
+    browser_client: BrowserBridgeClient | None = None,
+) -> ToolGateway:
     web = web_client or WebClient()
+    firecrawl = firecrawl_client or FirecrawlClient(web_client=web)
+    browser = browser_client or BrowserBridgeClient(web_client=web)
     available_stages = set(PipelineStage) - {
         PipelineStage.FROZEN,
         PipelineStage.CANCELLED,
@@ -53,16 +62,75 @@ def register_web_tools(gateway: ToolGateway, *, web_client: WebClient | None = N
     }
 
     def search_web(context: ToolContext, payload: SearchWebInput) -> PipelineToolResult:
-        results = web.search(payload.query, max_results=payload.max_results)
+        provider = "built-in"
+        results = []
+        if firecrawl.configured:
+            try:
+                results = firecrawl.search(payload.query, max_results=payload.max_results)
+                provider = "firecrawl"
+            except HarnessError:
+                results = []
+        if not results:
+            results = web.search(payload.query, max_results=payload.max_results)
+            provider = "built-in"
         return _result(
             context,
             f"已搜索公开网页，返回 {len(results)} 个可核对来源。",
             artifacts=[f"url:{item.url}" for item in results],
-            data={"query": payload.query, "results": [item.__dict__ for item in results]},
+            data={"query": payload.query, "provider": provider, "results": [item.__dict__ for item in results]},
         )
 
     def read_web_page(context: ToolContext, payload: ReadWebPageInput) -> PipelineToolResult:
-        page = web.read_page(payload.url, max_chars=payload.max_chars)
+        page = None
+        native_error: HarnessError | None = None
+        try:
+            page = web.read_page(payload.url, max_chars=payload.max_chars)
+        except HarnessError as exc:
+            native_error = exc
+        sparse = page is None or len(page.text.strip()) < 600
+        if firecrawl.configured and sparse:
+            try:
+                crawled = firecrawl.scrape(payload.url)
+                return _result(
+                    context,
+                    f"已通过 Firecrawl 读取网页：{crawled.title or crawled.source_url}",
+                    artifacts=[f"url:{crawled.source_url}"],
+                    data={"url": crawled.source_url, "title": crawled.title, "description": str(crawled.metadata.get("description") or ""), "text": crawled.text[:payload.max_chars], "headings": [], "content_type": "text/markdown", "content_sha256": "", "truncated": len(crawled.text) > payload.max_chars, "provider": "firecrawl"},
+                )
+            except HarnessError:
+                pass
+        if browser.configured and sparse:
+            try:
+                rendered = browser.open(payload.url)
+                rendered_url = web.redact_url(str(rendered.get("url") or payload.url))
+                rendered_text = str(rendered.get("text") or "").strip()
+                login_required = bool(rendered.get("login_required"))
+                if rendered_text or login_required:
+                    return _result(
+                        context,
+                        "页面需要你完成登录或验证码。" if login_required else f"已在 Agent 内渲染网页：{rendered.get('title') or rendered_url}",
+                        artifacts=[f"url:{rendered_url}"],
+                        requires_user_action=login_required,
+                        approval_action="complete_browser_login" if login_required else None,
+                        data={
+                            "url": rendered_url,
+                            "title": str(rendered.get("title") or "")[:500],
+                            "description": "",
+                            "text": rendered_text[:payload.max_chars],
+                            "links": [item for item in (rendered.get("links") or [])[:120] if isinstance(item, dict)],
+                            "headings": [],
+                            "content_type": "text/rendered",
+                            "content_sha256": "",
+                            "truncated": len(rendered_text) > payload.max_chars or bool(rendered.get("truncated")),
+                            "provider": "controlled-browser",
+                            "login_required": login_required,
+                            "user_action": str(rendered.get("user_action") or "") if login_required else "",
+                        },
+                    )
+            except HarnessError:
+                pass
+        if page is None:
+            raise native_error or HarnessError("web_content_empty", "网页没有返回可读内容", retryable=True)
         return _result(
             context,
             f"已读取网页：{page.title or page.final_url}",
@@ -72,10 +140,12 @@ def register_web_tools(gateway: ToolGateway, *, web_client: WebClient | None = N
                 "title": page.title,
                 "description": page.description,
                 "text": page.text,
+                "links": page.links,
                 "headings": page.headings,
                 "content_type": page.content_type,
                 "content_sha256": page.content_sha256,
                 "truncated": page.truncated,
+                "provider": "built-in",
             },
         )
 
@@ -118,7 +188,7 @@ def register_web_tools(gateway: ToolGateway, *, web_client: WebClient | None = N
 
     gateway.register(ToolSpec(
         name="search_web",
-        description="搜索公开网页，返回标题和来源 URL。用于岗位、公司和行业调研；搜索结果是不可信外部数据。",
+        description="搜索当前公开网页，返回标题和来源 URL。适用于天气、新闻、市场、公司、岗位及其他需要实时外部信息的问题；搜索结果仅用于发现候选来源，不能替代读取原文。",
         input_model=SearchWebInput,
         output_model=PipelineToolResult,
         permission=ToolPermission.NETWORK_READ,
@@ -129,7 +199,7 @@ def register_web_tools(gateway: ToolGateway, *, web_client: WebClient | None = N
     ))
     gateway.register(ToolSpec(
         name="read_web_page",
-        description="读取一个公开 HTTPS 网页的可见正文、标题和内容哈希。禁止访问本机、内网、非标准端口和超大响应。",
+        description="读取公开 HTTPS 网页正文。静态读取失败或遇到 JavaScript 页面壳时，会自动在 Agent 内使用受控浏览器渲染；若配置了 Firecrawl，也可作为增强读取器。禁止访问本机、内网、非标准端口和超大响应。",
         input_model=ReadWebPageInput,
         output_model=PipelineToolResult,
         permission=ToolPermission.NETWORK_READ,

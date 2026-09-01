@@ -39,7 +39,8 @@ class SkillLoader:
 
     def roots(self) -> list[Path]:
         configured = [Path(item).expanduser() for item in os.getenv("FETCHCV_SKILL_ROOTS", "").split(os.pathsep) if item.strip()]
-        candidates = [self.project_root / "skills", Path.home() / ".fetchcv" / "skills", *configured]
+        builtin = Path(__file__).resolve().parent / "builtin_skills"
+        candidates = [builtin, self.project_root / "skills", Path.home() / ".fetchcv" / "skills", *configured]
         roots: list[Path] = []
         for candidate in candidates:
             resolved = candidate.resolve()
@@ -68,13 +69,28 @@ class SkillLoader:
             description = (metadata.get("description") or self._description(body))[:2000]
             item = existing.get(path)
             if item is None:
-                item = AgentSkill(name=metadata["name"], description=description, path=path, content_hash=digest, metadata_json={"available": True})
+                item = AgentSkill(name=metadata["name"], description=description, path=path, content_hash=digest, enabled=False, metadata_json={"available": True, "trust_pending": True})
                 self.session.add(item)
             else:
+                previous_hash = item.content_hash
+                trust = item.metadata_json or {}
+                trusted_hash = trust.get("trusted_hash")
+                if item.enabled and trusted_hash and trusted_hash != digest:
+                    item.enabled = False
+                    trust = {
+                        **trust,
+                        "trust_pending": True,
+                        "previous_trusted_hash": trusted_hash,
+                        "change_reason": "Skill 内容已变化，需要重新批准",
+                    }
+                elif item.enabled and not trusted_hash:
+                    # One-time compatibility for skills approved before hash-bound
+                    # trust was introduced. Every later change revokes this trust.
+                    trust = {**trust, "trusted_hash": previous_hash or digest, "trust_pending": False}
                 item.name = metadata["name"]
                 item.description = description
                 item.content_hash = digest
-                item.metadata_json = {**(item.metadata_json or {}), "available": True}
+                item.metadata_json = {**trust, "available": True}
         for path, item in existing.items():
             if path not in discovered:
                 item.enabled = False
@@ -91,6 +107,18 @@ class SkillLoader:
             raise HarnessError("skill_too_large", "Skill 文件超过 128 KB 限制")
         content = path.read_text(encoding="utf-8")
         _, body = self._frontmatter(content)
+        digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
+        trusted_hash = (skill.metadata_json or {}).get("trusted_hash")
+        if skill.enabled and (trusted_hash != digest or skill.content_hash != digest):
+            skill.enabled = False
+            skill.content_hash = digest
+            skill.metadata_json = {
+                **(skill.metadata_json or {}),
+                "trust_pending": True,
+                "change_reason": "Skill 内容已变化，需要重新批准",
+            }
+            self.session.flush()
+            raise HarnessError("skill_trust_changed", "Skill 内容在批准后发生变化，已自动停用；请检查后重新批准")
         return body
 
     @staticmethod
@@ -116,6 +144,20 @@ class SkillLoader:
             if value:
                 return value
         return ""
+
+
+def enabled_skill_catalog(session: Session, *, limit: int = 20) -> str:
+    skills = list(
+        session.scalars(
+            select(AgentSkill)
+            .where(AgentSkill.enabled.is_(True))
+            .order_by(AgentSkill.name)
+            .limit(limit)
+        ).all()
+    )
+    if not skills:
+        return ""
+    return "\n".join(f"- {item.name}: {item.description[:240]}" for item in skills)
 
 
 def register_skill_tools(gateway: ToolGateway, loader: SkillLoader) -> ToolGateway:

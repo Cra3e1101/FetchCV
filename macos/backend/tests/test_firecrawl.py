@@ -60,3 +60,24 @@ def test_firecrawl_adapter_can_call_a_local_no_auth_server():
         web_client=WebClient(resolver=resolver),
     )
     assert "岗位职责" in client.scrape("https://jobs.example.com/42").text
+
+
+def test_firecrawl_adapter_searches_and_filters_unsafe_results():
+    def handler(request):
+        assert request.url.path == "/v2/search"
+        return httpx.Response(200, json={
+            "success": True,
+            "data": {"web": [
+                {"title": "公开岗位", "url": "https://jobs.example.com/42"},
+                {"title": "本机页面", "url": "http://127.0.0.1/private"},
+            ]},
+        }, request=request)
+
+    client = FirecrawlClient(
+        base_url="https://firecrawl.example.com/v2/scrape",
+        api_key="test-key",
+        transport=httpx.MockTransport(handler),
+        web_client=WebClient(resolver=resolver),
+    )
+    results = client.search("数据分析实习", max_results=5)
+    assert [(item.title, item.url) for item in results] == [("公开岗位", "https://jobs.example.com/42")]

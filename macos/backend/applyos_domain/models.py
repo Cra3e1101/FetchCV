@@ -144,6 +144,61 @@ class JobProfile(TimestampMixin, Base):
     job: Mapped[Job] = relationship(back_populates="profile")
 
 
+class InterviewSource(TimestampMixin, Base):
+    """A captured public interview-experience post with traceable extraction."""
+
+    __tablename__ = "interview_sources"
+    __table_args__ = (
+        UniqueConstraint("candidate_id", "url_hash", name="uq_interview_source_candidate_url"),
+        Index("ix_interview_source_candidate_company", "candidate_id", "company"),
+        Index("ix_interview_source_job", "job_id", "updated_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: new_id("isrc"))
+    candidate_id: Mapped[str] = mapped_column(ForeignKey("candidates.id", ondelete="CASCADE"), nullable=False)
+    job_id: Mapped[str | None] = mapped_column(ForeignKey("jobs.id", ondelete="SET NULL"))
+    platform: Mapped[str] = mapped_column(String(80), default="xiaohongshu", nullable=False)
+    company: Mapped[str] = mapped_column(String(240), nullable=False)
+    business_unit: Mapped[str | None] = mapped_column(String(240))
+    role: Mapped[str] = mapped_column(String(240), nullable=False)
+    title: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    source_url: Mapped[str] = mapped_column(Text, nullable=False)
+    url_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    author: Mapped[str | None] = mapped_column(String(240))
+    published_at: Mapped[str | None] = mapped_column(String(80))
+    raw_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    summary: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    extracted_questions: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, nullable=False)
+    tags: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    status: Mapped[str] = mapped_column(String(40), default="captured", nullable=False)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class InterviewBrief(TimestampMixin, Base):
+    """A job-level synthesis whose claims point back to captured sources."""
+
+    __tablename__ = "interview_briefs"
+    __table_args__ = (
+        Index("ix_interview_brief_candidate_company", "candidate_id", "company"),
+        Index("ix_interview_brief_job", "job_id", "updated_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: new_id("ibrief"))
+    candidate_id: Mapped[str] = mapped_column(ForeignKey("candidates.id", ondelete="CASCADE"), nullable=False)
+    job_id: Mapped[str | None] = mapped_column(ForeignKey("jobs.id", ondelete="SET NULL"))
+    run_id: Mapped[str | None] = mapped_column(ForeignKey("agent_runs.id", ondelete="SET NULL"))
+    company: Mapped[str] = mapped_column(String(240), nullable=False)
+    business_unit: Mapped[str | None] = mapped_column(String(240))
+    role: Mapped[str] = mapped_column(String(240), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    common_questions: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, nullable=False)
+    recommendations: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, nullable=False)
+    source_ids: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    query_terms: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+
 class ResumeVersion(TimestampMixin, Base):
     __tablename__ = "resume_versions"
     __table_args__ = (CheckConstraint("status != 'frozen' OR frozen_at IS NOT NULL", name="ck_resume_frozen_has_time"), Index("ix_resume_candidate_job", "candidate_id", "job_id"))
@@ -317,7 +372,7 @@ class AgentSkill(TimestampMixin, Base):
     description: Mapped[str] = mapped_column(Text, default="", nullable=False)
     path: Mapped[str] = mapped_column(Text, nullable=False)
     content_hash: Mapped[str] = mapped_column(String(128), nullable=False)
-    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
 
 
@@ -382,6 +437,33 @@ class Approval(TimestampMixin, Base):
     decision_payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     approved_by: Mapped[str | None] = mapped_column(String(160))
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ToolInvocation(TimestampMixin, Base):
+    """Durable outbox record for one normalized side-effecting operation.
+
+    A prepared/running row is committed before the handler is entered. If the
+    process disappears after the external effect but before its receipt is
+    saved, recovery stops with an unknown outcome instead of replaying it.
+    """
+
+    __tablename__ = "tool_invocations"
+    __table_args__ = (
+        UniqueConstraint("operation_id", name="uq_tool_invocation_operation"),
+        Index("ix_tool_invocation_run_status", "run_id", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: new_id("toolinv"))
+    operation_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    run_id: Mapped[str] = mapped_column(ForeignKey("agent_runs.id", ondelete="CASCADE"), nullable=False)
+    tool_name: Mapped[str] = mapped_column(String(180), nullable=False)
+    stage: Mapped[str] = mapped_column(String(160), nullable=False)
+    arguments_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    arguments_summary: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    provider_call_id: Mapped[str | None] = mapped_column(String(240))
+    status: Mapped[str] = mapped_column(String(40), default="prepared", nullable=False)
+    result_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    error_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
 
 
 class VersionSnapshot(Base):

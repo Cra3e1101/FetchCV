@@ -5,6 +5,7 @@ from hashlib import sha256
 from html.parser import HTMLParser
 import ipaddress
 import os
+import re
 import socket
 from typing import Callable
 from urllib.parse import parse_qs, parse_qsl, quote_plus, urlencode, urljoin, urlsplit, urlunsplit
@@ -36,6 +37,7 @@ class WebPage:
     text: str
     headings: list[str] = field(default_factory=list)
     links: list[dict[str, str]] = field(default_factory=list)
+    images: list[str] = field(default_factory=list)
     json_ld: list[str] = field(default_factory=list)
     content_sha256: str = ""
     truncated: bool = False
@@ -57,6 +59,7 @@ class _PageParser(HTMLParser):
         self.text_parts: list[str] = []
         self.headings: list[str] = []
         self.links: list[dict[str, str]] = []
+        self.images: list[str] = []
         self.json_ld: list[str] = []
         self._skip_depth = 0
         self._capture_title = False
@@ -95,6 +98,10 @@ class _PageParser(HTMLParser):
             key = (values.get("name") or values.get("property") or "").lower()
             if key in {"description", "og:description", "twitter:description"} and values.get("content") and not self.description:
                 self.description = values["content"].strip()
+            if key in {"og:image", "twitter:image"} and values.get("content"):
+                image_url = urljoin(self.base_url, values["content"].strip())
+                if image_url.startswith("https://") and image_url not in self.images:
+                    self.images.append(image_url)
         if tag == "a" and values.get("href"):
             self._capture_link = True
             self._link_parts = []
@@ -205,7 +212,10 @@ class WebClient:
         self.resolver = resolver
         self.allow_http = os.getenv("FETCHCV_WEB_ALLOW_HTTP", "").strip() == "1" if allow_http is None else allow_http
         configured_search = [item.strip() for item in os.getenv("FETCHCV_WEB_SEARCH_ENDPOINT", "").split(",") if item.strip()]
-        self.search_endpoints = configured_search or ["https://www.bing.com/search", "https://html.duckduckgo.com/html/"]
+        self.search_endpoints = configured_search or [
+            "https://www.bing.com/search",
+            "https://html.duckduckgo.com/html/",
+        ]
 
     def validate_url(self, value: str, *, preserve_fragment: bool = False) -> str:
         raw = str(value or "").strip()
@@ -261,7 +271,15 @@ class WebClient:
                 follow_redirects=False,
                 trust_env=False,
                 transport=self.transport,
-                headers={"User-Agent": "FetchCV/0.3 (+local career agent)", "Accept": "text/html,application/xhtml+xml,text/plain,application/json;q=0.8"},
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/124.0.0.0 Safari/537.36 FetchCV/0.4"
+                    ),
+                    "Accept": "text/html,application/xhtml+xml,text/plain,application/json;q=0.8",
+                    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.7",
+                },
             ) as client:
                 for _ in range(4):
                     with client.stream("GET", current) as response:
@@ -269,7 +287,17 @@ class WebClient:
                             location = response.headers.get("location", "").strip()
                             if not location:
                                 raise HarnessError("web_redirect_invalid", "网页返回了没有目标地址的重定向")
-                            current = self.validate_url(urljoin(current, location))
+                            redirected = urljoin(current, location)
+                            previous = urlsplit(current)
+                            redirected_parts = urlsplit(redirected)
+                            if (
+                                previous.scheme == "https"
+                                and redirected_parts.scheme == "http"
+                                and previous.hostname
+                                and redirected_parts.hostname == previous.hostname
+                            ):
+                                redirected = redirected_parts._replace(scheme="https").geturl()
+                            current = self.validate_url(redirected)
                             continue
                         if response.status_code >= 400:
                             raise HarnessError("web_http_error", f"网页返回 HTTP {response.status_code}", retryable=response.status_code >= 500, details={"url": current, "status": response.status_code})
@@ -307,6 +335,7 @@ class WebClient:
             description = _clean_text(parser.description)
             headings = parser.headings[:20]
             links = parser.links[:80]
+            images = parser.images[:20]
             json_ld = parser.json_ld[:20]
         else:
             visible = _clean_text(text)
@@ -314,6 +343,7 @@ class WebClient:
             description = ""
             headings = []
             links = []
+            images = []
             json_ld = []
         limit = max(1000, min(int(max_chars), 50000))
         truncated = len(visible) > limit
@@ -327,6 +357,7 @@ class WebClient:
             text=visible[:limit],
             headings=headings,
             links=links,
+            images=images,
             json_ld=json_ld,
             content_sha256=sha256(raw).hexdigest(),
             truncated=truncated,
@@ -341,7 +372,9 @@ class WebClient:
             try:
                 endpoint = self.validate_url(raw_endpoint)
                 separator = "&" if urlsplit(endpoint).query else "?"
-                search_url = f"{endpoint}{separator}q={quote_plus(normalized)}"
+                endpoint_host = (urlsplit(endpoint).hostname or "").casefold()
+                query_parameter = "query" if endpoint_host == "sogou.com" or endpoint_host.endswith(".sogou.com") else "q"
+                search_url = f"{endpoint}{separator}{query_parameter}={quote_plus(normalized)}"
                 final_url, raw, content_type, _ = self.read(search_url)
                 if content_type not in {"text/html", "application/xhtml+xml"}:
                     continue
@@ -383,7 +416,7 @@ class WebClient:
     def _is_search_host(host: str, search_hosts: set[str]) -> bool:
         if host in search_hosts:
             return True
-        return any(host == suffix or host.endswith(f".{suffix}") for suffix in ("bing.com", "duckduckgo.com", "baidu.com"))
+        return any(host == suffix or host.endswith(f".{suffix}") for suffix in ("bing.com", "duckduckgo.com", "baidu.com", "sogou.com"))
 
     @staticmethod
     def _search_target(url: str) -> str:
@@ -397,7 +430,12 @@ class WebClient:
     @staticmethod
     def redact_url(url: str) -> str:
         parsed = urlsplit(url)
-        filtered = [(key, value) for key, value in parse_qsl(parsed.query, keep_blank_values=True) if key.casefold() not in SENSITIVE_QUERY_KEYS]
+        filtered = []
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True):
+            key_parts = {part for part in re.split(r"[_-]+", key.casefold()) if part}
+            if key.casefold() in SENSITIVE_QUERY_KEYS or key_parts.intersection(SENSITIVE_QUERY_KEYS):
+                continue
+            filtered.append((key, value))
         fragment = WebClient._safe_fragment(parsed.fragment)
         return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(filtered, doseq=True), fragment))
 

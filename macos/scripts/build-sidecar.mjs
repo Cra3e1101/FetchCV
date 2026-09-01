@@ -8,7 +8,30 @@ const backendRoot = path.join(projectRoot, "backend");
 const isWindows = process.platform === "win32";
 const python = process.env.FETCHCV_PYTHON || path.join(backendRoot, ".venv", isWindows ? "Scripts" : "bin", isWindows ? "python.exe" : "python");
 const executableName = isWindows ? "fetchcv-api.exe" : "fetchcv-api";
-const args = ["-m", "PyInstaller", "--noconfirm", "--clean", "--onedir", "--name", "fetchcv-api", "--paths", backendRoot, "--collect-all", "claude_agent_sdk", "--collect-submodules", "mcp.client", "--collect-submodules", "mcp.shared", "--hidden-import", "mcp.types", "--collect-all", "reportlab", "--collect-submodules", "uvicorn", "--distpath", path.join(backendRoot, "dist"), "--workpath", path.join(backendRoot, "build", "pyinstaller"), "--specpath", path.join(backendRoot, "build"), path.join(backendRoot, "sidecar_entry.py")];
+const args = [
+  "-m", "PyInstaller",
+  "--noconfirm", "--clean", "--onedir",
+  "--name", "fetchcv-api",
+  "--paths", backendRoot,
+  "--collect-data", "applyos_agent",
+  "--collect-submodules", "mcp.client",
+  "--collect-submodules", "mcp.shared",
+  "--hidden-import", "mcp.types",
+  "--collect-all", "reportlab",
+  "--collect-submodules", "uvicorn",
+  // FetchCV only uses the signed HTTP client and QR primitives. Excluding the
+  // optional Camoufox browser runtime keeps startup and installer size bounded.
+  "--exclude-module", "camoufox",
+  "--exclude-module", "playwright",
+  // NumPy is only an optional ReportLab acceleration path. FetchCV's
+  // text-first renderer uses ReportLab's pure-Python implementation.
+  "--exclude-module", "numpy",
+  "--exclude-module", "scipy",
+  "--distpath", path.join(backendRoot, "dist"),
+  "--workpath", path.join(backendRoot, "build", "pyinstaller"),
+  "--specpath", path.join(backendRoot, "build"),
+  path.join(backendRoot, "sidecar_entry.py"),
+];
 const env = {
   ...process.env,
   // Keep PyInstaller's binary cache inside the project build directory so

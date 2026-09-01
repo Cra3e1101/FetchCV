@@ -21,7 +21,7 @@ FetchCV is a local-first desktop job-search agent that brings profile management
 ```text
 FetchCV/
 ├─ windows/    Windows 10/11 x64 edition (current version: 0.4.19)
-├─ macos/      macOS edition (current version: 0.2.24)
+├─ macos/      macOS edition (current version: 0.4.19)
 ├─ README.md
 └─ README_en.md
 ```
@@ -97,9 +97,8 @@ Web tools are restricted to public HTTPS endpoints by default and block local/pr
 
 ## Project status
 
-FetchCV is under active development. The Windows and macOS directories currently evolve independently, so their features and version numbers are not identical. Public distribution still requires the appropriate platform code-signing and notarization workflows.
+FetchCV is under active development. Windows and macOS now share the `0.4.19` core feature set while retaining platform-specific runtime and packaging adaptations. Public distribution still requires the appropriate platform code-signing and notarization workflows.
 
 ## License
 
 No open-source license is currently included. All rights are reserved until a license is explicitly added. Contact the repository owner before using, modifying, or distributing the code.
-

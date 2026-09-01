@@ -3,33 +3,36 @@
   "description": "FetchCV local-first resume and job application agent",
   "author": "hesan",
   "private": true,
-  "version": "0.2.24",
+  "version": "0.4.19",
   "type": "module",
-  "main": "electron/main.mjs",
+  "main": "build/electron/main.mjs",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "desktop": "npm run build && electron .",
-    "desktop:package": "npm run build && npm run sidecar:build && electron-builder",
-    "desktop:package:installer": "npm run build && npm run sidecar:build && electron-builder --mac zip --publish never && node scripts/build-mac-pkg.mjs",
-    "desktop:package:signed": "FETCHCV_REQUIRE_SIGNING=1 npm run signing:check && npm run build && npm run sidecar:build && electron-builder --mac dmg zip --publish never",
+    "electron:runtime": "node scripts/build-electron-runtime.mjs",
+    "desktop": "npm run build && npm run electron:runtime && electron .",
+    "desktop:package": "npm run build && npm run electron:runtime && npm run sidecar:build && electron-builder --mac dmg zip --publish never",
+    "desktop:package:installer": "npm run build && npm run electron:runtime && npm run sidecar:build && electron-builder --mac zip --publish never && node scripts/build-mac-pkg.mjs",
+    "desktop:package:signed": "FETCHCV_REQUIRE_SIGNING=1 npm run signing:check && npm run build && npm run electron:runtime && npm run sidecar:build && electron-builder --mac dmg zip --publish never",
     "signing:check": "node scripts/check-macos-signing.mjs",
     "sidecar:build": "node scripts/build-sidecar.mjs",
     "test:sidecar": "node --test tests/sidecar.test.mjs",
-    "test:unit": "npm run backend:test && node --test tests/provider-models.test.mjs tests/chat-scroll.test.mjs tests/processing-disclosure.test.mjs tests/composer-layout.test.mjs tests/interaction-inputs.test.mjs tests/sidebar-grouping.test.mjs tests/window-chrome.test.mjs tests/resume-editor-layout.test.mjs tests/agent-platform-ui.test.mjs tests/job-description-import.test.mjs",
-    "test:electron": "npm run build && node --test tests/chat-scroll.test.mjs && node tests/electron.e2e.mjs",
-    "test:provider": "npm run build && node --test tests/provider-models.test.mjs && node tests/provider.e2e.mjs",
-    "test:provider:packaged": "FETCHCV_PROVIDER_E2E_PACKAGED=1 node tests/provider.e2e.mjs",
-    "test:real-materials": "node scripts/run-python.mjs -m pytest backend/tests/test_agent_real_materials.py backend/tests/test_resume_continuity.py -q && node --test tests/job-description-import.test.mjs",
+    "test:unit": "npm run backend:test && node --test tests/agent-events.test.mjs tests/pi-agent-runtime.test.mjs tests/pi-harness.test.mjs tests/provider-models.test.mjs tests/chat-scroll.test.mjs tests/processing-disclosure.test.mjs tests/model-protocol.test.mjs tests/composer-layout.test.mjs tests/interaction-inputs.test.mjs tests/sidebar-grouping.test.mjs tests/window-chrome.test.mjs tests/resume-editor-layout.test.mjs tests/agent-platform-ui.test.mjs tests/appearance-runtime.test.mjs tests/job-description-import.test.mjs tests/interview-intelligence.test.mjs tests/interview-source-links.test.mjs tests/xiaohongshu-adapter.test.mjs",
+    "test:electron": "npm run build && npm run electron:runtime && node --test tests/chat-scroll.test.mjs && node tests/electron.e2e.mjs",
+    "test:provider": "npm run build && npm run electron:runtime && node --test tests/provider-models.test.mjs && node tests/provider.e2e.mjs",
+    "test:provider:packaged": "node --input-type=module -e \"process.env.FETCHCV_PROVIDER_E2E_PACKAGED='1'; await import('./tests/provider.e2e.mjs')\"",
+    "test:real-materials": "node scripts/run-python.mjs -m pytest backend/tests/test_agent_real_materials.py backend/tests/test_resume_continuity.py -q --basetemp backend/.pytest-real-tmp && node --test tests/job-description-import.test.mjs",
     "test:packaged": "node tests/packaged.e2e.mjs",
     "backend:dev": "node scripts/run-backend.mjs --reload",
-    "backend:test": "node scripts/run-python.mjs -m pytest backend/tests",
+    "backend:test": "node scripts/run-python.mjs -m pytest backend/tests --basetemp backend/.pytest-tmp",
     "backend:migrate": "node scripts/run-python.mjs -m alembic -c backend/alembic.ini upgrade head",
     "check": "eslint .",
     "verify": "npm run check && npm run build && npm run test:unit"
   },
   "dependencies": {
+    "@earendil-works/pi-agent-core": "0.80.10",
+    "@earendil-works/pi-ai": "0.80.10",
     "@fontsource/cormorant-garamond": "^5.2.8",
     "@fontsource/inter": "^5.2.8",
     "@fontsource/jetbrains-mono": "^5.2.8",
@@ -47,7 +50,8 @@
     "react-dom": "^18.3.1",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
-    "tailwind-merge": "^2.6.0"
+    "tailwind-merge": "^2.6.0",
+    "typebox": "1.1.38"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
@@ -55,6 +59,7 @@
     "autoprefixer": "^10.4.21",
     "electron": "^43.1.1",
     "electron-builder": "^26.15.3",
+    "esbuild": "0.25.12",
     "eslint": "^9.39.5",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.1.1",
@@ -70,15 +75,21 @@
     "productName": "FetchCV",
     "electronDist": "node_modules/electron/dist",
     "npmRebuild": false,
+    "compression": "maximum",
+    "electronLanguages": [
+      "en-US",
+      "zh-CN"
+    ],
     "directories": {
       "output": "release"
     },
     "files": [
       "dist/**/*",
-      "electron/**/*",
+      "build/electron/**/*",
       "FetchCV_LOGO.png",
       "FetchCV_LOGO.ico",
-      "package.json"
+      "package.json",
+      "!node_modules/**/*"
     ],
     "extraResources": [
       {
@@ -86,14 +97,6 @@
         "to": "sidecar"
       }
     ],
-    "win": {
-      "icon": "FetchCV_LOGO.ico",
-      "signAndEditExecutable": false,
-      "target": [
-        "portable"
-      ],
-      "artifactName": "FetchCV-${version}.exe"
-    },
     "mac": {
       "icon": "FetchCV_LOGO.png",
       "category": "public.app-category.productivity",

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -54,7 +56,12 @@ def test_workspace_tools_reject_escape_hidden_and_binary(database, tmp_path):
     outside.write_text("secret", encoding="utf-8")
     (workspace / ".secret").write_text("hidden", encoding="utf-8")
     (workspace / "image.png").write_bytes(b"png")
-    (workspace / "escape").symlink_to(outside)
+    try:
+        (workspace / "escape").symlink_to(outside)
+    except OSError as exc:
+        if sys.platform == "win32" and getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Windows symlink test requires Developer Mode or elevated privileges")
+        raise
     with database.session() as session:
         run = seed(session)
         gateway = register_workspace_tools(ToolGateway(session, workspace_root=workspace))

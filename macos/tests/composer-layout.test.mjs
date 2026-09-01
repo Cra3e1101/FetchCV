@@ -42,11 +42,12 @@ test("composer controls remain compact, circular and inside the writing surface"
   assert.match(css, /\.model-effort-popover\s*\{[\s\S]*?width:\s*min\(262px/);
 });
 
-test("composer uses the five-level effort control and preserves backend thinking levels", () => {
+test("composer uses three honest effort levels and preserves backend thinking levels", () => {
   assert.match(source, /<AgentEffortControl[\s\S]*?value=\{agentEffort\}[\s\S]*?onChange=\{setAgentEffort\}/);
-  assert.match(effortSource, /Mild[\s\S]*?Medium[\s\S]*?High[\s\S]*?Extreme[\s\S]*?Ultracode/);
+  assert.match(effortSource, /快速[\s\S]*?均衡[\s\S]*?深入/);
+  assert.doesNotMatch(effortSource, /Mild|Extreme|Ultracode/);
   assert.match(effortSource, /apiLevel:\s*"fast"[\s\S]*?apiLevel:\s*"balanced"[\s\S]*?apiLevel:\s*"deep"/);
-  assert.match(effortSource, /aria-label="推理强度"/);
+  assert.match(effortSource, /aria-label="分析投入"/);
   assert.doesNotMatch(source.slice(source.indexOf('role="dialog" aria-label="模型与推理设置"'), source.indexOf("<AgentEffortControl")), /<header>/);
 });
 

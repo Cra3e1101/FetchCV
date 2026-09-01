@@ -108,14 +108,6 @@ def test_agent_loop_executes_model_tool_model_and_persists_real_results(database
             decisions=[{"proposal_id": item.id, "decision": "accepted"} for item in proposals],
         )
 
-        third = engine.run(run)
-        assert third.stop_reason == "approval_required"
-        assert run.current_stage == "awaiting_publish_approval"
-        ApprovalService(session).approve_action(
-            approval_id=_approval(session, run.id, "publish_assets").id,
-            approved_by="tester",
-        )
-
         final = engine.run(run)
         assert final.stop_reason == "ready_to_publish"
         assert run.current_stage == "ready_to_publish"
@@ -127,9 +119,7 @@ def test_agent_loop_executes_model_tool_model_and_persists_real_results(database
             "propose_resume_rewrites",
             "apply_approved_resume_changes",
             "validate_resume",
-            "build_portfolio_preview",
             "run_consistency_checks",
-            "finalize_publish_ready",
         ]
         steps = list(session.scalars(select(AgentRunStep).where(AgentRunStep.run_id == run.id).order_by(AgentRunStep.sequence)).all())
         tool_steps = [step for step in steps if step.event_type == "tool" and step.status == StepStatus.COMPLETED]

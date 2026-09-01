@@ -14,7 +14,7 @@ from .context import ContextManager
 from .tools import PipelineToolResult
 
 
-ContextSection = Literal["job", "resume", "facts", "materials"]
+ContextSection = Literal["job", "resume", "facts", "materials", "decisions"]
 
 
 class ReadWorkspaceContextInput(BaseModel):
@@ -51,6 +51,8 @@ def register_context_tools(gateway: ToolGateway) -> ToolGateway:
             data["verified_facts"] = pinned["verified_facts"]
         if "materials" in requested:
             data["materials"] = pinned["materials"]
+        if "decisions" in requested:
+            data["explicit_memory"] = pinned["explicit_memory"]
         return PipelineToolResult(
             stage=context.run.current_stage or PipelineStage.CREATED.value,
             status=context.run.status.value,
@@ -63,7 +65,8 @@ def register_context_tools(gateway: ToolGateway) -> ToolGateway:
         name="read_job_workspace_context",
         description=(
             "按需读取当前岗位工作区的真实上下文。仅当用户语义涉及当前/这个岗位、JD、简历、候选人经历、事实或资料时调用；"
-            "通用知识、闲聊、API/UI 问题不要调用。sections 可选择 job、resume、facts、materials。"
+            "通用知识、闲聊、API/UI 问题不要调用。sections 可选择 job、resume、facts、materials、decisions；"
+            "用户要求沿用、撤销或核对已确认选择时读取 decisions。"
         ),
         input_model=ReadWorkspaceContextInput,
         output_model=PipelineToolResult,

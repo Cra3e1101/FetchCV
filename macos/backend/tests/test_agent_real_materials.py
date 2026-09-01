@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from pathlib import Path
 
+import pytest
 from sqlalchemy import select
 
 from applyos_agent.config import AgentSettings, RuntimeMode
@@ -46,6 +47,8 @@ def _bodies(snapshot):
 
 
 def test_real_pdf_and_jd_complete_agent_flow_without_rebuilding_resume(database, tmp_path, monkeypatch):
+    if not REAL_RESUME.exists() or not REAL_JDS.exists():
+        pytest.skip("private real-material fixtures are not present")
     monkeypatch.setenv("FETCHCV_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
     imported = PdfResumeImporter(database).import_file(REAL_RESUME)
     first_jd = REAL_JDS.read_text(encoding="utf-8").split("\n\n字节跳动", 1)[0].strip()
@@ -138,12 +141,8 @@ def test_real_pdf_and_jd_complete_agent_flow_without_rebuilding_resume(database,
         )
 
         post_review = engine.run(run)
-        assert post_review.stop_reason == "approval_required", run.error
-        ApprovalService(session).approve_action(
-            approval_id=_approval(session, run.id, "publish_assets").id,
-            approved_by="acceptance-test",
-        )
-        assert engine.run(run).stop_reason == "ready_to_publish"
+        assert post_review.stop_reason == "ready_to_publish", run.error
+        assert session.scalar(select(Approval).where(Approval.run_id == run.id, Approval.action_type == "publish_assets")) is None
 
         session.refresh(base_resume)
         session.refresh(job_resume)

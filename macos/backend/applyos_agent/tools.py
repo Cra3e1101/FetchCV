@@ -152,25 +152,24 @@ def register_pipeline_tools(gateway: ToolGateway, pipeline: MockPipeline) -> Too
 
     def validate_resume(context: ToolContext, _: PipelineToolInput) -> PipelineToolResult:
         pipeline._run_stage(context.run, PipelineStage.FACT_VALIDATING, pipeline._validate_resume_facts)
-        pipeline.state.transition(context.run, PipelineStage.PORTFOLIO_BUILDING, reason="resume facts validated")
+        pipeline.state.transition(context.run, PipelineStage.CONSISTENCY_CHECKING, reason="resume facts validated")
         resume = pipeline._require_resume(context.run)
         return _result(context, "简历事实来源、角色强度和候选人范围校验通过。", artifacts=[f"validated_resume:{resume.id}"])
 
     def build_portfolio_preview(context: ToolContext, _: PipelineToolInput) -> PipelineToolResult:
-        pipeline._run_stage(context.run, PipelineStage.PORTFOLIO_BUILDING, pipeline._build_mock_portfolio)
-        pipeline.state.transition(context.run, PipelineStage.CONSISTENCY_CHECKING, reason="portfolio preview prepared")
-        return _result(context, "已准备与当前简历版本绑定的作品材料预览。")
+        pipeline.state.transition(context.run, PipelineStage.CONSISTENCY_CHECKING, reason="legacy optional portfolio step skipped")
+        return _result(context, "已跳过可选作品集步骤，继续检查岗位简历。")
 
     def run_consistency_checks(context: ToolContext, _: PipelineToolInput) -> PipelineToolResult:
         pipeline._run_stage(context.run, PipelineStage.CONSISTENCY_CHECKING, pipeline._run_consistency_and_gate)
-        pipeline.state.transition(context.run, PipelineStage.AWAITING_PUBLISH_APPROVAL, reason="wait for final export approval")
-        pipeline._ensure_publish_approval(context.run)
-        approval = context.session.scalar(select(Approval).where(Approval.run_id == context.run.id, Approval.action_type == "publish_assets"))
+        pipeline.state.transition(context.run, PipelineStage.READY_TO_PUBLISH, reason="verified local draft is ready to edit and export")
+        pipeline._write_report(context.run)
+        resume = pipeline._require_resume(context.run)
         return _result(
             context,
-            "简历与作品材料一致性检查通过，等待用户最终确认导出。",
-            approval_action="publish_assets",
-            data={"approval_id": approval.id if approval else None},
+            "岗位简历一致性检查通过，可以编辑和导出。",
+            artifacts=[f"resume:{resume.id}"],
+            data={"resume_id": resume.id, "ready_to_edit": True},
         )
 
     def finalize_publish_ready(context: ToolContext, _: PipelineToolInput) -> PipelineToolResult:
@@ -201,8 +200,6 @@ def register_pipeline_tools(gateway: ToolGateway, pipeline: MockPipeline) -> Too
     add("propose_resume_rewrites", "以原简历为底稿生成逐条改写建议和新的岗位简历草稿。", ToolPermission.DRAFT_WRITE, {PipelineStage.DRAFT_GENERATING}, propose_resume_rewrites)
     add("apply_approved_resume_changes", "只应用用户逐条批准的简历改写建议。", ToolPermission.CONFIRMED_WRITE, {PipelineStage.AWAITING_USER_REVIEW}, apply_approved_resume_changes, approval_action="apply_resume_changes")
     add("validate_resume", "核验简历事实来源、角色强度和候选人范围。", ToolPermission.READ, {PipelineStage.FACT_VALIDATING}, validate_resume)
-    add("build_portfolio_preview", "基于当前简历版本准备作品材料预览。", ToolPermission.DRAFT_WRITE, {PipelineStage.PORTFOLIO_BUILDING}, build_portfolio_preview)
     add("run_consistency_checks", "执行简历、作品材料和发布门禁的一致性检查。", ToolPermission.READ, {PipelineStage.CONSISTENCY_CHECKING}, run_consistency_checks)
-    add("finalize_publish_ready", "在用户最终批准后将材料标记为可预览和导出。", ToolPermission.EXPORT, {PipelineStage.AWAITING_PUBLISH_APPROVAL}, finalize_publish_ready, approval_action="publish_assets")
     add("inspect_job_context", "只读检查当前岗位、事实、材料、基础简历和岗位简历，不修改任何内容。", ToolPermission.READ, all_stages, inspect_job_context, read_only=True)
     return gateway

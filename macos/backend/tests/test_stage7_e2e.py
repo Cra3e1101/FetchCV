@@ -47,9 +47,8 @@ def _seed_ready_run(client: TestClient):
         },
     )
     client.post(f"/api/agent-runs/{run['id']}/resume")
-    publish = next(item for item in client.get(f"/api/agent-runs/{run['id']}/approvals").json() if item["action_type"] == "publish_assets")
-    client.post(f"/api/agent-runs/{run['id']}/publish-approval", json={"approval_id": publish["id"]})
-    run = client.post(f"/api/agent-runs/{run['id']}/resume").json()
+    run = client.get(f"/api/agent-runs/{run['id']}").json()
+    assert not any(item["action_type"] == "publish_assets" for item in client.get(f"/api/agent-runs/{run['id']}/approvals").json())
     workspace = client.get(f"/api/jobs/{job['id']}/workspace").json()
     return candidate, job, run, workspace
 
@@ -64,12 +63,10 @@ def test_runtime_uses_structured_mock_without_external_credentials():
     assert runtime.session_id.startswith("mock:")
 
 
-def test_stage7_asset_flow_builds_pdf_portfolio_and_submitted_snapshot(database, tmp_path, monkeypatch):
-    import applyos_harness.assets as assets_module
+def test_ready_resume_flow_builds_pdf_and_submitted_snapshot_without_forced_portfolio(database, tmp_path, monkeypatch):
     import integrations.resume.renderer as renderer_module
 
     monkeypatch.setattr(renderer_module, "ARTIFACT_ROOT", tmp_path / "resumes")
-    monkeypatch.setattr(assets_module, "PORTFOLIO_ROOT", tmp_path / "portfolios")
     with TestClient(create_app(database)) as client:
         _, job, run, workspace = _seed_ready_run(client)
         assert workspace["run"]["current_stage"] == "ready_to_publish"
@@ -99,26 +96,15 @@ def test_stage7_asset_flow_builds_pdf_portfolio_and_submitted_snapshot(database,
         assert preview.headers["content-disposition"].startswith("inline;")
         assert preview.content == canonical_pdf
 
-        portfolio = client.post(
-            f"/api/jobs/{job['id']}/portfolios",
-            json={"run_id": run["id"], "resume_version_id": resume["id"], "mode": "mock"},
-        ).json()
-        built = client.post(f"/api/portfolios/{portfolio['id']}/build", json={"run_id": run["id"], "mode": "mock"})
-        assert built.status_code == 200
-        assert Path(built.json()["build"]["preview_path"]).is_file()
-        published = client.post(f"/api/portfolios/{portfolio['id']}/publish", json={"run_id": run["id"]})
-        assert published.status_code == 200
-        assert published.json()["status"] == "published"
-
         application = client.post(
             "/api/applications",
-            json={"run_id": run["id"], "resume_version_id": resume["id"], "portfolio_version_id": portfolio["id"], "status": "submitted"},
+            json={"run_id": run["id"], "resume_version_id": resume["id"], "portfolio_version_id": None, "status": "submitted"},
         )
         assert application.status_code == 201
         final_workspace = client.get(f"/api/jobs/{job['id']}/workspace").json()
         assert final_workspace["run"]["current_stage"] == "published"
         assert final_workspace["applications"][0]["status"] == "submitted"
         assert final_workspace["resumes"][0]["status"] == "draft"
-        assert final_workspace["portfolios"][0]["status"] == "published"
+        assert final_workspace["portfolios"] == []
         assert final_workspace["applications"][0]["submitted_at"] is not None
         assert final_workspace["applications"][0]["frozen_at"] is None

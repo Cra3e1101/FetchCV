@@ -7,14 +7,15 @@ import reactRefresh from "eslint-plugin-react-refresh";
 export default [
   {
     ignores: [
-      "backend/build/**",
-      "backend/dist/**",
-      "backend/.venv/**",
+      "backend/**",
+      "build/**",
       "dist/**",
       "node_modules/**",
       "public/resume-editor/**",
       "release/**",
       "source-references/**",
+      "tmp/**",
+      "vendor/**",
     ],
   },
   js.configs.recommended,

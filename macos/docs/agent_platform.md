@@ -1,6 +1,6 @@
 # FetchCV Agent Platform
 
-Updated: 2026-07-19
+Updated: 2026-07-21
 
 ## Task lifecycle
 
@@ -22,11 +22,13 @@ Compaction separates stable task truth from conversational history. Stable conte
 
 `GET /api/agent-runs/{run_id}/events?follow=true&after_sequence=N` polls persisted trace rows and emits `trace`, `heartbeat` and `end` events. The UI uses sequence IDs for replay and shows the latest real action in a compact disclosure. Tool calls, task state and failures remain inspectable; private chain-of-thought is neither requested nor exposed.
 
-General conversation requests that explicitly depend on current, searched or web information use a separate read-only ToolGateway loop. It can select background search/page/workspace/Skill/read-only MCP tools, feed results back to the provider and emit real tool progress into the same processing disclosure. It never exposes the visible browser tool, so ordinary web research stays inside the Agent window. Repeated calls and exhausted tool rounds switch to a no-tool synthesis turn instead of surfacing a loop-limit error. Ordinary non-live questions retain direct token streaming.
+Conversation and pipeline execution now build their capabilities through the same `build_capability_gateway`. The model—not UI keywords—selects the currently available web, browser, workspace, context, Skill and approved MCP tools. Pipeline mode additionally registers the resume business tools. Every execution still enters `ToolGateway`, so a conversation can perform bounded writes such as JD import or approved workspace/MCP actions without bypassing permission, approval, scope, idempotency or trace enforcement.
+
+Web access is demand-driven. Opening FetchCV starts a loopback-controlled hidden renderer, but it creates and navigates a page only after the model calls a web tool. Static HTTPS remains the fast path; an optional Firecrawl provider and the embedded renderer handle richer pages. No terminal process is required from the user. Repeated calls and exhausted tool rounds switch to a no-tool synthesis turn instead of surfacing a loop-limit error.
 
 ## Security boundaries
 
-- Skills are read-only Markdown resources with root, symlink and size checks.
+- Skills are read-only Markdown resources with root, symlink and size checks. A bundled `web-research` Skill teaches source selection and verification but cannot execute or grant tools.
 - MCP uses direct stdio process arguments, never a shell string.
 - MCP child processes receive a minimal environment; model, browser and desktop-control secrets are never inherited implicitly.
 - Read-only MCP requires server approval, probing, an allowed-tool list and `readOnlyHint=true`.

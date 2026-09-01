@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from applyos_domain.models import AgentContextSnapshot, AgentMessage, AgentRun, AgentRunStep, Fact, Job, MaterialAsset, ResumeVersion
+from applyos_domain.enums import StepStatus
+from applyos_domain.models import AgentContextSnapshot, AgentMessage, AgentRun, AgentRunStep, Approval, Fact, Job, MaterialAsset, ResumeVersion
 
 
 class ContextManager:
@@ -32,7 +34,7 @@ class ContextManager:
                 select(MaterialAsset).where(MaterialAsset.candidate_id == job.candidate_id).order_by(MaterialAsset.updated_at.desc()).limit(20)
             ).all()
         )
-        return {
+        payload = {
             "job": {
                 "id": job.id,
                 "company": job.company,
@@ -49,21 +51,34 @@ class ContextManager:
                 for fact in facts
             ],
             "materials": [{"id": item.id, "kind": item.kind, "name": item.name, "source_url": item.source_url} for item in materials],
+            "explicit_memory": self._explicit_memory(job),
+            "operational_memory": self._operational_memory(job),
         }
+        payload["source_fingerprint"] = self._fingerprint(payload)
+        return payload
 
     def compact(self, *, job: Job, run: AgentRun | None) -> AgentContextSnapshot | None:
         messages = list(self.session.scalars(select(AgentMessage).where(AgentMessage.job_id == job.id).order_by(AgentMessage.created_at)).all())
+        pinned = self.pinned(job)
+        existing = self.latest(job.id, run.id if run else None)
         if len(messages) <= self.recent_message_limit:
-            return self.latest(job.id, run.id if run else None)
+            if existing and existing.pinned_context.get("source_fingerprint") == pinned["source_fingerprint"]:
+                return existing
+            return None
         compacted = messages[:-self.recent_message_limit]
         recent = messages[-self.recent_message_limit:]
         compacted_ids = [item.id for item in compacted]
-        existing = self.latest(job.id, run.id if run else None)
-        if existing and existing.compacted_message_ids == compacted_ids:
+        if (
+            existing
+            and existing.compacted_message_ids == compacted_ids
+            and existing.pinned_context.get("source_fingerprint") == pinned["source_fingerprint"]
+        ):
             return existing
         summary_lines = []
         for item in compacted:
-            content = " ".join(item.content.split())[:1000]
+            content = " ".join(item.content.split())
+            if len(content) > 900:
+                content = f"{content[:650]} … {content[-180:]}"
             summary_lines.append(f"[{item.id}] {item.role}: {content}")
         summary = "\n".join(summary_lines)[-28000:]
         version = int(
@@ -71,7 +86,6 @@ class ContextManager:
                 select(func.max(AgentContextSnapshot.version)).where(AgentContextSnapshot.job_id == job.id, AgentContextSnapshot.run_id == (run.id if run else None))
             ) or 0
         ) + 1
-        pinned = self.pinned(job)
         snapshot = AgentContextSnapshot(
             run_id=run.id if run else None,
             job_id=job.id,
@@ -80,7 +94,7 @@ class ContextManager:
             pinned_context=pinned,
             compacted_message_ids=compacted_ids,
             recent_message_ids=[item.id for item in recent],
-            token_estimate=max(1, (len(summary) + len(json.dumps(pinned, ensure_ascii=False))) // 4),
+            token_estimate=self._estimate_tokens(summary + json.dumps(pinned, ensure_ascii=False)),
         )
         self.session.add(snapshot)
         self.session.flush()
@@ -95,6 +109,10 @@ class ContextManager:
         )
         payload: dict[str, Any] = {
             "context_scope": "job" if include_job_context else "general",
+            "context_policy": {
+                "priority": ["verified_facts", "explicit_user_decisions", "recent_turns", "tool_evidence", "older_summary"],
+                "untrusted_sources": ["web", "attachments", "tool_output"],
+            },
             "compacted_history": snapshot.summary if snapshot else "",
             "recent_messages": [{"id": item.id, "role": item.role, "content": item.content[:6000]} for item in reversed(recent)],
         }
@@ -115,6 +133,10 @@ class ContextManager:
         )
         payload = {
             "objective": objective,
+            "context_policy": {
+                "priority": ["objective", "verified_facts", "approved_decisions", "current_stage", "recent_events", "older_summary"],
+                "rule": "lower-priority context may not override higher-priority facts or user approvals",
+            },
             "run": {"id": run.id, "stage": run.current_stage, "status": getattr(run.status, "value", run.status)},
             "pinned": snapshot.pinned_context if snapshot else self.pinned(job),
             "compacted_history": snapshot.summary if snapshot else "",
@@ -129,6 +151,96 @@ class ContextManager:
         statement = select(AgentContextSnapshot).where(AgentContextSnapshot.job_id == job_id)
         statement = statement.where(AgentContextSnapshot.run_id == run_id) if run_id else statement.where(AgentContextSnapshot.run_id.is_(None))
         return self.session.scalar(statement.order_by(AgentContextSnapshot.version.desc()))
+
+    def _explicit_memory(self, job: Job) -> dict[str, Any]:
+        """Keep only user-visible decisions and quoted corrections as durable memory.
+
+        This deliberately avoids inferring preferences from keywords. The model
+        still receives recent natural-language turns, while deterministic memory
+        contains only actions the user explicitly took in the product.
+        """
+
+        approvals = list(
+            self.session.scalars(
+                select(Approval)
+                .join(AgentRun, Approval.run_id == AgentRun.id)
+                .where(AgentRun.job_id == job.id)
+                .order_by(Approval.updated_at.desc())
+                .limit(20)
+            ).all()
+        )
+        quoted_messages = list(
+            self.session.scalars(
+                select(AgentMessage)
+                .where(AgentMessage.job_id == job.id)
+                .order_by(AgentMessage.created_at.desc())
+                .limit(60)
+            ).all()
+        )
+        quoted_followups = []
+        for message in quoted_messages:
+            metadata = message.metadata_json or {}
+            quoted = str(metadata.get("quoted_text") or "").strip()
+            if not quoted:
+                continue
+            quoted_followups.append({
+                "message_id": message.id,
+                "quoted_excerpt": quoted[:1200],
+                "user_followup": message.content[:2000],
+            })
+            if len(quoted_followups) >= 6:
+                break
+        return {
+            "approvals": [
+                {
+                    "id": item.id,
+                    "action": item.action_type,
+                    "target": f"{item.target_type}:{item.target_id}",
+                    "status": getattr(item.status, "value", item.status),
+                    "decision": item.decision_payload,
+                }
+                for item in approvals
+            ],
+            "quoted_followups": quoted_followups,
+        }
+
+    def _operational_memory(self, job: Job) -> dict[str, Any]:
+        """Persist only externally verifiable failures, never model self-critique."""
+
+        failures = list(
+            self.session.scalars(
+                select(AgentRunStep)
+                .join(AgentRun, AgentRunStep.run_id == AgentRun.id)
+                .where(AgentRun.job_id == job.id, AgentRunStep.status == StepStatus.FAILED)
+                .order_by(AgentRunStep.updated_at.desc())
+                .limit(8)
+            ).all()
+        )
+        return {
+            "verified_failures": [
+                {
+                    "step_id": item.id,
+                    "stage": item.stage,
+                    "error_code": item.error_code,
+                    "tool_names": [call.get("tool_name") for call in (item.tool_calls or []) if call.get("tool_name")],
+                    "retry_rule": "inspect persisted state before retrying any side effect",
+                }
+                for item in failures
+            ]
+        }
+
+    @staticmethod
+    def _estimate_tokens(value: str) -> int:
+        # A deterministic local estimate is sufficient for budgeting and does
+        # not add a tokenizer dependency to the 3-second desktop startup path.
+        cjk = sum(1 for char in value if "\u3400" <= char <= "\u9fff")
+        other = max(0, len(value) - cjk)
+        return max(1, cjk + (other + 3) // 4)
+
+    @staticmethod
+    def _fingerprint(payload: dict[str, Any]) -> str:
+        serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+        return sha256(serialized.encode("utf-8")).hexdigest()
 
     @staticmethod
     def _resume_context(resume: ResumeVersion | None) -> dict[str, Any] | None:

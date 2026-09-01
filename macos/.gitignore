@@ -1,10 +1,16 @@
 node_modules/
+.electron-cache/
 dist/
 release/
 .tmp/
+.tmp-sidecar-artifacts/
 artifacts/
 tmp/
 coverage/
+build/electron/
+backend/.pytest-tmp/
+backend/.pytest-real-tmp/
+backend/.pytest-*/
 
 # Local reference projects and private test material.
 source-references/

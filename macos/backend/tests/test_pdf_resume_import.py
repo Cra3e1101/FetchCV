@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from reportlab.pdfgen import canvas
 
@@ -46,6 +47,9 @@ def test_pdf_resume_preview_import_and_duplicate(database, tmp_path: Path, monke
         assert parsed["profile"]["email"] == "alex@example.com"
         assert {item["key"] for item in parsed["sections"]} >= {"education", "experience", "project", "skill"}
         assert len(parsed["experiences"]) >= 4
+        assert parsed["outbound_text_length"] > 0
+        assert "alex@example.com" not in parsed["outbound_preview"]
+        assert "<EMAIL_" in parsed["outbound_preview"]
 
         imported = client.post(
             "/api/imports/resume-pdf",
@@ -71,11 +75,50 @@ def test_pdf_resume_preview_import_and_duplicate(database, tmp_path: Path, monke
         assert duplicate["resume_id"] == result["resume_id"]
 
 
+def test_pdf_resume_import_uses_user_reviewed_fields_before_creating_facts(database, tmp_path: Path, monkeypatch):
+    import integrations.resume_pdf.importer as importer_module
+
+    monkeypatch.setattr(importer_module, "artifact_root", lambda *parts: tmp_path.joinpath("artifacts", *parts))
+    source = _resume_pdf(tmp_path / "reviewed-resume.pdf")
+    with TestClient(create_app(database)) as client:
+        preview = client.post("/api/imports/resume-pdf/preview", json={"source_path": str(source), "ai_enhanced": False}).json()
+        reviewed = [dict(item, _source_index=index) for index, item in enumerate(preview["experiences"])]
+        reviewed[0] = {
+            **reviewed[0],
+            "title": "用户修正后的教育经历",
+            "start_date": "2024-10",
+            "review_status": "uncertain",
+        }
+        reviewed = reviewed[:-1]
+        imported = client.post(
+            "/api/imports/resume-pdf",
+            json={
+                "source_path": str(source),
+                "ai_enhanced": False,
+                "candidate_name": "Reviewed User",
+                "reviewed_preview": {
+                    "source_sha256": preview["source_sha256"],
+                    "profile": {**preview["profile"], "name": "Reviewed User"},
+                    "experiences": reviewed,
+                },
+            },
+        )
+        assert imported.status_code == 200
+        result = imported.json()
+        assert result["facts_created"] == len(reviewed)
+        library = client.get(f"/api/candidates/{result['candidate_id']}/library").json()
+        corrected = next(item for item in library["experiences"] if item["title"] == "用户修正后的教育经历")
+        assert corrected["start_date"] == "2024-10"
+        assert corrected["details_json"]["review_status"] == "uncertain"
+
+
 def test_legacy_job_snapshot_rebases_on_source_layout_without_losing_body_edit(database, tmp_path: Path, monkeypatch):
     import integrations.resume_pdf.importer as importer_module
 
     monkeypatch.setattr(importer_module, "artifact_root", lambda *parts: tmp_path.joinpath("artifacts", *parts))
     source = Path(__file__).resolve().parents[2] / "test use" / "高子强的简历.pdf"
+    if not source.exists():
+        pytest.skip("private real-resume fixture is not present")
     imported = PdfResumeImporter(database).import_file(source)
     with database.session() as session:
         base = session.get(ResumeVersion, imported["resume_id"])

@@ -10,6 +10,7 @@ const legacyCss = fs.readFileSync(path.join(root, "public/resume-editor/styles.c
 const css = fs.readFileSync(path.join(root, "public/resume-editor/editor-layout.css"), "utf8");
 const fetchcvTheme = fs.readFileSync(path.join(root, "public/resume-editor/fetchcv-theme.css"), "utf8");
 const app = fs.readFileSync(path.join(root, "public/resume-editor/app.js"), "utf8");
+const workspace = fs.readFileSync(path.join(root, "src/components/AgentWorkspace.jsx"), "utf8");
 
 test("resume editor keeps the structure sidebar inside its layout grid", () => {
   const drawerStart = html.indexOf('id="editorDrawer"');
@@ -140,4 +141,10 @@ test("toolbar preview toggles a reversible full-width document mode", () => {
   assert.match(app, /state\.drawerOpen = !state\.drawerOpen/);
   assert.match(app, /if \(!state\.drawerOpen\) fitFetchCVCanonicalPreview\(\)/);
   assert.match(app, /previewLabel\.textContent = state\.drawerOpen \? "预览" : "返回编辑"/);
+});
+
+test("resume studio offers a separate ATS Word export without replacing PDF", () => {
+  assert.match(workspace, /基础 Word|岗位版 Word/);
+  assert.match(workspace, /\/api\/resumes\/\$\{resume\.id\}\/docx/);
+  assert.match(workspace, /导出基础 PDF|导出岗位版 PDF/);
 });

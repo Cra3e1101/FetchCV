@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from applyos_domain.enums import RunStatus
-from applyos_domain.models import AgentRun, AgentRunStep, Candidate, Job
+from applyos_domain.models import AgentRun, AgentRunStep, Candidate, Job, ToolInvocation
 from applyos_harness.errors import HarnessError
 from applyos_harness.permissions import ToolGateway, ToolPermission, ToolSpec
 from applyos_harness.state_machine import PipelineStage
@@ -62,9 +62,13 @@ def test_gateway_enforces_permission_scope_path_and_idempotency(database, tmp_pa
         )
         args = {"candidate_id": candidate.id, "job_id": job.id, "output_path": str(tmp_path / "artifact.json"), "value": "ok"}
         first = gateway.execute(tool_name="echo_write", run=run, arguments=args, granted_permissions={ToolPermission.DRAFT_WRITE}, idempotency_key="same")
-        second = gateway.execute(tool_name="echo_write", run=run, arguments=args, granted_permissions={ToolPermission.DRAFT_WRITE}, idempotency_key="same")
+        second = gateway.execute(tool_name="echo_write", run=run, arguments=args, granted_permissions={ToolPermission.DRAFT_WRITE}, idempotency_key="new-host-call-id")
         assert first == second == {"value": "ok", "calls": 1}
         assert calls["count"] == 1
+        invocation = session.scalar(select(ToolInvocation).where(ToolInvocation.run_id == run.id, ToolInvocation.tool_name == "echo_write"))
+        assert invocation is not None
+        assert invocation.operation_id.startswith("op_")
+        assert invocation.status == "completed"
 
         with pytest.raises(HarnessError) as replay_permission_error:
             gateway.execute(tool_name="echo_write", run=run, arguments=args, granted_permissions={ToolPermission.READ}, idempotency_key="same")
@@ -113,3 +117,55 @@ def test_gateway_enforces_permission_scope_path_and_idempotency(database, tmp_pa
         assert execution_error.value.code == "tool_execution_failed"
         assert "internal details" not in execution_error.value.message
         assert session.scalar(select(AgentRunStep).where(AgentRunStep.run_id == run.id, AgentRunStep.error_code == "tool_execution_failed")) is not None
+
+
+def test_gateway_never_replays_an_unsettled_side_effect(database, tmp_path: Path):
+    with database.session() as session:
+        candidate, job, run = _context(session)
+        calls = {"count": 0}
+
+        def handler(_context, payload):
+            calls["count"] += 1
+            return {"value": payload.value, "calls": calls["count"]}
+
+        gateway = ToolGateway(session, workspace_root=tmp_path)
+        gateway.register(ToolSpec(
+            name="external_write",
+            input_model=EchoInput,
+            output_model=EchoOutput,
+            permission=ToolPermission.DRAFT_WRITE,
+            allowed_stages={PipelineStage.DRAFT_GENERATING},
+            handler=handler,
+            read_only=False,
+            side_effect=True,
+        ))
+        arguments = {"candidate_id": candidate.id, "job_id": job.id, "value": "once"}
+        operation_id, arguments_hash = gateway._operation_identity(
+            run=run,
+            stage=PipelineStage.DRAFT_GENERATING,
+            tool_name="external_write",
+            arguments=arguments,
+        )
+        session.add(ToolInvocation(
+            operation_id=operation_id,
+            run_id=run.id,
+            tool_name="external_write",
+            stage=PipelineStage.DRAFT_GENERATING.value,
+            arguments_hash=arguments_hash,
+            arguments_summary=arguments,
+            provider_call_id="host-before-crash",
+            status="running",
+        ))
+        session.commit()
+
+        with pytest.raises(HarnessError) as stopped:
+            gateway.execute(
+                tool_name="external_write",
+                run=run,
+                arguments=arguments,
+                granted_permissions={ToolPermission.DRAFT_WRITE},
+                idempotency_key="host-after-restart",
+            )
+        assert stopped.value.code == "tool_outcome_unknown"
+        assert calls["count"] == 0
+        assert session.scalar(select(ToolInvocation).where(ToolInvocation.operation_id == operation_id)).status == "outcome_unknown"

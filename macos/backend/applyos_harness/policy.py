@@ -17,12 +17,13 @@ DEFAULT_PERMISSION_SETTINGS: dict[str, Any] = {
     "workspace_read": "allow",
     "workspace_write": "ask",
     "file_delete": "ask",
-    "browser_bridge": "deny",
+    "browser_bridge": "allow",
 }
 
 DEFAULT_GENERAL_SETTINGS: dict[str, Any] = {
     "accent": "coral",
     "density": "comfortable",
+    "theme": "system",
 }
 
 
@@ -65,7 +66,7 @@ def permission_settings(session: Session) -> dict[str, Any]:
     values = {**DEFAULT_PERMISSION_SETTINGS, **stored}
     for key in ("web_access", "workspace_read", "browser_bridge"):
         if values[key] not in {"allow", "ask", "deny"}:
-            values[key] = "allow" if key != "browser_bridge" else "deny"
+            values[key] = "allow"
     if values["workspace_write"] not in {"ask", "deny"}:
         values["workspace_write"] = "ask"
     if values["file_delete"] not in {"ask", "deny"}:
@@ -96,6 +97,8 @@ def save_general_settings(session: Session, updates: dict[str, Any]) -> dict[str
         current["accent"] = DEFAULT_GENERAL_SETTINGS["accent"]
     if current["density"] not in {"comfortable", "compact"}:
         current["density"] = DEFAULT_GENERAL_SETTINGS["density"]
+    if current["theme"] not in {"system", "light", "dark"}:
+        current["theme"] = DEFAULT_GENERAL_SETTINGS["theme"]
     raw = _read_file(session)
     raw["general"] = current
     _write_file(session, raw)
@@ -106,7 +109,7 @@ def apply_gateway_policy(gateway: ToolGateway, values: dict[str, Any]) -> ToolGa
     """Hide disabled capabilities before definitions reach the model."""
     blocked = set()
     if values.get("web_access") == "deny":
-        blocked.update({"search_web", "read_web_page", "web_search", "web_read", "import_job_posting"})
+        blocked.update({"search_web", "read_web_page", "web_search", "web_read", "import_job_posting", "discover_interview_sources", "capture_interview_source"})
     if values.get("browser_bridge") == "deny":
         blocked.update({"open_browser_page", "read_browser_page"})
     if values.get("workspace_read") == "deny":

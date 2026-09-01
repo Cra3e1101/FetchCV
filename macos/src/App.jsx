@@ -10,6 +10,7 @@ import { ImportResumeDialog } from "./components/ImportResumeDialog";
 import { LibraryRail, LibraryView } from "./components/LibraryView";
 import { ModelSettingsDialog } from "./components/ModelSettingsDialog";
 import { api } from "./lib/api";
+import { applyAppearance, DEFAULT_APPEARANCE, watchSystemTheme } from "./lib/appearance";
 import { splitJobDescriptions } from "./lib/job-description";
 import { installSelectAllShortcut } from "./lib/keyboard";
 import { mergeProcessingEvent } from "./lib/processing";
@@ -114,6 +115,14 @@ function EmptyWorkspace({ onNew, onImport, offline, hasProfile, busy }) {
       {hasProfile && <button className="primary-button" onClick={onNew}><Plus size={16} />新增岗位</button>}
     </div>}
   </div>;
+}
+
+function StartupWorkspace() {
+  return <main className="startup-workspace" aria-live="polite" aria-label="正在启动 FetchCV">
+    <div className="startup-brand"><img src="./FetchCV_LOGO.png" alt="" /></div>
+    <strong>FetchCV</strong>
+    <span><i />正在准备本地 Agent</span>
+  </main>;
 }
 
 function NewJobModal({ open, candidates, onClose, onCreate, busy }) {
@@ -247,6 +256,7 @@ export default function App() {
   const [activeCandidateId, setActiveCandidateId] = useState(null);
   const [activeView, setActiveView] = useState("job");
   const [runtime, setRuntime] = useState(null);
+  const [initializing, setInitializing] = useState(true);
   const [offline, setOffline] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -257,11 +267,79 @@ export default function App() {
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
   const [managedJob, setManagedJob] = useState(null);
   const [agentActivity, setAgentActivity] = useState(null);
-  const conversationAbort = useRef(null);
+  const [jobConversationStates, setJobConversationStates] = useState({});
+  const conversationControllers = useRef(new Map());
+  const streamingBuffers = useRef(new Map());
+  const streamingFrames = useRef(new Map());
   const runEventAbort = useRef(null);
-  const initialized = useRef(false);
+  const activeJobRef = useRef(null);
+  const detailRequestSequence = useRef(new Map());
+  const appearanceRef = useRef(DEFAULT_APPEARANCE);
+  const updateJobConversation = useCallback((jobId, patch) => {
+    setJobConversationStates((current) => {
+      const previous = current[jobId] || { busy: false, activity: null, error: "" };
+      const next = typeof patch === "function" ? patch(previous) : { ...previous, ...patch };
+      return { ...current, [jobId]: next };
+    });
+  }, []);
+  const flushStreamingDelta = useCallback((jobId) => {
+    streamingFrames.current.delete(jobId);
+    const text = streamingBuffers.current.get(jobId) || "";
+    streamingBuffers.current.delete(jobId);
+    if (!text) return;
+    setDetail((current) => {
+      if (current?.job?.id !== jobId) return current;
+      const exists = current.messages.some((item) => item.id === "streaming-assistant");
+      const messages = exists
+        ? current.messages.map((item) => item.id === "streaming-assistant" ? { ...item, content: item.content + text } : item)
+        : [...current.messages, { id: "streaming-assistant", role: "assistant", content: text, metadata_json: { delivery_status: "streaming" } }];
+      return { ...current, messages };
+    });
+  }, []);
+  const queueStreamingDelta = useCallback((jobId, text) => {
+    if (!text) return;
+    streamingBuffers.current.set(jobId, `${streamingBuffers.current.get(jobId) || ""}${text}`);
+    if (streamingFrames.current.has(jobId)) return;
+    streamingFrames.current.set(jobId, window.requestAnimationFrame(() => flushStreamingDelta(jobId)));
+  }, [flushStreamingDelta]);
 
   useEffect(() => installSelectAllShortcut(), []);
+  useEffect(() => () => {
+    streamingFrames.current.forEach((frame) => window.cancelAnimationFrame(frame));
+    streamingFrames.current.clear();
+    streamingBuffers.current.clear();
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    applyAppearance(appearanceRef.current);
+    api.generalSettings().then((appearance) => {
+      if (!mounted) return;
+      appearanceRef.current = applyAppearance(appearance);
+    }).catch(() => {});
+    const stopWatching = watchSystemTheme(() => appearanceRef.current);
+    const onAppearanceChanged = (event) => {
+      appearanceRef.current = applyAppearance(event.detail || appearanceRef.current);
+    };
+    window.addEventListener("fetchcv:appearance", onAppearanceChanged);
+    return () => {
+      mounted = false;
+      stopWatching();
+      window.removeEventListener("fetchcv:appearance", onAppearanceChanged);
+    };
+  }, []);
+
+  useEffect(() => {
+    const onNotice = (event) => {
+      const detail = event?.detail || {};
+      setNotice({
+        type: detail.type === "success" ? "success" : "error",
+        message: String(detail.message || "操作未完成"),
+      });
+    };
+    window.addEventListener("fetchcv:notice", onNotice);
+    return () => window.removeEventListener("fetchcv:notice", onNotice);
+  }, []);
 
   useEffect(() => {
     if (notice?.type !== "success") return undefined;
@@ -271,30 +349,78 @@ export default function App() {
 
   const loadDetail = useCallback(async (jobId) => {
     if (!jobId) return;
-    setDetail(await api.jobWorkspace(jobId));
+    const sequence = (detailRequestSequence.current.get(jobId) || 0) + 1;
+    detailRequestSequence.current.set(jobId, sequence);
+    const value = await api.jobWorkspace(jobId);
+    if (activeJobRef.current === jobId && detailRequestSequence.current.get(jobId) === sequence) {
+      setDetail(value);
+    }
+    return value;
   }, []);
   const loadLibrary = useCallback(async (candidateId) => {
     if (!candidateId) { setLibrary(null); return; }
     setLibrary(await api.candidateLibrary(candidateId));
   }, []);
-  const load = useCallback(async () => {
+  const load = useCallback(async ({ progressive = false } = {}) => {
     try {
-      const [nextWorkspace, nextRuntime] = await Promise.all([api.workspace(), api.runtime()]);
-      setWorkspace(nextWorkspace); setRuntime(nextRuntime); setOffline(false);
+      const runtimeRequest = api.runtime().then((value) => ({ value }), (requestError) => ({ error: requestError }));
+      const nextWorkspace = await api.workspace();
+      setWorkspace(nextWorkspace); setOffline(false);
+      // The job/library shell is already useful once the workspace index is
+      // available. Hydrate runtime metadata and the selected detail next,
+      // instead of holding the whole application behind secondary queries.
+      if (progressive) setInitializing(false);
+      const runtimeResult = await runtimeRequest;
+      if (runtimeResult.error) throw runtimeResult.error;
+      setRuntime(runtimeResult.value);
       const candidateId = activeCandidateId || nextWorkspace.candidates[0]?.id;
       if (candidateId) { setActiveCandidateId(candidateId); await loadLibrary(candidateId); } else setLibrary(null);
       const jobId = activeId && nextWorkspace.jobs.some((item) => item.id === activeId) ? activeId : nextWorkspace.jobs[0]?.id;
-      if (jobId) { setActiveId(jobId); await loadDetail(jobId); }
+      if (jobId) { activeJobRef.current = jobId; setActiveId(jobId); await loadDetail(jobId); }
       else { setDetail(null); setActiveView("library"); }
+      return true;
     } catch (loadError) {
       setOffline(true); setError(loadError.message);
+      return false;
     }
   }, [activeCandidateId, activeId, loadDetail, loadLibrary]);
+  const loadRef = useRef(load);
+  useEffect(() => { loadRef.current = load; }, [load]);
   useEffect(() => {
-    if (initialized.current) return;
-    initialized.current = true;
-    void load();
-  }, [load]);
+    let cancelled = false;
+    const bootstrap = async () => {
+      const deadline = Date.now() + 30000;
+      let startupError = "";
+      while (!cancelled && Date.now() < deadline) {
+        try {
+          const loaded = await loadRef.current({ progressive: true });
+          if (loaded && !cancelled) {
+            setInitializing(false);
+            return;
+          }
+        } catch (healthError) {
+          startupError = healthError.message;
+        }
+        const backend = await window.appRuntime?.getBackendStatus?.().catch(() => null);
+        if (backend?.state === "error") {
+          startupError = backend.message || startupError || "本地 Agent 服务启动失败";
+          break;
+        }
+        // During the normal cold-start window poll densely enough that a ready
+        // sidecar is reflected immediately. The old 280 ms interval could add
+        // a visible quarter-second after the API was already usable.
+        const remaining = deadline - Date.now();
+        await new Promise((resolve) => setTimeout(resolve, remaining > 25000 ? 50 : 250));
+      }
+      if (!cancelled) {
+        setOffline(true);
+        setError(startupError || "本地 Agent 服务启动超时");
+        setInitializing(false);
+      }
+    };
+    void bootstrap();
+    return () => { cancelled = true; };
+  }, []);
 
   const runId = detail?.run?.id;
   const runStage = detail?.run?.current_stage;
@@ -342,15 +468,18 @@ export default function App() {
   };
   const runWithActivity = async (kind, operation, success) => {
     const descriptor = typeof kind === "string" ? { kind } : kind;
-    setAgentActivity({ ...descriptor, startedAt: Date.now() });
+    const jobId = detail?.job?.id || activeJobRef.current;
+    setAgentActivity({ ...descriptor, jobId, startedAt: Date.now() });
     try { return await act(operation, success); }
-    finally { setAgentActivity(null); }
+    finally { setAgentActivity((current) => current?.jobId === jobId ? null : current); }
   };
   const selectJob = async (id) => {
+    activeJobRef.current = id;
     setActiveView("job"); setActiveId(id); setError("");
     try {
-      const value = await api.jobWorkspace(id);
-      setDetail(value); setActiveCandidateId(value.candidate.id); setOffline(false);
+      const value = await loadDetail(id);
+      if (activeJobRef.current !== id) return;
+      setActiveCandidateId(value.candidate.id); setOffline(false);
       await loadLibrary(value.candidate.id);
     } catch (selectionError) { setError(selectionError.message); }
   };
@@ -368,7 +497,7 @@ export default function App() {
     try {
       const job = await api.createJob({ ...form, source_type: form.source_type || "manual", status: "draft" });
       const nextWorkspace = await api.workspace();
-      setWorkspace(nextWorkspace); setActiveId(job.id); setActiveCandidateId(job.candidate_id); setActiveView("job"); setNewOpen(false);
+      setWorkspace(nextWorkspace); activeJobRef.current = job.id; setActiveId(job.id); setActiveCandidateId(job.candidate_id); setActiveView("job"); setNewOpen(false);
       await loadDetail(job.id);
       setNotice({ type: "success", message: "岗位已创建，下一步让 Agent 理解 JD。" });
     } catch (createError) { setError(createError.message); }
@@ -434,10 +563,27 @@ export default function App() {
     try {
       await api.decideToolApproval(detail.run.id, approvalId, decision);
       await loadDetail(detail.job.id);
-      setNotice({ type: "success", message: decision === "approved" ? "操作已批准并执行。" : "操作已拒绝，未修改本地文件。" });
+      setNotice({ type: "success", message: decision === "approved" ? "操作已授权；Agent 将从当前步骤继续。" : "操作已拒绝，未修改本地文件。" });
     } catch (approvalError) {
       setError(approvalError.message);
       setNotice({ type: "error", message: approvalError.message });
+    } finally { setBusy(false); }
+  };
+  const resolveToolInvocation = async (operationId, decision) => {
+    if (!detail?.job?.id) return;
+    setBusy(true); setError("");
+    try {
+      await api.resolveToolInvocation(operationId, decision);
+      await loadDetail(detail.job.id);
+      const message = decision === "completed"
+        ? "已记录为人工核对成功，不会重复执行。"
+        : decision === "not_executed"
+          ? "已确认未执行；下一次重试将作为新的显式操作继续。"
+          : "已保持停止，稍后仍可回来核对。";
+      setNotice({ type: "success", message });
+    } catch (resolutionError) {
+      setError(resolutionError.message);
+      setNotice({ type: "error", message: resolutionError.message });
     } finally { setBusy(false); }
   };
   const review = (decisions) => runWithActivity("review", async () => {
@@ -459,65 +605,88 @@ export default function App() {
   const sendMessage = async (content, options) => {
     const controller = new AbortController();
     const jobId = detail.job.id;
-    conversationAbort.current = controller;
-    setError("");
+    conversationControllers.current.set(jobId, controller);
+    updateJobConversation(jobId, { error: "" });
     if (taskActive) {
       try {
+        if (window.appRuntime?.steerPiTask && detail.run?.id) {
+          const steered = await api.steerTask(detail.run.id, content, options);
+          setDetail((current) => current?.job?.id === jobId ? { ...current, messages: [...current.messages, steered.message] } : current);
+          setNotice({ type: "success", message: "补充内容已交给当前 Agent，将在下一步决策前读取。" });
+          return;
+        }
         const queued = await api.queueMessage(jobId, content, options);
         setDetail((current) => current?.job?.id === jobId ? { ...current, queued_messages: [...(current.queued_messages || []), queued] } : current);
         setNotice({ type: "success", message: "消息已加入队列，将在当前任务停下后处理。" });
-      } catch (queueError) { setError(queueError.message); }
+      } catch (queueError) { updateJobConversation(jobId, { error: queueError.message }); }
       return;
     }
-    setBusy(true);
-    setAgentActivity({
-      kind: "chat",
-      thinkingLevel: options?.thinkingLevel || "balanced",
-      label: "正在理解你的问题",
-      startedAt: Date.now(),
-      events: [
-        { id: "scope", label: "理解问题", detail: "正在判断这条消息需要使用哪些上下文。", status: "active" },
-      ],
+    updateJobConversation(jobId, {
+      busy: true,
+      activity: {
+        kind: "chat",
+        jobId,
+        taskKind: options?.taskKind || "conversation",
+        thinkingLevel: options?.thinkingLevel || "balanced",
+        label: "正在理解你的问题",
+        startedAt: Date.now(),
+        events: [],
+      },
     });
     try {
       await api.streamMessage(jobId, content, {
         ...options,
         signal: controller.signal,
         onEvent: (eventName, payload) => {
-          if (eventName === "status") setAgentActivity((current) => {
-            if (!current) return current;
+          if (eventName === "status") updateJobConversation(jobId, (state) => {
+            const current = state.activity;
+            if (!current) return state;
             const label = payload.label === "正在等待模型响应"
               ? "等待当前模型返回结果"
               : payload.label || current.label;
-            return label === current.label ? current : { ...current, label };
+            return label === current.label ? state : { ...state, activity: { ...current, label } };
           });
-          if (eventName === "reasoning") setAgentActivity((current) => current ? {
-            ...current,
-            label: payload.event?.label || current.label,
-            events: mergeProcessingEvent(current.events || [], payload.event),
-          } : current);
+          if (eventName === "reasoning") updateJobConversation(jobId, (state) => state.activity ? {
+            ...state,
+            activity: {
+              ...state.activity,
+              label: payload.event?.label || state.activity.label,
+              events: mergeProcessingEvent(state.activity.events || [], payload.event),
+            },
+          } : state);
           if (eventName === "user") setDetail((current) => current?.job?.id === jobId ? { ...current, messages: [...current.messages.filter((item) => item.id !== payload.message.id), payload.message] } : current);
-          if (eventName === "delta") setDetail((current) => {
-            if (current?.job?.id !== jobId) return current;
-            const exists = current.messages.some((item) => item.id === "streaming-assistant");
-            const messages = exists
-              ? current.messages.map((item) => item.id === "streaming-assistant" ? { ...item, content: item.content + payload.text } : item)
-              : [...current.messages, { id: "streaming-assistant", role: "assistant", content: payload.text, metadata_json: { delivery_status: "streaming" } }];
-            return { ...current, messages };
-          });
-          if (eventName === "done") setDetail((current) => current?.job?.id === jobId ? { ...current, messages: [...current.messages.filter((item) => item.id !== "streaming-assistant" && item.id !== payload.assistant.id), payload.assistant] } : current);
+          if (eventName === "delta") queueStreamingDelta(jobId, payload.text);
+          if (eventName === "done") {
+            const frame = streamingFrames.current.get(jobId);
+            if (frame) window.cancelAnimationFrame(frame);
+            streamingFrames.current.delete(jobId);
+            streamingBuffers.current.delete(jobId);
+            setDetail((current) => current?.job?.id === jobId ? { ...current, messages: [...current.messages.filter((item) => item.id !== "streaming-assistant" && item.id !== payload.assistant.id), payload.assistant] } : current);
+          }
         },
       });
       await loadDetail(jobId);
     } catch (streamError) {
       await loadDetail(jobId).catch(() => {});
       if (streamError.name === "AbortError") setNotice({ type: "success", message: "已停止生成；你的问题仍保留在对话中。" });
-      else { setError(streamError.message); setNotice({ type: "error", message: streamError.message }); }
+      else { updateJobConversation(jobId, { error: streamError.message }); setNotice({ type: "error", message: streamError.message }); }
     } finally {
-      if (conversationAbort.current === controller) conversationAbort.current = null;
-      setAgentActivity(null); setBusy(false);
+      if (conversationControllers.current.get(jobId) === controller) conversationControllers.current.delete(jobId);
+      updateJobConversation(jobId, { busy: false, activity: null });
     }
   };
+  const researchInterviews = () => sendMessage(
+    `请为当前岗位开展一次可追溯的面试情报调研。先读取岗位上下文并检索本地面试知识库；证据不足时先完整检索小红书：第一层优先搜索“同公司 + 已确认事业部 + 核心岗位”，第二层再搜索“同公司 + 同岗位”，允许来自其他事业部或没有注明事业部。不要以固定条数提前停止，应持续发现到结果耗尽、连续结果均重复或平台访问保护触发；随后再检索牛客、知乎、CSDN 等公开原文作为补充证据。精确岗位标题没有结果时，从完整标题中提取职能称谓并扩展常见写法，例如“两轮车事业部-策略运营”继续检索“策略运营”“运营策略”，同时保留“两轮车”“青桔”等业务线词。若用户提供公开原帖链接，应直接读取。每个候选链接必须先验证正文可读，失效、扫码、登录、导航和搜索结果页不得进入最终来源清单。只把有原文引文支持的问题写入知识库；图片中的问题未经 OCR 不得臆造。按真实来源数归纳共性问题，结合 JD 和已验证简历事实给出准备建议。最终回答强调问题和准备建议，并按时间倒序列出实际使用的原帖；原帖链接是主入口，本地快照只是备用。若平台要求验证或页面不可读，停止该来源，不进行点赞、评论、关注或发布。`,
+    { thinkingLevel: "deep", taskKind: "interview_research" },
+  );
+  const deleteInterviewSource = (sourceId) => act(
+    () => api.deleteInterviewSource(sourceId),
+    "面经来源已从本地知识库移除，相关频次已重新计算。",
+  );
+  const deleteInterviewBrief = (briefId) => act(
+    () => api.deleteInterviewBrief(briefId),
+    "面试简报已删除，原始面经仍保留在知识库。",
+  );
   const handleRuntimeChanged = (value) => {
     setRuntime(value);
     setNotice({ type: "success", message: value?.configured ? `${value.provider_name || value.model} 已连接。` : "模型连接已断开。" });
@@ -528,21 +697,31 @@ export default function App() {
   const deleteManagedJob = () => act(async () => {
     const deletingId = managedJob.id;
     await api.deleteJob(deletingId); setManagedJob(null);
-    if (activeId === deletingId) { setActiveId(null); setDetail(null); setActiveView("library"); }
+    if (activeId === deletingId) { activeJobRef.current = null; setActiveId(null); setDetail(null); setActiveView("library"); }
   }, "岗位项目已删除，个人资料库未受影响。");
   const pauseTask = () => act(() => api.pauseTask(latestTask.id), "已请求暂停；当前模型请求结束后会停下。");
-  const resumeTask = () => act(() => api.resumeTask(latestTask.id), "任务已恢复。");
+  const resumeTask = () => act(() => api.resumeTask(latestTask.id, latestTask.run_id), "任务已恢复。");
   const cancelTask = () => act(() => api.cancelTask(latestTask.id), "已请求取消当前任务。");
   const retryTask = () => act(
-    () => latestTask?.status === "failed" ? api.retryTask(latestTask.id) : api.enqueueTask(detail.run.id, { kind: "retry" }),
+    () => latestTask?.status === "failed" ? api.retryTask(latestTask.id, latestTask.run_id) : api.enqueueTask(detail.run.id, { kind: "retry" }),
     "已从最近的可恢复阶段重试。",
   );
   const jobs = useMemo(() => workspace.jobs, [workspace.jobs]);
+  if (initializing) return <div className="app-shell"><WindowBar /><StartupWorkspace /></div>;
   const currentUser = detail?.candidate
     || library?.candidate
     || workspace.candidates.find((item) => item.id === activeCandidateId)
     || workspace.candidates[0]
     || { name: "本地用户" };
+  const activeConversationState = detail?.job?.id ? (jobConversationStates[detail.job.id] || { busy: false, activity: null, error: "" }) : { busy: false, activity: null, error: "" };
+  const taskProvider = taskActive ? latestTask?.payload_json?.provider_snapshot : null;
+  const workspaceRuntime = taskProvider ? {
+    ...runtime,
+    model: taskProvider.model,
+    provider_name: taskProvider.provider_name,
+    provider_protocol: taskProvider.protocol,
+    provider_base_url: taskProvider.base_url,
+  } : runtime;
 
   return <div className="app-shell">
     <WindowBar />
@@ -551,10 +730,10 @@ export default function App() {
       {offline
         ? <EmptyWorkspace offline />
         : activeView === "library"
-          ? library ? <LibraryView library={library} busy={busy} onImportResume={() => setImportOpen(true)} onAddMaterial={importWorkspaceMaterials} onNewJob={openNewJob} /> : <EmptyWorkspace onImport={() => setImportOpen(true)} offline={false} hasProfile={false} busy={busy} />
+          ? library ? <LibraryView library={library} busy={busy} onImportResume={() => setImportOpen(true)} onAddMaterial={importWorkspaceMaterials} onNewJob={openNewJob} onDeleteInterviewSource={deleteInterviewSource} onDeleteInterviewBrief={deleteInterviewBrief} /> : <EmptyWorkspace onImport={() => setImportOpen(true)} offline={false} hasProfile={false} busy={busy} />
           : !detail
             ? <EmptyWorkspace onNew={openNewJob} onImport={() => setImportOpen(true)} offline={false} hasProfile={workspace.candidates.length > 0} busy={busy} />
-            : <AgentWorkspace detail={detail} runtime={runtime} busy={busy} error={error} activity={agentActivity} task={latestTask} onStart={start} onRestart={restart} onFactReview={reviewFacts} onReview={review} onPublishApproval={approvePublish} onRetry={retryTask} onPauseTask={pauseTask} onResumeTask={resumeTask} onCancelTask={cancelTask} onFinalize={() => setFreezeOpen(true)} onSendMessage={sendMessage} onCancelMessage={() => conversationAbort.current?.abort()} onAddMaterial={importWorkspaceMaterials} onApprovalDecision={decideToolApproval} onModelActivated={handleRuntimeChanged} onOpenModelSettings={() => setModelSettingsOpen(true)} onSaveResumeEditor={saveResumeEditor} onResumePdfSaved={refreshResumeArtifact} />}
+            : <AgentWorkspace detail={detail} runtime={workspaceRuntime} busy={busy || activeConversationState.busy} error={activeConversationState.error || error} activity={activeConversationState.activity || (agentActivity?.jobId === detail.job.id ? agentActivity : null)} task={latestTask} onStart={start} onRestart={restart} onFactReview={reviewFacts} onReview={review} onPublishApproval={approvePublish} onRetry={retryTask} onPauseTask={pauseTask} onResumeTask={resumeTask} onCancelTask={cancelTask} onResolveInvocation={resolveToolInvocation} onFinalize={() => setFreezeOpen(true)} onSendMessage={sendMessage} onResearchInterviews={researchInterviews} onCancelMessage={() => conversationControllers.current.get(detail.job.id)?.abort()} onAddMaterial={importWorkspaceMaterials} onApprovalDecision={decideToolApproval} onModelActivated={handleRuntimeChanged} onOpenModelSettings={() => setModelSettingsOpen(true)} onSaveResumeEditor={saveResumeEditor} onResumePdfSaved={refreshResumeArtifact} />}
       {activeView === "library" ? <LibraryRail library={library} /> : !detail ? <aside className="context-blank"><FolderKanban size={19} /><span>岗位上下文会显示在这里</span></aside> : null}
     </div>
     <NewJobModal open={newOpen} candidates={workspace.candidates} onClose={() => setNewOpen(false)} onCreate={createJob} busy={busy} />

@@ -1,30 +1,24 @@
 $ErrorActionPreference = "Stop"
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
-$Python = Join-Path $ProjectRoot "backend\.venv\Scripts\python.exe"
-$Dist = Join-Path $ProjectRoot "backend\dist"
-$Work = Join-Path $ProjectRoot "backend\build\pyinstaller"
-$Spec = Join-Path $ProjectRoot "backend\build"
-$Entry = Join-Path $ProjectRoot "backend\sidecar_entry.py"
+$BuildScript = Join-Path $PSScriptRoot "build-sidecar.mjs"
 
-if (-not (Test-Path -LiteralPath $Python)) {
-  throw "Backend virtual environment not found: $Python"
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+  throw "Node.js is required to build the FetchCV sidecar."
 }
 
-& $Python -m PyInstaller `
-  --noconfirm `
-  --onedir `
-  --name fetchcv-api `
-  --paths (Join-Path $ProjectRoot "backend") `
-  --collect-all claude_agent_sdk `
-  --collect-all reportlab `
-  --collect-submodules uvicorn `
-  --distpath $Dist `
-  --workpath $Work `
-  --specpath $Spec `
-  $Entry
+Push-Location $ProjectRoot
+try {
+  & node $BuildScript
+  if ($LASTEXITCODE -ne 0) {
+    throw "FetchCV sidecar build failed with exit code $LASTEXITCODE."
+  }
+}
+finally {
+  Pop-Location
+}
 
-$Executable = Join-Path $Dist "fetchcv-api\fetchcv-api.exe"
+$Executable = Join-Path $ProjectRoot "backend\dist\fetchcv-api\fetchcv-api.exe"
 if (-not (Test-Path -LiteralPath $Executable)) {
   throw "Sidecar build did not produce $Executable"
 }

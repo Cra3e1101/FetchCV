@@ -16,6 +16,7 @@ from applyos_harness.errors import HarnessError
 from .config import AgentSettings
 from .cancellation import ProviderRequestCancelled, cancellable_handle, raise_if_cancelled
 from .hooks import SDKHookRecorder
+from .model_protocol import contains_dsml, parse_dsml_tool_calls, strip_model_protocol
 from .schemas import AgentTurnDecision, RuntimeResult, RuntimeToolCall, RuntimeToolDefinition, RuntimeTurnResult
 
 OutputT = TypeVar("OutputT", bound=BaseModel)
@@ -297,6 +298,10 @@ class CompatibleAgentRuntime:
         return text
 
     @staticmethod
+    def _dsml_tool_calls(value: str) -> tuple[list[RuntimeToolCall], str]:
+        return parse_dsml_tool_calls(value)
+
+    @staticmethod
     def _endpoint(base_url: str, protocol: str) -> str:
         base = base_url.rstrip("/")
         suffix = "/v1/messages" if protocol == "anthropic" else "/chat/completions"
@@ -435,6 +440,7 @@ class CompatibleAgentRuntime:
             raise HarnessError("provider_connection_error", f"模型工具调用失败：{message}", retryable=True) from exc
 
         calls: list[RuntimeToolCall] = []
+        tool_mode = "native"
         if protocol == "anthropic":
             content = payload.get("content") or []
             text = "\n".join(str(item.get("text") or "") for item in content if item.get("type") == "text").strip()
@@ -452,19 +458,37 @@ class CompatibleAgentRuntime:
                 arguments = json.loads(raw_arguments) if isinstance(raw_arguments, str) else raw_arguments
                 calls.append(RuntimeToolCall(id=str(item.get("id") or f"openai:{index}"), name=str(function.get("name") or ""), arguments=arguments or {}))
             finish_reason = str(choice.get("finish_reason") or ("tool_calls" if calls else "stop"))
-            if not calls and text:
+        # Some compatible providers emit DSML inside a normal text block even
+        # on their Anthropic endpoint. Normalize protocol text after both
+        # provider branches so the Agent Loop sees one consistent tool-call
+        # representation.
+        raw_text = text
+        if not calls and text:
+            dsml_calls, cleaned_text = self._dsml_tool_calls(text)
+            if dsml_calls:
+                calls = dsml_calls
+                text = cleaned_text
+                tool_mode = "dsml"
+            else:
+                text = cleaned_text
                 try:
                     decision = AgentTurnDecision.model_validate(json.loads(self._json_text(text)))
                     calls = [item.model_copy(update={"id": item.id or f"json:{index}"}) for index, item in enumerate(decision.tool_calls, start=1)]
                     text = decision.message or text
+                    if calls:
+                        tool_mode = "structured_content"
                 except (json.JSONDecodeError, ValueError):
                     pass
+        if contains_dsml(text):
+            text = strip_model_protocol(text)
+        if not calls and not text and contains_dsml(raw_text):
+            raise HarnessError("provider_protocol_error", "模型返回了无法解析的工具调用格式，请重试本轮请求", retryable=True)
         return RuntimeTurnResult(
             text=text,
             tool_calls=calls,
             finish_reason="tool_calls" if calls else finish_reason,
             session_id=session_id,
-            usage={**(payload.get("usage") or {}), "runtime": "compatible_agent", "provider": self.settings.provider_name or "custom", "model": self.settings.model, "protocol": protocol, "tool_mode": "native"},
+            usage={**(payload.get("usage") or {}), "runtime": "compatible_agent", "provider": self.settings.provider_name or "custom", "model": self.settings.model, "protocol": protocol, "tool_mode": tool_mode},
         )
 
     def generate(self, *, agent_name: str, prompt: str, system_prompt: str, output_model: type[OutputT], mock_data: dict, session_id: str | None = None) -> tuple[OutputT, RuntimeResult]:
@@ -672,7 +696,10 @@ class CompatibleAgentRuntime:
 
 def build_runtime(settings: AgentSettings) -> AgentRuntime:
     if settings.runtime.value == "claude":
-        return ClaudeAgentRuntime(settings)
+        raise HarnessError(
+            "legacy_claude_runtime_removed",
+            "Claude Agent SDK 运行时已由 Electron Pi Agent Runtime 替代，请在桌面设置中连接模型。",
+        )
     if settings.runtime.value == "compatible":
         return CompatibleAgentRuntime(settings)
     return MockAgentRuntime()

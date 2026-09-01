@@ -9,6 +9,7 @@ const workspace = fs.readFileSync(path.join(root, "src/components/AgentWorkspace
 const activity = fs.readFileSync(path.join(root, "src/components/AgentActivity.jsx"), "utf8");
 const settings = fs.readFileSync(path.join(root, "src/components/ModelSettingsDialog.jsx"), "utf8");
 const api = fs.readFileSync(path.join(root, "src/lib/api.js"), "utf8");
+const styles = fs.readFileSync(path.join(root, "src/styles.css"), "utf8");
 
 test("agent tasks use durable queue controls and follow real trace events", () => {
   assert.match(app, /api\.enqueueTask/);
@@ -42,4 +43,47 @@ test("skills and approved read-only MCP servers are manageable in settings", () 
   assert.match(workspace, /startsWith\("permission:"\)/);
   assert.match(api, /createMcpServer/);
   assert.match(api, /updateMcpServer/);
+});
+
+test("job rail exposes compact evidence checks instead of an opaque AI score", () => {
+  assert.match(workspace, /function RunEvidence/);
+  assert.match(workspace, /detail\.run_evaluation/);
+  assert.match(workspace, /运行证据/);
+  assert.doesNotMatch(workspace, /AI 评分/);
+});
+
+test("resume workspace remains reachable before a tailored version is generated", () => {
+  assert.match(workspace, /const resume = jobResume \|\| detail\.base_resumes\?\.\[0\]/);
+  assert.doesNotMatch(workspace, /<button disabled=\{!detail\.resumes\?\.length\} className=\{tab === "resume"/);
+  assert.match(workspace, /岗位版尚未生成；这里明确展示资料库原简历/);
+});
+
+test("application rail presents explainable ATS coverage and grounded collateral", () => {
+  assert.match(workspace, /岗位要求覆盖/);
+  assert.match(workspace, /不预测招聘系统通过率/);
+  assert.match(workspace, /support_status/);
+  assert.match(workspace, /为什么这样判断/);
+  assert.match(workspace, /selected\.jd_context/);
+  assert.match(workspace, /selected\.resume_evidence/);
+  assert.match(workspace, /打开简历核对上下文/);
+  assert.match(workspace, /save_cover_letter_draft/);
+  assert.match(workspace, /投递材料/);
+});
+
+test("desktop context rail can collapse and resize without hiding the task state", () => {
+  assert.match(workspace, /fetchcv\.context-rail-collapsed/);
+  assert.match(workspace, /fetchcv\.context-rail-width/);
+  assert.match(workspace, /beginRailResize/);
+  assert.match(workspace, /调整任务上下文宽度/);
+  assert.match(workspace, /展开任务上下文/);
+  assert.match(styles, /--context-rail-width/);
+  assert.match(styles, /\.context-rail-resizer/);
+  assert.match(styles, /prefers-reduced-motion/);
+});
+
+test("streaming output is frame-batched and workspace status uses an explicit runtime state", () => {
+  assert.match(app, /streamingBuffers/);
+  assert.match(app, /requestAnimationFrame\(\(\) => flushStreamingDelta/);
+  assert.match(workspace, /resolveAgentRuntimeState/);
+  assert.match(workspace, /runtime-\$\{runtimeState\.id\}/);
 });

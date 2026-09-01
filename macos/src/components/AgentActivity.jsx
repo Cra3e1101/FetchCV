@@ -1,10 +1,10 @@
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   Brain, Check, ChevronDown, Circle, FileText, Image as ImageIcon,
   Search, Sparkles, Wrench,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { formatProcessingDuration } from "../lib/processing";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { compactProcessingEvents, formatProcessingDuration, mergeProcessingEvent } from "../lib/processing";
 
 const activityLabels = {
   chat: "正在处理你的问题",
@@ -40,6 +40,9 @@ function eventFromStep(step) {
   };
   return {
     id: step.id,
+    kind: step.event_type === "tool" ? "tool" : step.event_type?.startsWith("task_") ? "control" : "system",
+    sequence: step.sequence,
+    run_id: step.run_id,
     label: eventLabels[step.event_type] || step.stage || "运行步骤",
     detail: step.error || (toolName ? `已通过 ToolGateway 记录 ${toolName} 的输入、权限和结果。` : step.reason),
     status: step.status === "completed" ? "completed" : step.status === "failed" ? "failed" : "active",
@@ -59,18 +62,39 @@ function ActivityIcon({ label, size = 16 }) {
 
 function ActivityLine({ item, detail = false }) {
   const active = item.status === "active";
-  return <div className={`activity-line ${active ? "active" : item.status === "failed" ? "failed" : "completed"}`}>
+  const reduceMotion = useReducedMotion();
+  return <motion.div layout={reduceMotion ? false : "position"} initial={reduceMotion ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={reduceMotion ? { duration: 0 } : { layout: { type: "spring", stiffness: 360, damping: 36, mass: .7 }, opacity: { duration: .2, ease: [0.16, 1, 0.3, 1] }, y: { duration: .24, ease: [0.16, 1, 0.3, 1] } }} className={`activity-line ${active ? "active" : item.status === "failed" ? "failed" : "completed"}`}>
     <span className="activity-line-icon">
       {detail ? (active ? <span className="activity-wave" aria-label="正在处理"><i /><i /><i /><i /></span> : item.status === "failed" ? <Circle size={10} /> : <Check size={11} />) : <ActivityIcon label={item.label} />}
     </span>
     <span className="activity-line-copy"><strong>{item.label}</strong>{item.detail && <span>{item.detail}</span>}</span>
-  </div>;
+  </motion.div>;
 }
 
-export function ProcessingDisclosure({ status = "completed", startedAt, durationMs, events = [], defaultExpanded = false }) {
+export function ProcessingDisclosure({ status = "completed", startedAt, durationMs, events = [], defaultExpanded = false, contextKind = "conversation" }) {
+  const reduceMotion = useReducedMotion();
   const [expanded, setExpanded] = useState(defaultExpanded);
+  const [showAll, setShowAll] = useState(false);
   const [elapsed, setElapsed] = useState(() => durationMs ?? Math.max(0, Date.now() - Number(startedAt || Date.now())));
   const running = status === "running";
+  const wasRunning = useRef(running);
+  const keepExpanded = useRef(false);
+  useEffect(() => {
+    const previous = wasRunning.current;
+    wasRunning.current = running;
+    if (running && !previous) {
+      keepExpanded.current = false;
+      setExpanded(true);
+    }
+    if (!running && previous) {
+      const timer = window.setTimeout(() => {
+        if (!keepExpanded.current) setExpanded(false);
+      }, 520);
+      setShowAll(false);
+      return () => window.clearTimeout(timer);
+    }
+    return undefined;
+  }, [running]);
   useEffect(() => {
     if (!running) {
       setElapsed(Number(durationMs || 0));
@@ -81,16 +105,25 @@ export function ProcessingDisclosure({ status = "completed", startedAt, duration
     const timer = window.setInterval(update, 1000);
     return () => window.clearInterval(timer);
   }, [durationMs, running, startedAt]);
-  if (!events.length && !running) return null;
-  const current = [...events].reverse().find((item) => item.status === "active") || events.at(-1);
-  return <section className={`processing-disclosure ${running ? "running" : "completed"}`}>
-    <button type="button" className="processing-summary" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>
+  const compactedEvents = useMemo(() => compactProcessingEvents(events, contextKind), [contextKind, events]);
+  if (!compactedEvents.length && !running) return null;
+  const current = [...compactedEvents].reverse().find((item) => item.status === "active") || compactedEvents.at(-1);
+  const hiddenCount = !showAll ? Math.max(0, compactedEvents.length - 4) : 0;
+  const visibleEvents = hiddenCount ? compactedEvents.slice(-4) : compactedEvents;
+  const toggleExpanded = () => {
+    const next = !expanded;
+    if (!running) keepExpanded.current = next;
+    setExpanded(next);
+  };
+  return <section className={`processing-disclosure ${running ? "running" : "completed"}`} aria-busy={running}>
+    <button type="button" className="processing-summary" onClick={toggleExpanded} aria-expanded={expanded}>
       <span><strong>{running ? "思考中" : "已处理"}</strong><time>{formatProcessingDuration(elapsed)}</time></span>
       {!expanded && current?.label && <small>{current.label}</small>}
       <ChevronDown size={14} />
     </button>
-    <AnimatePresence initial={false}>{expanded && <motion.div className="processing-detail" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={{ duration: .18 }}>
-      {events.map((item) => <ActivityLine key={item.id} item={item} detail />)}
+    <AnimatePresence initial={false}>{expanded && <motion.div layout={!reduceMotion} className="processing-detail" aria-live="polite" aria-atomic="false" initial={reduceMotion ? false : { opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={reduceMotion ? undefined : { opacity: 0, height: 0 }} transition={{ duration: reduceMotion ? 0 : .22, ease: [0.16, 1, 0.3, 1] }}>
+      {hiddenCount > 0 && <button type="button" className="processing-older" onClick={() => setShowAll(true)}>展开此前 {hiddenCount} 个阶段</button>}
+      <AnimatePresence initial={false}>{visibleEvents.map((item) => <ActivityLine key={item.id} item={item} detail />)}</AnimatePresence>
     </motion.div>}</AnimatePresence>
   </section>;
 }
@@ -103,15 +136,19 @@ export function AgentActivity({ activity, task, steps = [] }) {
   if (!activity && !taskRunning && (!task || !recentSteps.length)) return null;
 
   const title = activity?.label || activityLabels[activity?.kind] || "Agent 正在处理";
+  const taskTrace = task?.result_json?.checkpoint?.processing_trace
+    || task?.result_json?.processing_trace
+    || [];
   const detailEvents = activity?.kind === "chat"
     ? (activity.events || [])
-    : recentSteps.map(eventFromStep);
+    : [...recentSteps.map(eventFromStep), ...taskTrace]
+      .reduce((events, event) => mergeProcessingEvent(events, event), []);
   const events = detailEvents.length ? detailEvents : [{ id: "current", label: title, detail: "正在等待新的处理记录。", status: "active" }];
 
   const startedAt = activity?.startedAt || (task?.started_at ? Date.parse(task.started_at) : Date.parse(task?.created_at || "")) || 0;
   const completedAt = task?.completed_at ? Date.parse(task.completed_at) : 0;
   const durationMs = completedAt && startedAt ? Math.max(1, completedAt - startedAt) : undefined;
   return <motion.section className="agent-activity" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .18 }}>
-    <ProcessingDisclosure status={activity || taskRunning ? "running" : "completed"} startedAt={startedAt} durationMs={durationMs} events={events} defaultExpanded={Boolean(activity || taskRunning)} />
+    <ProcessingDisclosure status={activity || taskRunning ? "running" : "completed"} startedAt={startedAt} durationMs={durationMs} events={events} defaultExpanded={Boolean(activity || taskRunning)} contextKind={activity?.taskKind || "conversation"} />
   </motion.section>;
 }

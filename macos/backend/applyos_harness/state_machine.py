@@ -44,9 +44,13 @@ NORMAL_TRANSITIONS: dict[PipelineStage, set[PipelineStage]] = {
     PipelineStage.DRAFT_GENERATING: {PipelineStage.AWAITING_USER_REVIEW},
     PipelineStage.AWAITING_USER_REVIEW: {PipelineStage.APPROVED_CHANGES_APPLYING},
     PipelineStage.APPROVED_CHANGES_APPLYING: {PipelineStage.FACT_VALIDATING},
-    PipelineStage.FACT_VALIDATING: {PipelineStage.PORTFOLIO_BUILDING},
+    # A verified local resume is a reversible draft. Portfolio generation is an
+    # optional follow-up capability and must not sit on the resume critical path.
+    PipelineStage.FACT_VALIDATING: {PipelineStage.CONSISTENCY_CHECKING},
     PipelineStage.PORTFOLIO_BUILDING: {PipelineStage.CONSISTENCY_CHECKING},
-    PipelineStage.CONSISTENCY_CHECKING: {PipelineStage.AWAITING_PUBLISH_APPROVAL},
+    # Local preview/export is also reversible. The explicit confirmation belongs
+    # to the later "record as submitted" snapshot, not to opening the editor.
+    PipelineStage.CONSISTENCY_CHECKING: {PipelineStage.READY_TO_PUBLISH},
     PipelineStage.AWAITING_PUBLISH_APPROVAL: {PipelineStage.READY_TO_PUBLISH},
     PipelineStage.READY_TO_PUBLISH: {PipelineStage.PUBLISHED},
     PipelineStage.PUBLISHED: {PipelineStage.FROZEN},

@@ -4,15 +4,25 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildModelsUrlCandidates, parseModelsResponse, redactProviderError } from "./provider-utils.mjs";
-import { startBrowserBridge } from "./browser-bridge.mjs";
-import { startSidecar, stopSidecar } from "./sidecar.mjs";
+import { prepareBrowserBridge, startBrowserBridge } from "./browser-bridge.mjs";
+import { PiAgentRuntime } from "./pi-agent-runtime.mjs";
+import { choosePort, startSidecar, stopSidecar } from "./sidecar.mjs";
+import { isXiaohongshuUrl } from "./xiaohongshu-adapter.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const projectRoot = path.join(__dirname, "..");
+// Stable in development and after bundling the main process into app.asar.
+const projectRoot = app.getAppPath();
 let sidecar = null;
 let browserBridge = null;
 let backendError = null;
+let backendState = "starting";
+let backendApiBase = "";
 const controlToken = randomBytes(32).toString("hex");
+const piAgentRuntime = new PiAgentRuntime({
+  getApiBase: () => sidecar?.apiBase || backendApiBase || "http://127.0.0.1:8766",
+  getControlToken: () => controlToken,
+  getProviderConfig: () => readProviderConfig({ includeSecret: true }),
+});
 
 if (process.env.FETCHCV_E2E_USER_DATA) {
   app.setPath("userData", process.env.FETCHCV_E2E_USER_DATA);
@@ -84,7 +94,26 @@ function decodeProvider(saved, { includeSecret = false } = {}) {
 function readProviderConfig({ includeSecret = false } = {}) {
   const store = readProviderStore();
   const saved = store.activeId ? store.profiles.find((item) => item.id === store.activeId) : null;
-  return saved ? decodeProvider(saved, { includeSecret }) : null;
+  if (saved) return decodeProvider(saved, { includeSecret });
+  const apiKey = String(process.env.FETCHCV_PROVIDER_API_KEY || "").trim();
+  const baseUrl = String(process.env.FETCHCV_PROVIDER_BASE_URL || "").trim();
+  const model = String(process.env.FETCHCV_PROVIDER_MODEL || "").trim();
+  if (!apiKey || !baseUrl || !model) return null;
+  return {
+    id: "environment",
+    providerName: String(process.env.FETCHCV_PROVIDER_NAME || "Environment provider").trim(),
+    protocol: String(process.env.FETCHCV_PROVIDER_PROTOCOL || "openai").trim(),
+    baseUrl,
+    model,
+    modelsUrlOverride: "",
+    availableModels: [{ id: model, ownedBy: "environment" }],
+    modelsEndpoint: "",
+    health: "healthy",
+    latencyMs: null,
+    lastTestedAt: "",
+    hasApiKey: true,
+    ...(includeSecret ? { apiKey } : {}),
+  };
 }
 
 function listProviderConfigs() {
@@ -310,7 +339,67 @@ function registerIpc() {
     if (window.isMaximized()) window.unmaximize(); else window.maximize();
   });
   ipcMain.on("window:close", (event) => BrowserWindow.fromWebContents(event.sender)?.close());
+  ipcMain.handle("backend:get-status", () => ({ state: backendState, apiBase: backendApiBase, message: backendError || "" }));
+  ipcMain.on("pi-agent:start", (event, input) => {
+    const requestId = String(input?.requestId || "");
+    if (!/^[a-f0-9-]{20,80}$/i.test(requestId)) return;
+    const channel = `pi-agent:event:${requestId}`;
+    const send = (payload) => {
+      if (!event.sender.isDestroyed()) event.sender.send(channel, payload);
+    };
+    void piAgentRuntime.run(input, (name, payload) => send({ kind: "event", name, payload }))
+      .then((result) => send({ kind: "complete", result }))
+      .catch((error) => send({
+        kind: "error",
+        error: {
+          name: error?.name || "Error",
+          code: error?.code || "pi_agent_failed",
+          message: error?.message || "Pi Agent 运行失败",
+          payload: error?.payload || null,
+        },
+      }));
+  });
+  ipcMain.on("pi-agent:cancel", (_event, requestId) => piAgentRuntime.cancel(String(requestId || "")));
+  ipcMain.handle("pi-agent:start-task", (_event, input) => piAgentRuntime.startTask({
+    runId: String(input?.runId || ""),
+    kind: String(input?.kind || "resume"),
+  }));
+  ipcMain.handle("pi-agent:steer-task", (_event, input) => piAgentRuntime.steerTask(String(input?.runId || ""), input || {}));
   ipcMain.handle("clipboard:read-text", () => clipboard.readText());
+  ipcMain.handle("source:open-external", async (_event, input) => {
+    const url = String(input?.url || "");
+    const title = String(input?.title || "").slice(0, 300);
+    if (!isSafeExternal(url, backendApiBase)) throw new Error("面经原帖地址无效");
+    const isXhs = isXiaohongshuUrl(url);
+    const resolved = isXhs
+      ? await browserBridge?.resolveExternal?.(url, {
+        title,
+        company: String(input?.company || "").slice(0, 240),
+        businessUnit: String(input?.businessUnit || input?.business_unit || "").slice(0, 240),
+        role: String(input?.role || "").slice(0, 240),
+      }) || url
+      : url;
+    if (!isSafeExternal(resolved, backendApiBase)) throw new Error("面经原帖地址无效");
+    const diagnostics = isXhs ? browserBridge?.externalResolutionStatus?.() || null : null;
+    if (isXhs && diagnostics && diagnostics.accessRestored === false) {
+      return {
+        opened: false,
+        unavailable: true,
+        reason: "xiaohongshu_source_unavailable",
+        diagnostics,
+      };
+    }
+    if (process.env.FETCHCV_E2E_CAPTURE_EXTERNAL === "1") {
+      return {
+        opened: false,
+        accessRefreshed: resolved !== url,
+        url: resolved,
+        diagnostics,
+      };
+    }
+    await shell.openExternal(resolved);
+    return { opened: true, accessRefreshed: resolved !== url };
+  });
   ipcMain.handle("dialog:select-resume-pdf", async () => {
     const result = await dialog.showOpenDialog({
       title: "选择 PDF 简历",
@@ -498,8 +587,8 @@ function registerIpc() {
   });
 }
 
-function createWindow() {
-  const apiBase = sidecar?.apiBase || "http://127.0.0.1:8766";
+function createWindow(preferredApiBase = "") {
+  const apiBase = preferredApiBase || sidecar?.apiBase || backendApiBase || "http://127.0.0.1:8766";
   const isMac = process.platform === "darwin";
   const window = new BrowserWindow({
     width: 1360,
@@ -588,33 +677,73 @@ if (!hasLock) {
     if (window) { if (window.isMinimized()) window.restore(); window.focus(); }
   });
 
+  // Begin the independent Python boot while Electron itself is still becoming
+  // ready. Waiting for app.whenReady() first serialized two cold-start paths
+  // and left the CPU idle during part of the launch.
+  const requestedPort = Number(process.env.FETCHCV_API_PORT || 8766);
+  const preferredPort = Number.isInteger(requestedPort) && requestedPort > 0 && requestedPort <= 65535 ? requestedPort : 8766;
+  const portChoicePromise = choosePort(preferredPort);
+  const browserOptionsPromise = prepareBrowserBridge().catch((error) => {
+    console.error("Controlled browser bridge port reservation failed:", error instanceof Error ? error.message : String(error));
+    return null;
+  });
+  let earlyProvider = null;
+  try { earlyProvider = readProviderConfig({ includeSecret: true }); } catch { /* safeStorage may not be ready yet */ }
+  const sidecarStartup = Promise.all([portChoicePromise, browserOptionsPromise]).then(([portChoice, browserOptions]) => {
+    backendApiBase = `http://127.0.0.1:${portChoice.port}`;
+    return startSidecar({
+      isPackaged: app.isPackaged,
+      projectRoot,
+      resourcesPath: process.resourcesPath,
+      userDataPath: app.getPath("userData"),
+      port: portChoice.port,
+      onSpawn: (launched) => { sidecar = launched; },
+      env: {
+        ...process.env,
+        FETCHCV_CONTROL_TOKEN: controlToken,
+        ...(browserOptions ? { FETCHCV_BROWSER_BRIDGE_URL: browserOptions.url, FETCHCV_BROWSER_BRIDGE_TOKEN: browserOptions.token } : {}),
+        ...providerEnvironment(earlyProvider),
+      },
+    });
+  }).then((value) => ({ value }), (error) => ({ error }));
+
   app.whenReady().then(async () => {
     registerIpc();
     fs.mkdirSync(path.join(app.getPath("userData"), "data"), { recursive: true });
+    const [portChoice, browserOptions] = await Promise.all([portChoicePromise, browserOptionsPromise]);
+    backendApiBase = `http://127.0.0.1:${portChoice.port}`;
+    createWindow(backendApiBase);
+
+    // The desktop shell is visible before the Python runtime imports, opens
+    // the database and completes its health check. Browser and API bootstrap
+    // continue in the background while the renderer shows a quiet ready state.
+    const browserPromise = browserOptions
+      ? startBrowserBridge({
+        ...browserOptions,
+        credentialFile: path.join(app.getPath("userData"), "settings", "xiaohongshu-session.bin"),
+        accessCacheFile: path.join(app.getPath("userData"), "settings", "xiaohongshu-public-links.bin"),
+      }).catch((error) => {
+        console.error("Controlled browser bridge failed to start:", error instanceof Error ? error.message : String(error));
+        return null;
+      })
+      : Promise.resolve(null);
     try {
-      browserBridge = await startBrowserBridge();
-    } catch (error) {
-      console.error("Controlled browser bridge failed to start:", error instanceof Error ? error.message : String(error));
-    }
-    try {
+      const [startedBrowser, sidecarResult] = await Promise.all([browserPromise, sidecarStartup]);
+      if (sidecarResult.error) throw sidecarResult.error;
+      browserBridge = startedBrowser;
+      sidecar = sidecarResult.value;
       const savedProvider = readProviderConfig({ includeSecret: true });
-      sidecar = await startSidecar({
-        isPackaged: app.isPackaged,
-        projectRoot,
-        resourcesPath: process.resourcesPath,
-        userDataPath: app.getPath("userData"),
-        env: {
-          ...process.env,
-          FETCHCV_CONTROL_TOKEN: controlToken,
-          ...(browserBridge ? { FETCHCV_BROWSER_BRIDGE_URL: browserBridge.url, FETCHCV_BROWSER_BRIDGE_TOKEN: browserBridge.token } : {}),
-          ...providerEnvironment(savedProvider),
-        },
-      });
+      if (savedProvider?.apiKey && !earlyProvider?.apiKey) await applyProviderToSidecar(savedProvider);
+      await piAgentRuntime.reconcileTasks();
+      backendState = "ready";
+      // Load Pi after the window and local API are ready. This keeps click-to-
+      // window latency low while avoiding a first-message module import pause.
+      setTimeout(() => void piAgentRuntime.warm().catch(() => {}), 1200);
     } catch (error) {
+      backendState = "error";
       backendError = error instanceof Error ? error.message : String(error);
       console.error("Local API startup failed:", backendError);
     }
-    createWindow();
     app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
   });
 }

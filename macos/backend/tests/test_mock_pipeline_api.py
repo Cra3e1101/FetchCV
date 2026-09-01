@@ -19,7 +19,7 @@ def _seed(client):
     return candidate, facts, job
 
 
-def test_mock_pipeline_pauses_for_both_approvals_and_reaches_ready(database):
+def test_mock_pipeline_reaches_editable_draft_without_publish_approval(database):
     with TestClient(create_app(database)) as client:
         candidate, facts, job = _seed(client)
         created = client.post(
@@ -55,6 +55,21 @@ def test_mock_pipeline_pauses_for_both_approvals_and_reaches_ready(database):
         assert {item["risk_level"] for item in proposals} == {"low"}
         review_approval = next(item for item in approvals if item["action_type"] == "apply_resume_changes")
 
+        draft_decisions = {proposals[0]["id"]: {"decision": "accepted", "edited_after": None}}
+        draft = client.patch(
+            f"/api/agent-runs/{run_id}/approvals/{review_approval['id']}/draft",
+            json={"base_revision": 0, "decisions": draft_decisions, "edited_by": "tester"},
+        )
+        assert draft.status_code == 200
+        assert draft.json()["decision_payload"]["draft"]["revision"] == 1
+        assert draft.json()["decision_payload"]["draft"]["decisions"] == draft_decisions
+        conflict = client.patch(
+            f"/api/agent-runs/{run_id}/approvals/{review_approval['id']}/draft",
+            json={"base_revision": 0, "decisions": draft_decisions, "edited_by": "second-window"},
+        )
+        assert conflict.status_code == 409
+        assert conflict.json()["code"] == "approval_revision_conflict"
+
         incomplete = client.post(
             f"/api/agent-runs/{run_id}/proposals/review",
             json={"approval_id": review_approval["id"], "decisions": [{"proposal_id": proposals[0]["id"], "decision": "accepted"}]},
@@ -71,22 +86,18 @@ def test_mock_pipeline_pauses_for_both_approvals_and_reaches_ready(database):
             json={"approval_id": review_approval["id"], "approved_by": "tester", "decisions": decisions},
         )
         assert reviewed.status_code == 200
+        assert reviewed.json()["decision_payload"]["previous_draft_revision"] == 1
 
-        resumed = client.post(f"/api/agent-runs/{run_id}/resume").json()
-        assert resumed["current_stage"] == "awaiting_publish_approval"
-        publish_approval = next(item for item in client.get(f"/api/agent-runs/{run_id}/approvals").json() if item["action_type"] == "publish_assets")
-        approved = client.post(
-            f"/api/agent-runs/{run_id}/publish-approval",
-            json={"approval_id": publish_approval["id"], "approved_by": "tester"},
-        )
-        assert approved.status_code == 200
         ready = client.post(f"/api/agent-runs/{run_id}/resume").json()
         assert ready["current_stage"] == "ready_to_publish"
         assert ready["status"] == "paused"
+        approvals = client.get(f"/api/agent-runs/{run_id}/approvals").json()
+        assert not any(item["action_type"] == "publish_assets" for item in approvals)
 
         report = client.get(f"/api/agent-runs/{run_id}/report").json()
         assert report["trace_events"] > 10
         assert "fact_validating" in report["completed_stages"]
+        assert client.get(f"/api/jobs/{job['id']}/workspace").json()["portfolios"] == []
         events = client.get(f"/api/agent-runs/{run_id}/events")
         assert events.status_code == 200
         assert "event: trace" in events.text

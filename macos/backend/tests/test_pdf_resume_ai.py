@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from pypdf import PdfReader
 
 from applyos_agent.config import AgentSettings, RuntimeMode
@@ -143,6 +144,8 @@ def test_skill_subheadings_stay_in_one_editor_item():
 
 def test_real_resume_redaction_and_ai_preview_do_not_send_pdf_or_identity(database):
     source = Path(__file__).resolve().parents[2] / "test use" / "高子强的简历.pdf"
+    if not source.exists():
+        pytest.skip("private real-resume fixture is not present")
     text = "\n".join(page.extract_text(extraction_mode="layout") or "" for page in PdfReader(source).pages)
     education_quote = next(line.strip() for line in text.splitlines() if "中南财经政法大学" in line and "2024" in line)
     runtime = ScriptedRuntime({

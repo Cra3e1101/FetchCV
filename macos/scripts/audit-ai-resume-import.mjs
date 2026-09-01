@@ -4,11 +4,12 @@ import os from "node:os";
 import path from "node:path";
 import { _electron as electron } from "playwright";
 import { findFreePort } from "../electron/sidecar.mjs";
+import { defaultUserDataPath, packagedExecutablePath } from "./platform-paths.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
-const providerStore = path.join(os.homedir(), "Library", "Application Support", "fetchcv-desktop", "settings", "model-provider.json");
+const providerStore = path.join(defaultUserDataPath(), "settings", "model-provider.json");
 const resumePath = path.join(root, "test use", "高子强的简历.pdf");
-const packagedExecutable = path.join(root, "release", "mac-arm64", "FetchCV.app", "Contents", "MacOS", "FetchCV");
+const packagedExecutable = packagedExecutablePath(root);
 const userData = fs.mkdtempSync(path.join(os.tmpdir(), "fetchcv-ai-import-audit-"));
 const port = await findFreePort();
 

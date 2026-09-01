@@ -13,7 +13,6 @@ dependencies = [
   "pydantic==2.13.4",
   "SQLAlchemy==2.0.51",
   "alembic==1.18.5",
-  "claude-agent-sdk==0.2.120",
   "httpx==0.28.1",
   "pypdf==6.4.1",
   "reportlab==5.0.0",

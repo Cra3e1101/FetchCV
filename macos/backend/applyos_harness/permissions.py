@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -7,10 +9,11 @@ from typing import Any, Callable
 
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from applyos_domain.enums import StepStatus
-from applyos_domain.models import AgentRun, AgentRunStep, PortfolioVersion, ResumeVersion
+from applyos_domain.models import AgentRun, AgentRunStep, PortfolioVersion, ResumeVersion, ToolInvocation
 
 from .approval import ApprovalService
 from .errors import HarnessError
@@ -118,6 +121,13 @@ class ToolGateway:
             if spec.side_effect and not idempotency_key.strip():
                 raise HarnessError("idempotency_key_required", "有副作用的工具必须提供幂等键", run_id=run.id, stage=stage.value)
             payload = spec.input_model.model_validate(arguments)
+            normalized_arguments = payload.model_dump(mode="json", exclude_none=True)
+            operation_id, arguments_hash = self._operation_identity(
+                run=run,
+                stage=stage,
+                tool_name=tool_name,
+                arguments=normalized_arguments,
+            )
             context = ToolContext(
                 session=self.session,
                 run=run,
@@ -140,20 +150,59 @@ class ToolGateway:
                 # Pipeline approvals intentionally match by action type only.
                 # Policy-generated approvals need a stable target even when a
                 # read-only tool has no domain entity behind it.
-                if approval_target_id is None and spec.auto_request_approval:
-                    approval_target_id = tool_name
+                if spec.auto_request_approval:
+                    # Bind a policy-generated approval to the exact normalized
+                    # operation, not merely to a mutable entity or MCP target.
+                    approval_target_id = operation_id
                 if spec.auto_request_approval and not self.approvals.is_approved(run_id=run.id, action_type=spec.approval_action, target_id=approval_target_id):
                     self.approvals.request(
                         run_id=run.id,
                         action_type=spec.approval_action,
                         target_type=spec.target_type or "tool_action",
                         target_id=str(approval_target_id or tool_name),
-                        items=[{"tool_name": tool_name, "arguments": payload.model_dump(mode="json", exclude_none=True)}],
+                        items=[{
+                            "operation_id": operation_id,
+                            "tool_name": tool_name,
+                            "permission": spec.permission.value,
+                            "source": "mcp" if tool_name.startswith("mcp__") else "native",
+                            "target": getattr(target, "id", None) or spec.target_type or "external_action",
+                            "arguments": normalized_arguments,
+                            "risk": "write" if spec.side_effect else "read",
+                            "recoverable": target is not None,
+                        }],
                     )
                 self.approvals.require(run_id=run.id, action_type=spec.approval_action, target_id=approval_target_id)
-            replay = self._find_replay(run.id, tool_name, idempotency_key) if idempotency_key else None
+            replay = self._find_replay(run.id, tool_name, operation_id) if spec.side_effect else (
+                self._find_replay(run.id, tool_name, idempotency_key) if idempotency_key else None
+            )
             if replay is not None:
                 return replay
+            invocation = None
+            if spec.side_effect:
+                invocation = self._prepare_invocation(
+                    run=run,
+                    stage=stage,
+                    tool_name=tool_name,
+                    operation_id=operation_id,
+                    arguments_hash=arguments_hash,
+                    arguments=normalized_arguments,
+                    provider_call_id=idempotency_key,
+                )
+                if invocation.status in {"completed", "completed_verified"}:
+                    return dict(invocation.result_json)
+                if invocation.status in {"running", "outcome_unknown"}:
+                    invocation.status = "outcome_unknown"
+                    self.session.commit()
+                    raise HarnessError(
+                        "tool_outcome_unknown",
+                        "上次执行在保存回执前中断；为避免重复写入，已停止自动重试，请先核对目标系统。",
+                        run_id=run.id,
+                        stage=stage.value,
+                        retryable=False,
+                        details={"operation_id": operation_id, "tool_name": tool_name},
+                    )
+                invocation.status = "running"
+                self.session.commit()
             before_snapshot = None
             if target is not None and spec.side_effect:
                 self.versions.assert_mutable(target)
@@ -168,6 +217,10 @@ class ToolGateway:
                     "after_snapshot_id": after_snapshot.id,
                     "rollback_available": True,
                 }
+            if invocation is not None:
+                invocation = self.session.get(ToolInvocation, invocation.id)
+                invocation.status = "awaiting_user_action" if result.get("requires_user_action") else "completed"
+                invocation.result_json = result
             self.trace.record(
                 run=run,
                 stage=stage.value,
@@ -176,7 +229,13 @@ class ToolGateway:
                 status=StepStatus.COMPLETED,
                 input_refs=[f"tool:{tool_name}"],
                 output_refs=[f"tool_result:{tool_name}"],
-                tool_calls=[{"tool_name": tool_name, "idempotency_key": idempotency_key, "result": result}],
+                tool_calls=[{
+                    "tool_name": tool_name,
+                    "idempotency_key": operation_id if spec.side_effect else idempotency_key,
+                    "provider_call_id": idempotency_key,
+                    "operation_id": operation_id if spec.side_effect else None,
+                    "result": result,
+                }],
             )
             return result
         except HarnessError as exc:
@@ -203,6 +262,54 @@ class ToolGateway:
             )
             self._record_failure(run, tool_name, idempotency_key, error)
             raise error from exc
+
+    @staticmethod
+    def _operation_identity(
+        *,
+        run: AgentRun,
+        stage: PipelineStage,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> tuple[str, str]:
+        encoded = json.dumps(arguments, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        arguments_hash = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+        seed = f"{run.id}\n{stage.value}\n{tool_name}\n{arguments_hash}"
+        return f"op_{hashlib.sha256(seed.encode('utf-8')).hexdigest()[:40]}", arguments_hash
+
+    def _prepare_invocation(
+        self,
+        *,
+        run: AgentRun,
+        stage: PipelineStage,
+        tool_name: str,
+        operation_id: str,
+        arguments_hash: str,
+        arguments: dict[str, Any],
+        provider_call_id: str,
+    ) -> ToolInvocation:
+        existing = self.session.scalar(select(ToolInvocation).where(ToolInvocation.operation_id == operation_id))
+        if existing is not None:
+            return existing
+        invocation = ToolInvocation(
+            operation_id=operation_id,
+            run_id=run.id,
+            tool_name=tool_name,
+            stage=stage.value,
+            arguments_hash=arguments_hash,
+            arguments_summary=arguments,
+            provider_call_id=provider_call_id,
+            status="prepared",
+        )
+        self.session.add(invocation)
+        try:
+            self.session.commit()
+        except IntegrityError:
+            self.session.rollback()
+            existing = self.session.scalar(select(ToolInvocation).where(ToolInvocation.operation_id == operation_id))
+            if existing is None:
+                raise
+            return existing
+        return invocation
 
     def _record_failure(self, run: AgentRun, tool_name: str, idempotency_key: str, error: HarnessError) -> None:
         self.trace.record(
@@ -252,5 +359,8 @@ class ToolGateway:
         for step in steps:
             for call in step.tool_calls:
                 if call.get("tool_name") == tool_name and call.get("idempotency_key") == idempotency_key and "result" in call:
-                    return dict(call["result"])
+                    result = dict(call["result"])
+                    if result.get("requires_user_action"):
+                        continue
+                    return result
         return None
