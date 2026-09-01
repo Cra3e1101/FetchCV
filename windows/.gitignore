@@ -1,0 +1,33 @@
+node_modules/
+.electron-cache/
+dist/
+release/
+.tmp/
+.pytest-*/
+artifacts/
+tmp/
+coverage/
+build/
+
+# Local reference projects and private test material.
+source-references/
+FetchCV-Effort-Control/
+FetchCV-Effort-Control-mac.zip
+test use/
+高子强的简历.pdf
+
+backend/.venv/
+backend/dist/
+backend/build/
+backend/.pytest_cache/
+backend/.pytest-tmp/
+backend/.pytest-real-tmp/
+backend/.pytest-*/
+backend/**/__pycache__/
+backend/*.egg-info/
+backend/data/
+*.egg-info/
+
+*.log
+*.tmp
+.DS_Store

@@ -1,0 +1,115 @@
+{
+  "name": "fetchcv-desktop",
+  "description": "FetchCV local-first resume and job application agent",
+  "author": "hesan",
+  "private": true,
+  "version": "0.4.19",
+  "type": "module",
+  "main": "build/electron/main.mjs",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "electron:runtime": "node scripts/build-electron-runtime.mjs",
+    "desktop": "npm run build && npm run electron:runtime && electron .",
+    "desktop:package": "npm run build && npm run electron:runtime && npm run sidecar:build && electron-builder --win nsis --x64 --publish never",
+    "sidecar:build": "node scripts/build-sidecar.mjs",
+    "test:sidecar": "node --test tests/sidecar.test.mjs",
+    "test:unit": "npm run backend:test && node --test tests/agent-events.test.mjs tests/pi-agent-runtime.test.mjs tests/pi-harness.test.mjs tests/provider-models.test.mjs tests/chat-scroll.test.mjs tests/processing-disclosure.test.mjs tests/model-protocol.test.mjs tests/composer-layout.test.mjs tests/interaction-inputs.test.mjs tests/sidebar-grouping.test.mjs tests/window-chrome.test.mjs tests/resume-editor-layout.test.mjs tests/agent-platform-ui.test.mjs tests/appearance-runtime.test.mjs tests/job-description-import.test.mjs tests/interview-intelligence.test.mjs tests/interview-source-links.test.mjs tests/xiaohongshu-adapter.test.mjs",
+    "test:electron": "npm run build && npm run electron:runtime && node --test tests/chat-scroll.test.mjs && node tests/electron.e2e.mjs",
+    "test:provider": "npm run build && npm run electron:runtime && node --test tests/provider-models.test.mjs && node tests/provider.e2e.mjs",
+    "test:provider:packaged": "node --input-type=module -e \"process.env.FETCHCV_PROVIDER_E2E_PACKAGED='1'; await import('./tests/provider.e2e.mjs')\"",
+    "test:real-materials": "node scripts/run-python.mjs -m pytest backend/tests/test_agent_real_materials.py backend/tests/test_resume_continuity.py -q --basetemp backend/.pytest-real-tmp && node --test tests/job-description-import.test.mjs",
+    "test:packaged": "node tests/packaged.e2e.mjs",
+    "backend:dev": "node scripts/run-backend.mjs --reload",
+    "backend:test": "node scripts/run-python.mjs -m pytest backend/tests --basetemp backend/.pytest-tmp",
+    "backend:migrate": "node scripts/run-python.mjs -m alembic -c backend/alembic.ini upgrade head",
+    "check": "eslint .",
+    "verify": "npm run check && npm run build && npm run test:unit"
+  },
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "0.80.10",
+    "@earendil-works/pi-ai": "0.80.10",
+    "@fontsource/cormorant-garamond": "^5.2.8",
+    "@fontsource/inter": "^5.2.8",
+    "@fontsource/jetbrains-mono": "^5.2.8",
+    "@fontsource/plus-jakarta-sans": "^5.2.8",
+    "@fontsource/source-serif-4": "^5.2.9",
+    "@radix-ui/react-dialog": "^1.1.15",
+    "@radix-ui/react-scroll-area": "^1.2.10",
+    "@radix-ui/react-tabs": "^1.1.13",
+    "@radix-ui/react-tooltip": "^1.2.8",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "framer-motion": "^12.23.24",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "tailwind-merge": "^2.6.0",
+    "typebox": "1.1.38"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@vitejs/plugin-react": "^4.7.0",
+    "autoprefixer": "^10.4.21",
+    "electron": "^43.1.1",
+    "electron-builder": "^26.15.3",
+    "esbuild": "0.25.12",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.4.26",
+    "globals": "^16.5.0",
+    "playwright": "^1.54.1",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.17",
+    "vite": "^6.4.3"
+  },
+  "build": {
+    "appId": "com.fetchcv.desktop",
+    "productName": "FetchCV",
+    "electronDist": "node_modules/electron/dist",
+    "npmRebuild": false,
+    "compression": "maximum",
+    "electronLanguages": [
+      "en-US",
+      "zh-CN"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "build/electron/**/*",
+      "FetchCV_LOGO.png",
+      "FetchCV_LOGO.ico",
+      "package.json",
+      "!node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "backend/dist/fetchcv-api",
+        "to": "sidecar"
+      }
+    ],
+    "win": {
+      "icon": "FetchCV_LOGO.ico",
+      "signAndEditExecutable": false,
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "FetchCV-Setup-${version}-win-x64.exe"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "FetchCV"
+    }
+  }
+}

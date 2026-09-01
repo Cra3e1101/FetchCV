@@ -1,0 +1,111 @@
+{
+  "name": "fetchcv-desktop",
+  "description": "FetchCV local-first resume and job application agent",
+  "author": "hesan",
+  "private": true,
+  "version": "0.2.24",
+  "type": "module",
+  "main": "electron/main.mjs",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "desktop": "npm run build && electron .",
+    "desktop:package": "npm run build && npm run sidecar:build && electron-builder",
+    "desktop:package:installer": "npm run build && npm run sidecar:build && electron-builder --mac zip --publish never && node scripts/build-mac-pkg.mjs",
+    "desktop:package:signed": "FETCHCV_REQUIRE_SIGNING=1 npm run signing:check && npm run build && npm run sidecar:build && electron-builder --mac dmg zip --publish never",
+    "signing:check": "node scripts/check-macos-signing.mjs",
+    "sidecar:build": "node scripts/build-sidecar.mjs",
+    "test:sidecar": "node --test tests/sidecar.test.mjs",
+    "test:unit": "npm run backend:test && node --test tests/provider-models.test.mjs tests/chat-scroll.test.mjs tests/processing-disclosure.test.mjs tests/composer-layout.test.mjs tests/interaction-inputs.test.mjs tests/sidebar-grouping.test.mjs tests/window-chrome.test.mjs tests/resume-editor-layout.test.mjs tests/agent-platform-ui.test.mjs tests/job-description-import.test.mjs",
+    "test:electron": "npm run build && node --test tests/chat-scroll.test.mjs && node tests/electron.e2e.mjs",
+    "test:provider": "npm run build && node --test tests/provider-models.test.mjs && node tests/provider.e2e.mjs",
+    "test:provider:packaged": "FETCHCV_PROVIDER_E2E_PACKAGED=1 node tests/provider.e2e.mjs",
+    "test:real-materials": "node scripts/run-python.mjs -m pytest backend/tests/test_agent_real_materials.py backend/tests/test_resume_continuity.py -q && node --test tests/job-description-import.test.mjs",
+    "test:packaged": "node tests/packaged.e2e.mjs",
+    "backend:dev": "node scripts/run-backend.mjs --reload",
+    "backend:test": "node scripts/run-python.mjs -m pytest backend/tests",
+    "backend:migrate": "node scripts/run-python.mjs -m alembic -c backend/alembic.ini upgrade head",
+    "check": "eslint .",
+    "verify": "npm run check && npm run build && npm run test:unit"
+  },
+  "dependencies": {
+    "@fontsource/cormorant-garamond": "^5.2.8",
+    "@fontsource/inter": "^5.2.8",
+    "@fontsource/jetbrains-mono": "^5.2.8",
+    "@fontsource/plus-jakarta-sans": "^5.2.8",
+    "@fontsource/source-serif-4": "^5.2.9",
+    "@radix-ui/react-dialog": "^1.1.15",
+    "@radix-ui/react-scroll-area": "^1.2.10",
+    "@radix-ui/react-tabs": "^1.1.13",
+    "@radix-ui/react-tooltip": "^1.2.8",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "framer-motion": "^12.23.24",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "tailwind-merge": "^2.6.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@vitejs/plugin-react": "^4.7.0",
+    "autoprefixer": "^10.4.21",
+    "electron": "^43.1.1",
+    "electron-builder": "^26.15.3",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.4.26",
+    "globals": "^16.5.0",
+    "playwright": "^1.54.1",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.17",
+    "vite": "^6.4.3"
+  },
+  "build": {
+    "appId": "com.fetchcv.desktop",
+    "productName": "FetchCV",
+    "electronDist": "node_modules/electron/dist",
+    "npmRebuild": false,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "FetchCV_LOGO.png",
+      "FetchCV_LOGO.ico",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "backend/dist/fetchcv-api",
+        "to": "sidecar"
+      }
+    ],
+    "win": {
+      "icon": "FetchCV_LOGO.ico",
+      "signAndEditExecutable": false,
+      "target": [
+        "portable"
+      ],
+      "artifactName": "FetchCV-${version}.exe"
+    },
+    "mac": {
+      "icon": "FetchCV_LOGO.png",
+      "category": "public.app-category.productivity",
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.inherit.plist",
+      "notarize": true,
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "artifactName": "FetchCV-${version}-${arch}.${ext}"
+    }
+  }
+}

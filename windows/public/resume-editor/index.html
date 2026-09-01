@@ -1,0 +1,509 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>简历编辑器原型</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='5' y='4' width='4' height='24' fill='%23244766'/%3E%3Crect x='13' y='6' width='6' height='6' rx='2' fill='%23244766'/%3E%3Crect x='22' y='6' width='6' height='6' rx='2' fill='%238fa1b5'/%3E%3Crect x='13' y='17' width='6' height='6' rx='2' fill='%238fa1b5'/%3E%3Crect x='22' y='17' width='6' height='6' rx='2' fill='%23b7c4d2'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="./styles.css?v=20260719-layout-2" />
+    <link rel="stylesheet" href="./editor-layout.css?v=20260719-2" />
+    <link rel="stylesheet" href="./fetchcv-theme.css?v=8" />
+  </head>
+  <body class="dashboard-mode">
+    <section class="dashboard-shell" id="dashboardShell" aria-label="简历工作台">
+      <header class="dashboard-topbar">
+        <div class="dashboard-brand">
+          <strong>简历工作台</strong>
+        </div>
+        <div class="dashboard-search" role="search">
+          <span class="dashboard-search-icon" aria-hidden="true"></span>
+          <input id="workbenchSearchInput" type="search" aria-label="搜索候选人、简历、公司或岗位" autocomplete="off" placeholder="搜索候选人、简历、公司或岗位" />
+          <span class="dashboard-search-summary" id="workbenchSearchSummary" aria-live="polite"></span>
+          <button class="dashboard-search-clear" id="workbenchSearchClear" type="button" aria-label="清除搜索" title="清除搜索" hidden>×</button>
+          <div class="dashboard-search-results" id="workbenchSearchResults" role="listbox" aria-label="搜索结果" hidden></div>
+        </div>
+        <div class="dashboard-actions" aria-hidden="true"></div>
+      </header>
+
+      <div class="dashboard-grid">
+        <aside class="candidate-panel" aria-label="候选人列表">
+          <div class="panel-head">
+            <div>
+              <strong>候选人</strong>
+              <small id="candidateSummary">全部 0</small>
+            </div>
+          </div>
+          <div class="candidate-filters" id="candidateFilters" aria-label="候选人筛选">
+            <button class="active" data-candidate-filter="all" type="button">全部</button>
+            <button data-candidate-filter="recent" type="button">最近编辑</button>
+            <button data-candidate-filter="applied" type="button">有投递</button>
+            <button data-candidate-filter="todo" type="button">待完善</button>
+          </div>
+          <div class="candidate-list" id="candidateList"></div>
+          <div class="candidate-utility">
+            <button class="candidate-create-btn" id="newCandidateBtn" type="button">+ 新建候选人</button>
+            <button type="button" id="saveHistoryBtn">保存历史</button>
+            <button type="button" id="openHistoryFolderBtn">历史文件夹</button>
+          </div>
+        </aside>
+
+        <main class="resume-workspace-panel">
+          <section class="candidate-overview" id="candidateOverview"></section>
+          <div class="workspace-tabs" role="tablist" aria-label="工作台视图">
+            <button class="active" data-workbench-tab="resumes" type="button" role="tab" aria-selected="true">简历版本</button>
+            <button data-workbench-tab="applications" type="button" role="tab" aria-selected="false">投递进度</button>
+          </div>
+          <section class="version-panel" id="versionPanel" aria-label="简历版本"></section>
+          <section class="activity-panel" id="activityPanel" aria-label="版本活动"></section>
+        </main>
+
+        <aside class="application-panel" aria-label="投递进度">
+          <div class="panel-head">
+            <div>
+              <strong>投递进度</strong>
+              <small id="applicationSummary">当前候选人</small>
+            </div>
+            <button class="dash-link-btn" id="addApplicationBtn" type="button">新增投递</button>
+          </div>
+          <div class="pipeline-strip" id="pipelineStrip"></div>
+          <div class="application-list" id="applicationList"></div>
+          <div class="today-reminder" id="todayReminder"></div>
+        </aside>
+      </div>
+    </section>
+
+    <header class="appbar">
+      <div class="brand brand-sigil" aria-label="简历编辑状态">
+        <span class="brand-sigil-rail" aria-hidden="true"></span>
+        <span class="brand-sigil-grid" aria-hidden="true">
+          <span class="cell cell-a"></span>
+          <span class="cell cell-b"></span>
+          <span class="cell cell-c"></span>
+          <span class="cell cell-d"></span>
+        </span>
+        <span class="editor-brand-copy" aria-hidden="true">
+          <strong>简历编辑</strong>
+          <small>自动保存</small>
+        </span>
+        <small id="saveStatus" class="brand-status-sr" aria-live="polite">已自动保存</small>
+      </div>
+      <nav class="top-tools" aria-label="简历设置工具栏">
+        <button class="tool-btn active" data-panel="layout" title="间距设置">
+          <span class="tool-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M4 6h16M4 12h10M4 18h16M17 10v4M9 16v4" />
+            </svg>
+          </span><small>页面</small>
+        </button>
+        <button class="tool-btn" data-panel="type" title="字体设置">
+          <span class="tool-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M5 6h14M12 6v12M9 18h6" />
+            </svg>
+          </span><small>字体</small>
+        </button>
+        <button class="tool-btn" data-panel="skin" title="皮肤设置">
+          <span class="tool-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M12 4c-4.2 0-8 3.6-8 7.8A4.2 4.2 0 0 0 8.2 16H9a2 2 0 0 1 2 2 2 2 0 0 0 2 2h1c3.3 0 6-2.7 6-6v-1c0-5-3.6-9-8-9z" />
+              <circle cx="8" cy="10" r="1.2" />
+              <circle cx="12" cy="8.5" r="1.2" />
+              <circle cx="15.4" cy="11" r="1.2" />
+            </svg>
+          </span><small>配色</small>
+        </button>
+        <button class="tool-btn" id="templateBtn" title="更换模板">
+          <span class="tool-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <rect x="4.5" y="5" width="15" height="14" rx="1.5" />
+              <path d="M11 5v14M4.5 10h6.5M11 13h8.5" />
+            </svg>
+          </span><small>模板</small>
+        </button>
+      </nav>
+      <div class="app-actions">
+        <button class="icon-btn" id="backToWorkbenchBtn" title="返回简历工作台">
+          <span class="btn-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M15 5 8 12l7 7" />
+              <path d="M9 12h11" />
+            </svg>
+          </span>
+          <span>工作台</span>
+        </button>
+        <button class="icon-btn" id="previewBtn" title="收起编辑区">
+          <span class="btn-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z" />
+              <circle cx="12" cy="12" r="2.8" />
+            </svg>
+          </span>
+          <span>预览</span>
+        </button>
+        <button class="icon-btn" id="resetBtn" title="恢复示例">
+          <span class="btn-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M4 12a8 8 0 1 0 2.3-5.7" />
+              <path d="M4 5v4.8h4.8" />
+            </svg>
+          </span>
+          <span>重置</span>
+        </button>
+        <button class="icon-btn" id="importPdfBtn" title="导入 PDF 简历">
+          <span class="btn-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M12 3v11" />
+              <path d="M8 10.5 12 14.5l4-4" />
+              <path d="M4 18h16" />
+            </svg>
+          </span>
+          <span>导入 PDF</span>
+        </button>
+        <button class="icon-btn" id="fitOnePageBtn" title="压缩到一页">
+          <span class="btn-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M8 3H5.5A1.5 1.5 0 0 0 4 4.5V7" />
+              <path d="M16 3h2.5A1.5 1.5 0 0 1 20 4.5V7" />
+              <path d="M8 21H5.5A1.5 1.5 0 0 1 4 19.5V17" />
+              <path d="M16 21h2.5A1.5 1.5 0 0 0 20 19.5V17" />
+              <path d="M8 12h8" />
+              <path d="M12 8v8" />
+            </svg>
+          </span>
+          <span>压缩一页</span>
+        </button>
+        <button class="primary-btn" id="downloadBtn" title="导出 PDF">
+          <span class="btn-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M12 4v11" />
+              <path d="M8 12.5 12 16.5l4-4" />
+              <path d="M4 20h16" />
+            </svg>
+          </span>
+          <span>导出 PDF</span>
+        </button>
+        <button class="round-btn" id="doneBtn" title="完成" aria-label="完成">
+          <span class="btn-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M5 12.5 10 17l9-9" />
+            </svg>
+          </span>
+        </button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="preview-stage" id="previewStage" aria-label="简历预览">
+        <div class="preview-viewport" id="previewViewport">
+          <div class="preview-scale-frame" id="previewScaleFrame">
+            <article class="resume-page" id="resumePage">
+          <section class="cover-sheet" id="coverSheet">
+            <p>个人简历</p>
+            <h2 id="coverName">林予安</h2>
+            <span id="coverContact">138****2468 · demo***@mail.com</span>
+          </section>
+          <div class="resume-head" id="resumeHead">
+            <div class="photo-wrap" id="photoWrap">
+              <div class="photo-fallback">证件照</div>
+              <img id="previewPhoto" alt="简历照片" />
+            </div>
+              <div class="identity">
+                <div class="name-block">
+                  <h1 id="previewName">林予安</h1>
+                </div>
+                <div class="info-block">
+                  <div class="info-grid" id="infoGrid">
+                    <p><span>年龄</span><strong id="previewAge">24岁</strong></p>
+                    <p><span>性别</span><strong id="previewGender">女</strong></p>
+                    <p><span>政治面貌</span><strong id="previewPolitical">群众</strong></p>
+                    <p><span>电话</span><strong id="previewPhone">138****2468</strong></p>
+                    <p><span>邮箱</span><strong id="previewEmail">demo***@mail.com</strong></p>
+                    <p><span>到岗情况</span><strong id="previewArrival">两周内到岗</strong></p>
+                  </div>
+                </div>
+              </div>
+          </div>
+          <div id="resumeSections"></div>
+          <section class="letter-sheet" id="letterSheet">
+            <h2 class="section-title"><span>自荐信</span></h2>
+            <p id="letterPreview"></p>
+          </section>
+            </article>
+            <button class="preview-resize-handle handle-nw" data-preview-resize-handle="true" data-preview-corner="nw" type="button" aria-label="左上角缩放"></button>
+            <button class="preview-resize-handle handle-ne" data-preview-resize-handle="true" data-preview-corner="ne" type="button" aria-label="右上角缩放"></button>
+            <button class="preview-resize-handle handle-sw" data-preview-resize-handle="true" data-preview-corner="sw" type="button" aria-label="左下角缩放"></button>
+            <button class="preview-resize-handle handle-se" data-preview-resize-handle="true" data-preview-corner="se" type="button" aria-label="右下角缩放"></button>
+          </div>
+        </div>
+        <div class="preview-zoom-control" aria-label="简历缩放">
+          <button id="zoomOutBtn" type="button" title="缩小简历">−</button>
+          <span id="zoomValue">50%</span>
+          <button id="zoomInBtn" type="button" title="放大简历">+</button>
+        </div>
+      </section>
+
+      <aside class="settings-card hidden" id="settingsCard" aria-label="工具设置">
+        <div class="settings-head">
+          <strong id="settingsTitle">间距与位置</strong>
+          <button class="mini-btn" id="closeSettingsBtn" title="关闭设置">×</button>
+        </div>
+
+        <div class="settings-panel active" data-settings="layout">
+          <div class="settings-section-label">页面排版</div>
+          <div class="setting-row" data-setting-key="margin">
+            <span class="setting-label">页面边距</span>
+            <input id="marginRange" type="range" min="8" max="54" value="30" />
+            <input id="marginNumber" class="setting-number" type="number" min="8" max="54" value="30" />
+          </div>
+          <div class="setting-row" data-setting-key="spacing">
+            <span class="setting-label">段落间距</span>
+            <input id="spacingRange" type="range" min="4" max="18" value="8" />
+            <input id="spacingNumber" class="setting-number" type="number" min="4" max="18" value="8" />
+          </div>
+          <div class="setting-row" data-setting-key="lineHeight">
+            <span class="setting-label">内容行高</span>
+            <input id="lineHeightRange" type="range" min="118" max="190" value="166" />
+            <input id="lineHeightNumber" class="setting-number" type="number" min="118" max="190" value="166" />
+          </div>
+          <div class="settings-section-label">元素定位</div>
+          <div class="setting-row" data-setting-key="photoX">
+            <span class="setting-label">照片横向位置</span>
+            <input id="photoXRange" type="range" min="-80" max="80" value="0" />
+            <input id="photoXNumber" class="setting-number" type="number" min="-80" max="80" value="0" />
+          </div>
+          <div class="setting-row" data-setting-key="photoY">
+            <span class="setting-label">照片纵向位置</span>
+            <input id="photoYRange" type="range" min="-60" max="60" value="0" />
+            <input id="photoYNumber" class="setting-number" type="number" min="-60" max="60" value="0" />
+          </div>
+          <div class="setting-row" data-setting-key="nameX">
+            <span class="setting-label">姓名横向位置</span>
+            <input id="nameXRange" type="range" min="-80" max="80" value="0" />
+            <input id="nameXNumber" class="setting-number" type="number" min="-80" max="80" value="0" />
+          </div>
+          <div class="setting-row" data-setting-key="infoX">
+            <span class="setting-label">信息区横向位置</span>
+            <input id="infoXRange" type="range" min="-80" max="80" value="0" />
+            <input id="infoXNumber" class="setting-number" type="number" min="-80" max="80" value="0" />
+          </div>
+          <div class="setting-row" data-setting-key="infoY">
+            <span class="setting-label">信息区纵向位置</span>
+            <input id="infoYRange" type="range" min="-60" max="60" value="0" />
+            <input id="infoYNumber" class="setting-number" type="number" min="-60" max="60" value="0" />
+          </div>
+          <div class="setting-row" data-setting-key="basicHeight">
+            <span class="setting-label">基本信息高度</span>
+            <input id="basicHeightRange" type="range" min="90" max="150" value="132" />
+            <input id="basicHeightNumber" class="setting-number" type="number" min="90" max="150" value="132" />
+          </div>
+        </div>
+
+        <div class="settings-panel" data-settings="type">
+          <label class="stack-label">字体
+            <select id="fontFamilyInput">
+              <option value="'Microsoft YaHei', 'PingFang SC', Arial, sans-serif">微软雅黑</option>
+              <option value="'SimSun', serif">宋体</option>
+              <option value="'KaiTi', serif">楷体</option>
+            </select>
+          </label>
+          <label class="stack-label">字号
+            <input id="fontSizeRange" type="range" min="11" max="17" value="15" />
+          </label>
+          <label class="switch"><input id="languageInput" type="checkbox" /> 英文标签</label>
+        </div>
+
+        <div class="settings-panel" data-settings="skin">
+          <div class="swatches" id="swatches"></div>
+          <div class="skin-custom">
+            <label class="stack-label">主色
+              <span class="color-input-row">
+                <input id="customAccentPicker" type="color" value="#1f3b5c" />
+                <input id="customAccentInput" type="text" value="#1f3b5c" placeholder="#1f3b5c / rgb(...)" />
+              </span>
+            </label>
+            <label class="stack-label">强调色
+              <span class="color-input-row">
+                <input id="customAccent2Picker" type="color" value="#3f5f84" />
+                <input id="customAccent2Input" type="text" value="#3f5f84" placeholder="#3f5f84 / rgb(...)" />
+              </span>
+            </label>
+            <label class="stack-label">背景色
+              <span class="color-input-row">
+                <input id="customStagePicker" type="color" value="#eef1f5" />
+                <input id="customStageInput" type="text" value="#eef1f5" placeholder="#eef1f5 / rgb(...)" />
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <div class="settings-panel" data-settings="title">
+          <label class="stack-label">标题样式
+            <select id="titleStyleInput">
+              <option value="block">色块标题</option>
+              <option value="line">横线标题</option>
+              <option value="plain">简洁标题</option>
+            </select>
+          </label>
+          <label class="stack-label">姓名大小
+            <input id="nameSizeRange" type="range" min="20" max="36" value="28" />
+          </label>
+        </div>
+
+        <div class="settings-panel" data-settings="cover">
+          <label class="switch"><input id="coverInput" type="checkbox" /> 预览封面页</label>
+          <p class="soft-note">开启后会在打印预览中加入一页简洁封面。</p>
+        </div>
+
+        <div class="settings-panel" data-settings="letter">
+          <label class="stack-label">自荐信
+            <textarea id="letterInput" rows="7" placeholder="写一段自荐信内容，打印时会附在简历后。"></textarea>
+          </label>
+        </div>
+      </aside>
+
+      <aside class="module-adjust-card hidden" id="moduleAdjustCard" aria-label="模块位置调整">
+        <div class="settings-head">
+          <strong id="moduleAdjustTitle">模块位置</strong>
+          <button class="mini-btn" id="closeModuleAdjustBtn" title="关闭">×</button>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">模块横向位置</span>
+          <input id="selectedSectionXRange" type="range" min="-100" max="100" value="0" />
+          <input id="selectedSectionXNumber" class="setting-number" type="number" min="-100" max="100" value="0" />
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">模块行间距</span>
+          <input id="selectedSectionLineRange" type="range" min="130" max="220" value="166" />
+          <input id="selectedSectionLineNumber" class="setting-number" type="number" min="130" max="220" value="166" />
+        </div>
+        <div class="module-adjust-actions">
+          <button type="button" class="ghost-btn" data-selected-action="toggle">显示/隐藏</button>
+          <button type="button" class="ghost-btn" data-selected-action="up">上移</button>
+          <button type="button" class="ghost-btn" data-selected-action="down">下移</button>
+          <button type="button" class="danger-btn" data-selected-action="delete">删除</button>
+        </div>
+        <p class="soft-note">单击预览中的模块后可调整位置，双击模块会打开对应填写区。</p>
+      </aside>
+    </main>
+
+    <div class="workspace-resizer" id="workspaceResizer" role="separator" aria-label="调整预览和填写区宽度" tabindex="0"></div>
+
+    <section class="editor-drawer open" id="editorDrawer" aria-label="简历编辑表单">
+      <button class="module-sidebar-float-toggle" id="moduleSidebarFloatToggle" type="button" title="展开模块调整" aria-label="展开模块调整">›</button>
+
+      <aside class="module-sidebar" id="moduleSidebar" aria-label="模块调整侧边栏">
+        <div class="module-sidebar-head">
+          <div class="module-sidebar-title">
+            <strong>内容模块</strong>
+          </div>
+          <button class="sidebar-toggle" id="toggleModuleSidebarBtn" type="button" title="收起模块调整" aria-label="收起模块调整">‹</button>
+        </div>
+        <div class="module-sidebar-body">
+          <div class="tab-strip" id="tabStrip"></div>
+        </div>
+      </aside>
+
+      <button class="drawer-handle" id="drawerHandle" type="button" title="展开或收起填写区" aria-expanded="true">
+        <span></span>
+        <strong id="drawerLabel">收起填写区</strong>
+      </button>
+
+      <div class="drawer-content" data-active="profile">
+        <div class="drawer-main">
+          <div class="drawer-form">
+            <div class="editor-panel" id="profilePanel">
+              <div class="profile-panel-head">
+                <div>
+                  <small>个人资料</small>
+                  <strong>基本信息</strong>
+                </div>
+                <span>默认保留，不随岗位改写</span>
+              </div>
+              <div class="form-grid">
+                  <label class="field-short field-half">姓名<input id="nameInput" value="林予安" /></label>
+                  <label class="field-medium field-half">性别<select id="genderInput"><option>男</option><option>女</option><option>不填</option></select></label>
+                  <label class="field-short field-half">出生年月<input id="birthInput" type="month" value="2001-08" /></label>
+                  <label class="field-medium field-half">政治面貌<input id="politicalInput" value="群众" /></label>
+                  <label class="field-short">联系电话<input id="phoneInput" value="138****2468" /></label>
+                  <label class="profile-email-field">邮箱<span class="field-input-line email-combo"><input id="emailInput" placeholder="例如：demo@mail.com" /></span></label>
+                  <label class="field-short">到岗情况<input id="arrivalInput" value="两周内到岗" /></label>
+                  <label class="photo-upload-field">证件照上传
+                    <button type="button" class="upload-field" id="photoUploadField">
+                      <span class="upload-field-trigger">选择文件</span>
+                      <span class="upload-field-name" id="photoFileName">未上传</span>
+                    </button>
+                    <input id="photoInput" type="file" accept="image/*" hidden />
+                  </label>
+                  <label class="field-medium">工作年限<input id="workYearsInput" list="workYearsList" placeholder="如：3年 / 应届生" /></label>
+                  <label class="field-medium">婚姻状况<select id="maritalInput"><option>不填</option><option>未婚</option><option>已婚</option></select></label>
+                  <label class="field-short field-half">身高<input id="heightInput" placeholder="例如：175cm" /></label>
+                  <label class="field-short field-half">体重<input id="weightInput" placeholder="例如：65kg" /></label>
+                  <label class="field-short field-half">民族<input id="ethnicityInput" placeholder="请输入民族" /></label>
+                  <label class="field-short field-half">籍贯<input id="domicileInput" placeholder="请输入籍贯" /></label>
+              </div>
+              <div class="small-row">
+                <label class="switch"><input type="checkbox" id="showPhotoInput" checked /> 展示照片</label>
+                <button type="button" class="ghost-btn" id="addInfoBtn">添加自定义信息</button>
+              </div>
+              <div class="custom-info" id="customInfo"></div>
+            </div>
+
+            <div class="section-editor" id="sectionPanel">
+              <div class="section-form">
+                <div class="section-form-head">
+                  <div class="section-heading-copy">
+                    <small>当前编辑模块</small>
+                    <h3 id="activeSectionTitle">教育背景</h3>
+                  </div>
+                  <label class="switch"><input type="checkbox" id="sectionVisibleInput" checked /> 显示模块</label>
+                </div>
+                <div class="item-list" id="itemList"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <datalist id="monthShortcutList"></datalist>
+    <datalist id="emailSuffixList">
+      <option value="qq.com"></option>
+      <option value="163.com"></option>
+      <option value="126.com"></option>
+      <option value="gmail.com"></option>
+      <option value="outlook.com"></option>
+      <option value="hotmail.com"></option>
+    </datalist>
+    <datalist id="workYearsList">
+      <option value="应届生"></option>
+      <option value="1年"></option>
+      <option value="2年"></option>
+      <option value="3年"></option>
+      <option value="5年"></option>
+      <option value="8年"></option>
+      <option value="10年"></option>
+    </datalist>
+    <input id="importPdfInput" type="file" accept="application/pdf" hidden />
+
+    <div class="import-progress-panel" id="importProgressPanel" hidden aria-live="polite">
+      <div class="import-progress-head">
+        <strong id="importProgressStage">准备导入</strong>
+        <span id="importProgressPercent">0%</span>
+        <button id="undoImportBtn" type="button" hidden>撤销导入</button>
+      </div>
+      <p class="import-progress-detail" id="importProgressDetail">等待开始...</p>
+      <div class="import-progress-track">
+        <div class="import-progress-fill" id="importProgressFill"></div>
+      </div>
+    </div>
+
+    <script src="./assets/vendor/html2canvas.min.js?v=1.4.1"></script>
+    <script src="./assets/vendor/jspdf.umd.min.js?v=2.5.1"></script>
+    <script src="./data-layer.js?v=20260714-1"></script>
+    <script src="./timeline-model.js?v=20260714-3"></script>
+    <script src="./app.js?v=20260719-editor-bridge-2"></script>
+  </body>
+</html>

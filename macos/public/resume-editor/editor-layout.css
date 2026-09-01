@@ -1,0 +1,668 @@
+/*
+ * FetchCV editor layout contract.
+ * This file is loaded after the legacy editor theme so the document editor has
+ * one predictable geometry instead of depending on historical overrides.
+ */
+
+body:not(.dashboard-mode) {
+  --editor-sidebar-width: 158px;
+  display: grid !important;
+  grid-template-columns: minmax(420px, var(--preview-column)) 10px minmax(320px, 1fr) !important;
+  grid-template-rows: 60px minmax(0, 1fr) !important;
+  grid-template-areas:
+    "appbar appbar appbar"
+    "editor resizer preview" !important;
+  gap: 0 !important;
+  width: 100%;
+  height: 100dvh;
+  min-height: 0;
+  padding: 0 !important;
+  overflow: hidden;
+}
+
+body:not(.dashboard-mode) .appbar {
+  grid-area: appbar;
+  min-width: 0;
+  margin: 0 !important;
+}
+
+body:not(.dashboard-mode) .workspace {
+  grid-area: preview;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+body.fetchcv-preview-only .editor-drawer,
+body.fetchcv-preview-only .workspace-resizer,
+body.fetchcv-preview-only .module-sidebar-float-toggle {
+  display: none !important;
+}
+
+body.fetchcv-preview-only .workspace {
+  display: grid !important;
+}
+
+body:not(.dashboard-mode) .workspace-resizer {
+  grid-area: resizer;
+  min-width: 10px;
+  min-height: 0;
+}
+
+body:not(.dashboard-mode) .editor-drawer {
+  position: relative;
+  grid-area: editor;
+  display: grid;
+  grid-template-columns: var(--editor-sidebar-width) minmax(0, 1fr) !important;
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-areas: "modules editorContent";
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  margin: 0 !important;
+  overflow: visible;
+  border-radius: 0;
+}
+
+body:not(.dashboard-mode) .module-sidebar {
+  position: relative;
+  grid-area: modules;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  height: 100%;
+  min-height: 0;
+  padding: 0 !important;
+  overflow: hidden;
+  border-radius: 0;
+}
+
+body:not(.dashboard-mode) .module-sidebar-head {
+  min-width: 0;
+  min-height: 48px;
+  height: auto;
+  padding: 0 10px;
+}
+
+body:not(.dashboard-mode) .module-sidebar-title {
+  min-width: 0;
+  overflow: hidden;
+}
+
+body:not(.dashboard-mode) .module-sidebar-title strong,
+body:not(.dashboard-mode) .module-sidebar-title small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body:not(.dashboard-mode) .module-sidebar-body {
+  min-width: 0;
+  min-height: 0;
+  padding: 8px 6px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+body:not(.dashboard-mode) .tab-strip {
+  min-width: 0;
+  overflow: visible;
+}
+
+body:not(.dashboard-mode) .module-nav-item {
+  min-width: 0;
+}
+
+body:not(.dashboard-mode) .module-nav-item .module-name,
+body:not(.dashboard-mode) .module-nav-item > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body:not(.dashboard-mode) .module-sidebar-float-toggle {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 20;
+  display: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin: 0;
+}
+
+body:not(.dashboard-mode).module-sidebar-collapsed .editor-drawer {
+  grid-template-columns: 0 minmax(0, 1fr) !important;
+}
+
+body:not(.dashboard-mode).module-sidebar-collapsed .module-sidebar {
+  width: 0 !important;
+  min-width: 0 !important;
+  max-width: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+body:not(.dashboard-mode).module-sidebar-collapsed .module-sidebar-float-toggle {
+  display: grid;
+}
+
+body:not(.dashboard-mode) .drawer-content {
+  grid-area: editorContent;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  padding: 12px 14px 14px !important;
+  overflow: hidden;
+}
+
+body:not(.dashboard-mode).module-sidebar-collapsed .drawer-content {
+  padding-left: 52px !important;
+}
+
+body:not(.dashboard-mode) .drawer-main,
+body:not(.dashboard-mode) .drawer-form {
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+}
+
+body:not(.dashboard-mode) .drawer-form {
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 0 4px 20px 0;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+body:not(.dashboard-mode) .drawer-handle {
+  position: absolute;
+  top: 50%;
+  right: -14px;
+  z-index: 30;
+  width: 28px;
+  height: 36px;
+  margin: 0;
+  transform: translateY(-50%);
+}
+
+body:not(.dashboard-mode) .drawer-handle:hover {
+  transform: translateY(-50%);
+}
+
+body:not(.dashboard-mode) .editor-panel,
+body:not(.dashboard-mode) .section-editor {
+  min-width: 0;
+  width: 100%;
+  max-width: none;
+  overflow: visible;
+}
+
+body:not(.dashboard-mode) #profilePanel {
+  min-width: 0;
+  padding: 14px !important;
+}
+
+body:not(.dashboard-mode) .form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 100%;
+  min-width: 0;
+  gap: 12px 16px;
+}
+
+body:not(.dashboard-mode) .form-grid > label,
+body:not(.dashboard-mode) .form-grid > .profile-email-field,
+body:not(.dashboard-mode) .form-grid > .photo-upload-field {
+  min-width: 0;
+  max-width: none;
+}
+
+body:not(.dashboard-mode) .form-grid > label {
+  grid-template-columns: minmax(64px, 76px) minmax(0, 1fr);
+}
+
+body:not(.dashboard-mode) .form-grid > label.field-half > input,
+body:not(.dashboard-mode) .form-grid > label.field-half > select,
+body:not(.dashboard-mode) .form-grid > label.field-half > .field-input-line,
+body:not(.dashboard-mode) .form-grid > label.field-half > .profile-hybrid {
+  width: 100%;
+  min-width: 0;
+}
+
+body:not(.dashboard-mode) .form-grid input,
+body:not(.dashboard-mode) .form-grid select,
+body:not(.dashboard-mode) .form-grid textarea,
+body:not(.dashboard-mode) .form-grid .field-input-line,
+body:not(.dashboard-mode) .form-grid .upload-field,
+body:not(.dashboard-mode) .form-grid .profile-hybrid {
+  min-width: 0;
+  max-width: 100%;
+}
+
+body:not(.dashboard-mode) .profile-email-field {
+  grid-column: 1 / -1;
+}
+
+body:not(.dashboard-mode) .email-combo {
+  min-width: 0;
+  width: 100%;
+}
+
+body:not(.dashboard-mode) .email-combo > input,
+body:not(.dashboard-mode) .email-combo > .email-suffix-select,
+body:not(.dashboard-mode) .profile-email-field > .field-input-line > input,
+body:not(.dashboard-mode) .profile-email-field > .field-input-line > .email-suffix-select {
+  min-width: 0;
+}
+
+body:not(.dashboard-mode) .custom-info {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-width: 0;
+}
+
+body:not(.dashboard-mode) .section-form,
+body:not(.dashboard-mode) .section-editor {
+  min-height: 0;
+}
+
+body:not(.dashboard-mode) .item-list {
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+body:not(.dashboard-mode) .item-card {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+}
+
+body:not(.dashboard-mode) .item-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-width: 0;
+}
+
+body:not(.dashboard-mode) .item-grid > *,
+body:not(.dashboard-mode) .item-grid label,
+body:not(.dashboard-mode) .item-grid input,
+body:not(.dashboard-mode) .item-grid select,
+body:not(.dashboard-mode) .item-grid textarea,
+body:not(.dashboard-mode) .monthrange-control {
+  min-width: 0;
+  max-width: 100%;
+}
+
+body:not(.dashboard-mode) .rich-toolbar,
+body:not(.dashboard-mode) .rich-editor {
+  min-width: 0;
+  max-width: 100%;
+}
+
+body:not(.dashboard-mode) .rich-toolbar {
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+body:not(.dashboard-mode) .rich-editor {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+body:not(.dashboard-mode).editor-collapsed {
+  grid-template-columns: 0 0 minmax(0, 1fr) !important;
+  gap: 0 !important;
+}
+
+body:not(.dashboard-mode).editor-collapsed .editor-drawer {
+  width: 0;
+  min-width: 0;
+  max-width: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+body:not(.dashboard-mode).editor-collapsed .drawer-content,
+body:not(.dashboard-mode).editor-collapsed .module-sidebar {
+  display: none;
+}
+
+body:not(.dashboard-mode).editor-collapsed .drawer-handle {
+  top: 12px;
+  right: auto;
+  left: 8px;
+  width: 30px;
+  height: 30px;
+  transform: none;
+}
+
+body:not(.dashboard-mode).editor-collapsed .drawer-handle:hover {
+  transform: none;
+}
+
+@media (max-width: 980px) {
+  body:not(.dashboard-mode) {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: 60px minmax(0, 1fr) !important;
+    grid-template-areas:
+      "appbar"
+      "editor" !important;
+  }
+
+  body:not(.dashboard-mode) .workspace-resizer {
+    display: none !important;
+  }
+
+  body:not(.dashboard-mode) .workspace {
+    display: none;
+    grid-area: editor;
+  }
+
+  body:not(.dashboard-mode) .editor-drawer {
+    grid-area: editor;
+    grid-template-columns: 150px minmax(0, 1fr) !important;
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
+  }
+
+  body:not(.dashboard-mode) .drawer-content {
+    padding: 12px 14px 14px !important;
+  }
+
+  body:not(.dashboard-mode).module-sidebar-collapsed .drawer-content {
+    padding-left: 52px !important;
+  }
+
+  body:not(.dashboard-mode).editor-collapsed {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: 60px minmax(0, 1fr) !important;
+    grid-template-areas:
+      "appbar"
+      "preview" !important;
+  }
+
+  body:not(.dashboard-mode).editor-collapsed .editor-drawer {
+    display: none;
+  }
+
+  body:not(.dashboard-mode).editor-collapsed .workspace,
+  body:not(.dashboard-mode).fetchcv-preview-only .workspace {
+    display: grid;
+  }
+
+  body:not(.dashboard-mode).editor-collapsed .drawer-handle {
+    display: grid;
+    position: fixed;
+    top: 72px;
+    left: 10px;
+    z-index: 80;
+  }
+}
+
+@media (max-width: 640px) {
+  body:not(.dashboard-mode) {
+    grid-template-rows: auto minmax(0, 1fr) !important;
+  }
+
+  body:not(.dashboard-mode) .appbar {
+    min-height: 60px;
+    height: auto;
+    max-height: 112px;
+    overflow: hidden;
+  }
+
+  body:not(.dashboard-mode) .editor-drawer {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-areas:
+      "modules"
+      "editorContent";
+  }
+
+  body:not(.dashboard-mode) .module-sidebar {
+    height: auto;
+    max-height: 142px;
+    border-right: 0;
+    border-bottom: 1px solid var(--editor-line, #dbe2e8);
+  }
+
+  body:not(.dashboard-mode) .module-sidebar-head {
+    min-height: 42px;
+  }
+
+  body:not(.dashboard-mode) .module-sidebar-body {
+    padding: 4px 8px 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  body:not(.dashboard-mode) .tab-strip {
+    display: flex;
+    gap: 6px;
+    width: max-content;
+  }
+
+  body:not(.dashboard-mode) .module-nav-item {
+    flex: 0 0 auto;
+    width: 116px;
+  }
+
+  body:not(.dashboard-mode) .module-sidebar-float-toggle {
+    top: 8px;
+    right: 8px;
+    left: auto;
+  }
+
+  body:not(.dashboard-mode) .drawer-content,
+  body:not(.dashboard-mode).module-sidebar-collapsed .drawer-content {
+    padding: 10px !important;
+  }
+
+  body:not(.dashboard-mode) .form-grid,
+  body:not(.dashboard-mode) .custom-info,
+  body:not(.dashboard-mode) .item-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  body:not(.dashboard-mode) .form-grid > label {
+    grid-template-columns: minmax(72px, 88px) minmax(0, 1fr);
+  }
+
+  body:not(.dashboard-mode) .profile-email-field {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 480px) {
+  body:not(.dashboard-mode) .form-grid > label {
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
+
+  body:not(.dashboard-mode) .small-row,
+  body:not(.dashboard-mode) .section-form-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  body:not(.dashboard-mode) .section-form-head .switch {
+    align-self: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body:not(.dashboard-mode) .editor-drawer,
+  body:not(.dashboard-mode) .module-sidebar,
+  body:not(.dashboard-mode) .drawer-content {
+    transition: none !important;
+  }
+}
+
+/* Preview frames are a separate, full-viewport document mode. */
+body.fetchcv-preview-only {
+  display: block !important;
+  width: 100%;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+body.fetchcv-preview-only .workspace {
+  display: block !important;
+  width: 100%;
+  height: 100vh;
+  min-height: 0;
+}
+
+/* Embedded editing is a focused two-pane studio: structured fields on the
+   left and the exact printable document on the right. FetchCV owns the outer
+   window chrome, while this compact toolbar keeps template controls available. */
+body.fetchcv-embedded:not(.fetchcv-preview-only):not(.dashboard-mode) {
+  display: grid !important;
+  grid-template-columns: minmax(520px, 1.08fr) 8px minmax(440px, .92fr) !important;
+  grid-template-rows: 44px minmax(0, 1fr) !important;
+  grid-template-areas:
+    "appbar appbar appbar"
+    "editor resizer preview" !important;
+  background: #f4f1ea;
+}
+
+body.fetchcv-embedded:not(.fetchcv-preview-only):not(.dashboard-mode) .appbar {
+  display: flex !important;
+  min-height: 44px;
+  height: 44px;
+}
+
+body.fetchcv-embedded:not(.fetchcv-preview-only):not(.dashboard-mode) .workspace {
+  display: grid !important;
+}
+
+body.fetchcv-embedded:not(.fetchcv-preview-only):not(.dashboard-mode) .workspace-resizer {
+  display: block !important;
+}
+
+/* A collapsed module list becomes a dedicated reveal rail. The control stays
+   in layout instead of floating above the active section heading. */
+body.fetchcv-embedded:not(.fetchcv-preview-only):not(.dashboard-mode).module-sidebar-collapsed .editor-drawer {
+  grid-template-columns: 44px minmax(0, 1fr) !important;
+  grid-template-areas: "moduleToggle editorContent" !important;
+}
+
+body.fetchcv-embedded:not(.fetchcv-preview-only):not(.dashboard-mode).module-sidebar-collapsed .module-sidebar-float-toggle {
+  position: static !important;
+  grid-area: moduleToggle;
+  align-self: start;
+  justify-self: center;
+  display: grid;
+  width: 30px;
+  height: 30px;
+  margin: 14px 0 0;
+}
+
+body.fetchcv-embedded:not(.fetchcv-preview-only):not(.dashboard-mode).module-sidebar-collapsed .drawer-content {
+  padding-left: 16px !important;
+  border-left: 1px solid #e5dfd5;
+}
+
+/* The toolbar preview is a real document mode, not an empty editor column. */
+body.fetchcv-embedded:not(.fetchcv-preview-only):not(.dashboard-mode).editor-collapsed {
+  grid-template-columns: minmax(0, 1fr) !important;
+  grid-template-rows: 44px minmax(0, 1fr) !important;
+  grid-template-areas:
+    "appbar"
+    "preview" !important;
+}
+
+body.fetchcv-embedded:not(.fetchcv-preview-only):not(.dashboard-mode).editor-collapsed .workspace {
+  grid-area: preview;
+  display: grid !important;
+  width: 100%;
+  height: 100%;
+}
+
+body.fetchcv-embedded:not(.fetchcv-preview-only):not(.dashboard-mode).editor-collapsed .editor-drawer,
+body.fetchcv-embedded:not(.fetchcv-preview-only):not(.dashboard-mode).editor-collapsed .workspace-resizer,
+body.fetchcv-embedded:not(.fetchcv-preview-only):not(.dashboard-mode).editor-collapsed .module-sidebar-float-toggle,
+body.fetchcv-embedded:not(.fetchcv-preview-only):not(.dashboard-mode).editor-collapsed .settings-card {
+  display: none !important;
+}
+
+@media (max-width: 980px) {
+  body.fetchcv-embedded:not(.fetchcv-preview-only):not(.dashboard-mode) .editor-drawer {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-areas:
+      "modules"
+      "editorContent";
+    overflow: hidden;
+  }
+
+  body.fetchcv-embedded:not(.fetchcv-preview-only):not(.dashboard-mode) .module-sidebar {
+    height: auto;
+    max-height: 142px;
+    border-right: 0;
+    border-bottom: 1px solid #e5dfd5;
+  }
+
+  body.fetchcv-embedded:not(.fetchcv-preview-only):not(.dashboard-mode) .module-sidebar-body {
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  body.fetchcv-embedded:not(.fetchcv-preview-only):not(.dashboard-mode) .tab-strip {
+    display: flex;
+    gap: 6px;
+    width: max-content;
+  }
+
+  body.fetchcv-embedded:not(.fetchcv-preview-only):not(.dashboard-mode) .module-nav-item {
+    flex: 0 0 auto;
+    width: 140px;
+  }
+
+  body.fetchcv-embedded:not(.fetchcv-preview-only):not(.dashboard-mode) .drawer-content {
+    padding: 12px !important;
+    overflow: hidden;
+  }
+
+  body.fetchcv-embedded:not(.fetchcv-preview-only):not(.dashboard-mode) .drawer-form {
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  body.fetchcv-embedded:not(.fetchcv-preview-only):not(.dashboard-mode) .form-grid,
+  body.fetchcv-embedded:not(.fetchcv-preview-only):not(.dashboard-mode) .custom-info,
+  body.fetchcv-embedded:not(.fetchcv-preview-only):not(.dashboard-mode) .item-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  body.fetchcv-embedded:not(.fetchcv-preview-only):not(.dashboard-mode) .form-grid > label {
+    grid-template-columns: minmax(72px, 92px) minmax(0, 1fr);
+  }
+
+  body.fetchcv-embedded:not(.fetchcv-preview-only):not(.dashboard-mode) .form-grid > label.field-half > input,
+  body.fetchcv-embedded:not(.fetchcv-preview-only):not(.dashboard-mode) .form-grid > label.field-half > select,
+  body.fetchcv-embedded:not(.fetchcv-preview-only):not(.dashboard-mode) .form-grid > label.field-half > .field-input-line,
+  body.fetchcv-embedded:not(.fetchcv-preview-only):not(.dashboard-mode) .form-grid > label.field-half > .profile-hybrid {
+    width: 100%;
+  }
+
+  body.fetchcv-embedded:not(.fetchcv-preview-only):not(.dashboard-mode) .profile-email-field {
+    grid-column: auto;
+  }
+}
