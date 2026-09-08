@@ -366,6 +366,14 @@ function registerIpc() {
   }));
   ipcMain.handle("pi-agent:steer-task", (_event, input) => piAgentRuntime.steerTask(String(input?.runId || ""), input || {}));
   ipcMain.handle("clipboard:read-text", () => clipboard.readText());
+  ipcMain.handle("xiaohongshu:begin-login", () => {
+    if (!browserBridge) throw new Error("浏览器尚未就绪，请稍后重试");
+    return browserBridge.beginLogin();
+  });
+  ipcMain.handle("xiaohongshu:finish-login", () => {
+    if (!browserBridge) throw new Error("浏览器尚未就绪，请稍后重试");
+    return browserBridge.finishLogin();
+  });
   ipcMain.handle("source:open-external", async (_event, input) => {
     const url = String(input?.url || "");
     const title = String(input?.title || "").slice(0, 300);
@@ -720,7 +728,6 @@ if (!hasLock) {
     const browserPromise = browserOptions
       ? startBrowserBridge({
         ...browserOptions,
-        credentialFile: path.join(app.getPath("userData"), "settings", "xiaohongshu-session.bin"),
         accessCacheFile: path.join(app.getPath("userData"), "settings", "xiaohongshu-public-links.bin"),
       }).catch((error) => {
         console.error("Controlled browser bridge failed to start:", error instanceof Error ? error.message : String(error));

@@ -30,8 +30,8 @@ test("interview research is model driven and requests traceable tool work", () =
   assert.match(skill, /search_interview_knowledge/);
   assert.match(skill, /capture_interview_source/);
   assert.match(skill, /build_interview_brief/);
-  assert.match(skill, /primary corpus/);
-  assert.match(skill, /never use generic `search_web`/i);
+  assert.match(skill, /Default research must include a Nowcoder discovery attempt/);
+  assert.match(skill, /Never use `search_web`/i);
 });
 
 test("interview research keeps Xiaohongshu access read-only and renders local snapshots", () => {

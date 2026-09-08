@@ -5,6 +5,29 @@ import {
   SearchCheck, ShieldCheck, Sparkles,
 } from "lucide-react";
 import { lazy, Suspense, useMemo, useState } from "react";
+
+function XiaohongshuConnection() {
+  const [opened, setOpened] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState("");
+  if (!window.appRuntime?.beginXiaohongshuLogin) return null;
+  async function connect() {
+    setPending(true);
+    try {
+      const result = opened ? await window.appRuntime.finishXiaohongshuLogin() : await window.appRuntime.beginXiaohongshuLogin();
+      setOpened(!result.connected);
+      setMessage(result.message || "请在独立窗口完成扫码，再点击「我已登录」。关闭窗口可取消，重新连接后可再次打开。");
+    } catch (error) { setMessage(error.message || "登录窗口打开失败，请重试。"); }
+    finally { setPending(false); }
+  }
+  return <div className="interview-public-mode"><ShieldCheck size={14} /><span>
+    <strong>小红书登录会话仅保存在本机</strong>
+    <small>登录后低频读取；遇到验证码或限流仍会停止。</small>
+    <button type="button" disabled={pending} onClick={connect}>{pending ? "处理中…" : opened ? "我已登录，继续" : "连接小红书"}</button>
+    {opened && <button type="button" disabled={pending} onClick={() => { setOpened(false); setMessage(""); }}>重新连接</button>}
+    {message && <small role="status">{message}</small>}
+  </span></div>;
+}
 import { formatInterviewSourceDate, sortInterviewSourcesNewest } from "../lib/interview-sources";
 import { openOriginalInterviewSource } from "../lib/interview-source-actions";
 import { sanitizeAssistantContent } from "../lib/model-protocol";
@@ -196,7 +219,7 @@ export function InterviewIntelligence({ detail, activity, busy, error, runtime, 
           <span className="interview-empty-mark"><BookOpenCheck size={22} /></span>
           <p className="eyebrow">INTERVIEW INTELLIGENCE</p>
           <h2>从真实面经，准备下一轮</h2>
-          <p>Agent 先复用本地知识库，完整检索小红书主来源，再读取牛客等公开原文进行交叉验证。</p>
+          <p>先复用已核验面经，再结合小红书与牛客原帖交叉验证。小红书按访问预算少量读取，受限时自动转向牛客。</p>
           <div className="interview-empty-flow">
             <span><SearchCheck size={14} />检索知识库</span><i />
             <span><ExternalLink size={14} />验证多站点原帖</span><i />
@@ -204,6 +227,7 @@ export function InterviewIntelligence({ detail, activity, busy, error, runtime, 
           </div>
           <div className="interview-public-mode"><ShieldCheck size={14} /><span><strong>原帖优先，快照备用</strong><small>失效页不会进入简报；遇到验证码或访问限制会立即停止。</small></span></div>
           <button className="interview-primary" disabled={busy || !canResearch} onClick={onResearch}><Sparkles size={15} />开始面试调研</button>
+          <XiaohongshuConnection />
           {!canResearch && <small className="interview-empty-note"><CircleAlert size={12} />请先在设置中连接模型</small>}
         </motion.section>
       </div>
@@ -213,6 +237,7 @@ export function InterviewIntelligence({ detail, activity, busy, error, runtime, 
   return (
     <div className="interview-scroll content-scroll">
       <div className="interview-page">
+        <XiaohongshuConnection />
         <AnimatePresence mode="popLayout">{researching && <ResearchProgress key="research-progress" activity={activity} />}</AnimatePresence>
         {!brief && researchResult && (
           <ResearchOutcome
@@ -333,10 +358,10 @@ export function InterviewRail({ detail, activity, busy, runtime, onResearch }) {
         <header><ShieldCheck size={13} /><span>来源校验策略</span></header>
         <ul>
           <li><Database size={12} />本地知识库与缓存优先</li>
-          <li><SearchCheck size={12} />小红书检索到耗尽，再补充牛客等站点</li>
+          <li><SearchCheck size={12} />小红书低频读取，牛客默认参与交叉验证</li>
           <li><CircleAlert size={12} />失效、登录、验证码页面不进入简报</li>
         </ul>
-        <small>不设固定帖子数；只读访问仍会限速，并在平台访问保护触发时停止。</small>
+        <small>按共享访问预算分批读取；受限时停止小红书，保留缓存并继续牛客。</small>
       </section>
 
       <button className="interview-rail-refresh" type="button" disabled={busy || !canResearch} onClick={onResearch}>

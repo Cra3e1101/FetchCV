@@ -1,6 +1,7 @@
 import { BrowserWindow, safeStorage, session } from "electron";
-import { randomBytes } from "node:crypto";
+import { randomBytes, createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { createLocalNoteOcr } from "./local-note-ocr.mjs";
 import { lookup } from "node:dns/promises";
 import fs from "node:fs";
 import path from "node:path";
@@ -10,6 +11,8 @@ import {
   canonicalXiaohongshuUrl,
   createXiaohongshuAccessCache,
   createXiaohongshuPublicAccessGuard,
+  createBrowserCommandGate,
+  extractXiaohongshuNote,
   isXiaohongshuUrl,
   xiaohongshuRecoveryQueries,
 } from "./xiaohongshu-adapter.mjs";
@@ -17,14 +20,12 @@ import {
 const HOST = "127.0.0.1";
 const MAX_BODY_BYTES = 16 * 1024;
 const MAX_TEXT_CHARS = 50000;
-// Keep the controlled browser isolated from the main UI. A pre-existing,
-// locally encrypted Xiaohongshu session may be restored because anonymous
-// search is often replaced by an unrelated recommendation feed. Research is
-// read-only, relevance-gated, paced, and circuit-broken on login/CAPTCHA.
-const PARTITION = "persist:fetchcv-browser";
+// Research is isolated from account sessions and reuses encrypted local pages.
+// Public access is budgeted and stops on restriction; no frequency guarantees safety.
+const PARTITION = "persist:fetchcv-public-browser-v2";
 const DNS_CACHE_MS = 5 * 60 * 1000;
-const XHS_SEARCH_CACHE_MS = 10 * 60 * 1000;
-const XHS_NOTE_CACHE_MS = 6 * 60 * 60 * 1000;
+const XHS_SEARCH_CACHE_MS = 4 * 60 * 60 * 1000;
+const XHS_NOTE_CACHE_MS = 7 * 24 * 60 * 60 * 1000;
 
 function decryptLocalCredentialFile(filePath) {
   const encrypted = fs.readFileSync(filePath);
@@ -212,13 +213,17 @@ export async function startBrowserBridge(options = {}) {
   const validateUrl = await createUrlValidator();
   const browserSession = session.fromPartition(PARTITION, { cache: true });
   let storedAccessEntries = [];
+  let storedDocument = {};
   if (options.accessCacheFile && safeStorage.isEncryptionAvailable() && fs.existsSync(options.accessCacheFile)) {
     try {
-      storedAccessEntries = JSON.parse(decryptLocalCredentialFile(options.accessCacheFile))?.entries || [];
+      storedDocument = JSON.parse(decryptLocalCredentialFile(options.accessCacheFile)) || {};
+      storedAccessEntries = storedDocument.entries || [];
     } catch {
       storedAccessEntries = [];
     }
   }
+  let pendingGuardState = storedDocument.guard || {};
+  const xhsPageCache = new Map((storedDocument.pages || []).filter(([, entry]) => entry?.expiresAt > Date.now()).slice(-80));
   let accessCacheWriteTimer = null;
   let pendingAccessEntries = storedAccessEntries;
   const persistAccessEntries = () => {
@@ -226,7 +231,7 @@ export async function startBrowserBridge(options = {}) {
     fs.mkdirSync(path.dirname(options.accessCacheFile), { recursive: true });
     fs.writeFileSync(
       options.accessCacheFile,
-      safeStorage.encryptString(JSON.stringify({ version: 1, entries: pendingAccessEntries })),
+      safeStorage.encryptString(JSON.stringify({ version: 2, entries: pendingAccessEntries, guard: pendingGuardState, pages: [...xhsPageCache].filter(([, entry]) => entry.expiresAt > Date.now()).slice(-80) })),
     );
   };
   const scheduleAccessCacheWrite = (entries) => {
@@ -242,44 +247,28 @@ export async function startBrowserBridge(options = {}) {
     initialEntries: storedAccessEntries,
     onChange: scheduleAccessCacheWrite,
   });
-  const xhsPublicGuard = createXiaohongshuPublicAccessGuard();
-  const xhsPageCache = new Map();
+  const xhsPublicGuard = createXiaohongshuPublicAccessGuard({ initialState: pendingGuardState, onChange: (state) => {
+    pendingGuardState = state;
+    try { persistAccessEntries(); } catch { /* Persistence failure must not reset the in-memory guard. */ }
+  } });
   const xhsNetworkCandidates = new Map();
   const xhsSearchRequests = new Set();
   const xhsObservedSearchPaths = new Set();
   let lastExternalResolution = null;
   let lastBlockedRequest = null;
   let browserWindow = null;
+  let paintedFrame = null;
+  const getPaintedFrame = () => paintedFrame;
+  let loginWindow = null;
+  const imageRequests = new Map();
+  const loadedImages = new Map();
+  const imageReads = new Set();
+  const ocrDirectory = options.accessCacheFile ? path.join(path.dirname(options.accessCacheFile), "interview-ocr") : "";
+  const ocrBinary = path.join(process.env.ProgramFiles || "C:\\Program Files", "Tesseract-OCR", "tesseract.exe");
+  const localOcr = ocrDirectory && fs.existsSync(ocrBinary) ? createLocalNoteOcr({ directory: ocrDirectory, binary: ocrBinary }) : null;
 
-  if (options.credentialFile && safeStorage.isEncryptionAvailable() && fs.existsSync(options.credentialFile)) {
-    try {
-      const stored = JSON.parse(decryptLocalCredentialFile(options.credentialFile));
-      const allowedNames = new Set(["a1", "webId", "web_session", "web_session_sec"]);
-      for (const [name, rawValue] of Object.entries(stored?.cookies || {})) {
-        const value = String(rawValue || "");
-        if (!allowedNames.has(name) || !value || value.length > 4096) continue;
-        await browserSession.cookies.remove("https://www.xiaohongshu.com/", name).catch(() => {});
-        await browserSession.cookies.set({
-          url: "https://www.xiaohongshu.com/",
-          domain: ".xiaohongshu.com",
-          path: "/",
-          name,
-          value,
-          httpOnly: name.startsWith("web_session"),
-          secure: true,
-          sameSite: "lax",
-          expirationDate: Math.floor(Date.now() / 1000) + (30 * 24 * 60 * 60),
-        });
-      }
-    } catch (error) {
-      // A corrupt or expired session is recoverable: public discovery and
-      // specialist-community fallbacks remain available.
-      console.error(
-        "Stored Xiaohongshu session could not be restored:",
-        error instanceof Error ? error.message : String(error),
-      );
-    }
-  }
+  // Research uses its own public partition. Never import saved account cookies
+  // into background research; rate limiting alone cannot guarantee account safety.
 
   browserSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
   browserSession.on("will-download", (event) => event.preventDefault());
@@ -334,15 +323,25 @@ export async function startBrowserBridge(options = {}) {
         nodeIntegration: false,
         sandbox: true,
         webSecurity: true,
+        offscreen: true,
+        backgroundThrottling: false,
       },
     });
     browserWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    browserWindow.webContents.on("paint", (_event, _dirty, image) => { if (!image.isEmpty()) paintedFrame = image; });
     try {
       browserWindow.webContents.debugger.attach("1.3");
       void browserWindow.webContents.debugger.sendCommand("Network.enable");
       browserWindow.webContents.debugger.on("message", (_event, method, params) => {
         if (method === "Network.responseReceived") {
           const responseUrl = String(params?.response?.url || "");
+          if (String(params?.response?.mimeType || "").startsWith("image/") && /\/(?:explore|discovery\/item)\/[^/?]+/.test(browserWindow.webContents.getURL())) {
+            if (imageRequests.size < 100) imageRequests.set(params.requestId, responseUrl);
+          }
+          if (isXiaohongshuUrl(responseUrl) && [401, 403, 429].includes(params?.response?.status)) {
+            xhsPublicGuard.afterOpen({ user_action: "rate_limited" });
+            if (browserWindow && !browserWindow.isDestroyed()) browserWindow.webContents.stop();
+          }
           try {
             const observed = new URL(responseUrl);
             if (observed.hostname.endsWith("xiaohongshu.com") && /search|feed/i.test(observed.pathname)) {
@@ -354,12 +353,31 @@ export async function startBrowserBridge(options = {}) {
           }
           return;
         }
+        if (method === "Network.loadingFinished" && imageRequests.has(params.requestId)) {
+          const imageUrl = imageRequests.get(params.requestId);
+          imageRequests.delete(params.requestId);
+          if (params.encodedDataLength <= 8 * 1024 * 1024) {
+            const read = browserWindow.webContents.debugger.sendCommand("Network.getResponseBody", { requestId: params.requestId })
+              .then(({ body, base64Encoded }) => {
+                const bytes = Buffer.from(body, base64Encoded ? "base64" : "utf8");
+                const size = [...loadedImages.values()].reduce((sum, image) => sum + image.length, 0);
+                if (bytes.length <= 8 * 1024 * 1024 && size + bytes.length <= 40 * 1024 * 1024) loadedImages.set(imageUrl, bytes);
+              }).catch(() => {});
+            imageReads.add(read);
+            void read.finally(() => imageReads.delete(read));
+          }
+        }
         if (method !== "Network.loadingFinished" || !xhsSearchRequests.delete(params.requestId)) return;
         void browserWindow.webContents.debugger.sendCommand("Network.getResponseBody", { requestId: params.requestId })
           .then(({ body, base64Encoded }) => {
             const raw = base64Encoded ? Buffer.from(body, "base64").toString("utf8") : String(body || "");
             if (!raw || raw.length > 8 * 1024 * 1024) return;
             const parsed = JSON.parse(raw);
+            if ([-104, -102, 300012, 300013].includes(Number(parsed?.code)) || /访问频繁|访问异常|没有权限|验证码/.test(String(parsed?.msg || ""))) {
+              xhsPublicGuard.afterOpen({ user_action: "rate_limited" });
+              if (browserWindow && !browserWindow.isDestroyed()) browserWindow.webContents.stop();
+              return;
+            }
             for (const [noteId, candidate] of collectXiaohongshuSearchCandidates(parsed)) {
               xhsNetworkCandidates.set(noteId, candidate);
             }
@@ -401,6 +419,10 @@ export async function startBrowserBridge(options = {}) {
       candidates.push(clean(document.body));
       const jobSignal = (value) => /岗位职责|工作职责|工作内容|职位描述|任职要求|职位要求|岗位要求|实习内容|responsibilities|qualifications|requirements|job description/i.test(value);
       let text = candidates.sort((left, right) => ((jobSignal(right) ? 100000 : 0) + right.length) - ((jobSignal(left) ? 100000 : 0) + left.length))[0] || '';
+      // Nowcoder's article container excludes the comment feed and recommendations.
+      // If its layout changes, leave the body empty instead of persisting page chrome.
+      const isNowcoderPost = ['www.nowcoder.com', 'm.nowcoder.com', 'nowcoder.com'].includes(location.hostname) && !location.pathname.startsWith('/search/');
+      if (isNowcoderPost) text = clean(document.querySelector('.nc-post-content'));
       const visible = (node) => Boolean(node && (node.getClientRects().length || node.offsetWidth || node.offsetHeight));
       const password = Array.from(document.querySelectorAll('input[type="password"]')).some(visible);
       const captcha = Array.from(document.querySelectorAll('iframe[src*="captcha" i], [class*="captcha" i], [id*="captcha" i], [class*="verify" i]')).some(visible) || /验证码|人机验证|captcha|verify you are human|security check/i.test(text.slice(0, 12000));
@@ -435,43 +457,21 @@ export async function startBrowserBridge(options = {}) {
         const normalized = normalize(value);
         if (normalized.length >= 20 && !xhsNoteCandidates.includes(normalized)) xhsNoteCandidates.push(normalized);
       };
+      let exactNote = null;
       if (isXhsNote) {
-        addNoteCandidate([metaTitle, metaDescription].filter(Boolean).join(' '));
-        document.querySelectorAll('.note-detail-mask, .note-detail, .note-content, .interaction-container, [class*="note-detail" i], [class*="noteDetail" i], [class*="note-content" i], [class*="noteContent" i], [class*="desc" i]').forEach((node) => {
-          if (visible(node)) addNoteCandidate(clean(node, true));
-        });
-        const visited = new WeakSet();
-        let visitedCount = 0;
-        const inspectState = (value, depth = 0) => {
-          if (!value || typeof value !== 'object' || depth > 8 || visitedCount > 7000 || visited.has(value)) return;
-          visited.add(value);
-          visitedCount += 1;
-          if (!Array.isArray(value)) {
-            const title = typeof value.title === 'string' ? value.title : '';
-            const description = typeof value.desc === 'string' ? value.desc : typeof value.description === 'string' ? value.description : typeof value.content === 'string' ? value.content : '';
-            if (title || description) addNoteCandidate([title, description].filter(Boolean).join(' '));
-            rememberPublishedAt(
-              value.publishTime ?? value.publish_time
-              ?? value.createTime ?? value.create_time
-              ?? value.lastUpdateTime ?? value.last_update_time
-            );
-          }
-          for (const item of Object.values(value)) inspectState(item, depth + 1);
-        };
-        try { inspectState(window.__INITIAL_STATE__); } catch {}
-        if (!xhsPublishedAt) {
-          document.querySelectorAll('time[datetime], [data-time], [class*="publish-time" i], [class*="publishTime" i], [class*="date" i]').forEach((node) => {
-            if (!visible(node) || xhsPublishedAt) return;
-            rememberPublishedAt(node.getAttribute('datetime') || node.getAttribute('data-time') || node.getAttribute('title') || node.textContent);
+        const noteId = location.pathname.split('/').filter(Boolean).pop();
+        try { exactNote = (${extractXiaohongshuNote.toString()})(window.__INITIAL_STATE__, noteId); } catch {}
+        if (exactNote) {
+          text = normalize([exactNote.title, exactNote.description].filter(Boolean).join(' '));
+          rememberPublishedAt(exactNote.publishedAt);
+        } else {
+          // Only leaf description nodes, never the enclosing note/comment panel.
+          document.querySelectorAll('#detail-desc, .note-content .desc, .note-text').forEach((node) => {
+            if (visible(node)) addNoteCandidate(clean(node, true));
           });
+          text = xhsNoteCandidates.sort((a, b) => b.length - a.length)[0] || '';
+          if (text) text = normalize(metaTitle + ' ' + text);
         }
-        const interviewSignal = (value) => /面经|面试|一面|二面|三面|终面|HR面|面试官|复盘|问题|追问|自我介绍|case|群面/i.test(value);
-        const noiseSignal = (value) => /登录后|扫码登录|隐私政策|社区公约|打开小红书|相关推荐/.test(value);
-        const ranked = xhsNoteCandidates.sort((left, right) => {
-          const score = (value) => Math.min(value.length, 12000) + (interviewSignal(value) ? 50000 : 0) - (noiseSignal(value) ? 20000 : 0);
-          return score(right) - score(left);
-        });
-        if (ranked[0]) text = ranked[0];
       }
 
       const seen = new Set();
@@ -533,21 +533,22 @@ export async function startBrowserBridge(options = {}) {
         try { inspectSearchState(window.__INITIAL_STATE__); } catch {}
       }
       const xhsLogin = isXhs && /登录后查看|扫码登录|手机号登录|登录即可|请先登录/.test(clean(document.body).slice(0, 16000)) && !(isXhsNote && /面经|面试|一面|二面|三面|终面|HR面|面试官|复盘|问题|追问|自我介绍|case|群面/i.test(text));
-      const imageCount = isXhsNote ? Array.from(document.querySelectorAll('.note-detail-mask img, .note-detail img, [class*="note-detail" i] img, [class*="swiper" i] img')).filter(visible).length : 0;
+      const imageCount = exactNote ? exactNote.imageCount : isXhsNote ? new Set(Array.from(document.querySelectorAll('.note-detail .swiper img, .note-detail-mask .swiper img')).map(node => node.currentSrc || node.src).filter(Boolean)).size : 0;
       const noteReady = isXhsNote && text.length >= 80 && /面经|面试|一面|二面|三面|终面|HR面|面试官|复盘|问题|追问|自我介绍|case|群面/i.test(text);
       const xhsReady = (isXhsSearch && xhsCandidates.length > 0) || noteReady;
       return {
         text: text.slice(0, ${MAX_TEXT_CHARS}), links, password, captcha, job_ready: jobSignal(text) && text.length >= 180,
         platform: isXhs ? 'xiaohongshu' : '', page_kind: isXhsNote ? 'note' : isXhsSearch ? 'search' : '',
         xhs_candidates: xhsCandidates, xhs_ready: xhsReady, note_ready: noteReady, xhs_login: xhsLogin,
-        image_count: imageCount, meta_title: metaTitle, meta_description: metaDescription, published_at: xhsPublishedAt,
+        image_count: imageCount, image_urls: exactNote?.imageUrls || [], image_groups: exactNote?.imageGroups || [], meta_title: metaTitle, meta_description: metaDescription, published_at: xhsPublishedAt,
       };
     })()`, true).catch(() => ({ text: "", links: [], password: false, captcha: false, job_ready: false, xhs_candidates: [] }));
     const loginRequired = Boolean(page.password || page.captcha || page.xhs_login);
     const normalizeLink = (item) => {
       if (!item || typeof item.url !== "string") return null;
       const originalUrl = item.url;
-      const url = isXiaohongshuUrl(originalUrl) ? xhsAccessCache.remember(originalUrl) : originalUrl;
+      const relevantGrant = page.page_kind === "search" || (xiaohongshuNoteId(originalUrl) && xiaohongshuNoteId(originalUrl) === xiaohongshuNoteId(contents.getURL()));
+      const url = isXiaohongshuUrl(originalUrl) ? relevantGrant ? xhsAccessCache.remember(originalUrl) : canonicalXiaohongshuUrl(originalUrl) : originalUrl;
       return {
         url,
         title: String(item.title || "").slice(0, 300),
@@ -580,13 +581,83 @@ export async function startBrowserBridge(options = {}) {
       candidate_access_grants: xhsCandidates.filter((item) => item.access_grant).length,
       observed_search_paths: [...xhsObservedSearchPaths].slice(0, 20),
       image_count: Number(page.image_count || 0),
+      image_urls: page.image_urls || [],
+      image_groups: page.image_groups || [],
       published_at: String(page.published_at || "").slice(0, 80),
       description: String(page.meta_description || "").slice(0, 1000),
       truncated: page.text.length >= MAX_TEXT_CHARS,
     };
   }
 
-  async function command(payload) {
+  async function readVisibleImage(state) {
+    if (!localOcr) return { ...state, ocr_status: "unavailable" };
+    try {
+      await Promise.allSettled([...imageReads]);
+      const files = [];
+      const digest = createHash("sha256").update(canonicalXiaohongshuUrl(state.url));
+      fs.mkdirSync(ocrDirectory, { recursive: true });
+      const unique = new Set();
+      for (const group of state.image_groups || []) {
+        const url = group.find(value => loadedImages.has(value));
+        if (!url) continue;
+        const bytes = loadedImages.get(url);
+        const hash = createHash("sha256").update(bytes).digest("hex");
+        if (unique.has(hash)) continue;
+        unique.add(hash);
+        const file = path.join(ocrDirectory, `${hash}.img`);
+        fs.writeFileSync(file, bytes);
+        files.push(file); digest.update(hash);
+        if (files.length >= 12) break;
+      }
+      let method = "loaded_response";
+      if (!files.length) {
+        // Fallback uses already rendered pixels; it does not advance the carousel.
+        const rect = await browserWindow.webContents.executeJavaScript(`(async () => {
+          const images = Array.from(document.querySelectorAll('.note-detail-mask img, .note-detail img, .swiper img'));
+          await Promise.race([Promise.allSettled(images.map(img => img.decode())), new Promise(resolve => setTimeout(resolve, 1000))]);
+          return images.filter(img => img.complete && img.naturalWidth >= 300)
+            .map(img => { const r = img.getBoundingClientRect(); return { x: Math.max(0, Math.ceil(r.x)), y: Math.max(0, Math.ceil(r.y)),
+              width: Math.floor(Math.min(r.right, innerWidth) - Math.max(0, r.left)), height: Math.floor(Math.min(r.bottom, innerHeight) - Math.max(0, r.top)) }; })
+            .filter(r => r.width >= 200 && r.height >= 200).sort((a,b) => b.width*b.height-a.width*a.height)[0] || null;
+        })()`, true);
+        if (!rect) return { ...state, ocr_status: "no_loaded_images" };
+        // Offscreen frames are already rendered. Reading their bitmap avoids
+        // Chromium capturePage's hidden-window compositor (UnknownVizError).
+        {
+          await new Promise(resolve => {
+            const contents = browserWindow.webContents;
+            const finish = () => { clearTimeout(timer); contents.removeListener("paint", onPaint); resolve(); };
+            const onPaint = (_event, _dirty, image) => { if (!image.isEmpty()) finish(); };
+            const timer = setTimeout(finish, 2000);
+            contents.on("paint", onPaint);
+            contents.startPainting();
+            contents.invalidate();
+          });
+        }
+        const frame = getPaintedFrame();
+        if (!frame || frame.isEmpty()) return { ...state, ocr_status: "frame_not_ready" };
+        const bytes = frame.crop(rect).toPNG();
+        const hash = createHash("sha256").update(bytes).digest("hex");
+        const file = path.join(ocrDirectory, `${hash}.png`);
+        fs.writeFileSync(file, bytes); files.push(file); digest.update(hash);
+        method = "visible_screenshot";
+      }
+      const job = localOcr.enqueue(digest.digest("hex"), files);
+      return { ...state, ocr_status: job.status, ocr_job_id: job.id, ocr_images_saved: files.length,
+        ocr_capture_method: method, ocr_images_processed: job.completed };
+    } catch (error) {
+      console.error("Local image preparation failed:", error.name, error.message);
+      return { ...state, ocr_status: "failed", ocr_error_type: error.name };
+    }
+  }
+
+  async function runCommand(payload) {
+    if (payload?.command === "ocr_result") return localOcr ? localOcr.result(String(payload.job_id || "")) : { status: "unavailable", pages: [] };
+    if (loginWindow && !loginWindow.isDestroyed()) {
+      const error = new Error("请先完成或关闭小红书登录窗口，再恢复调研");
+      error.code = "browser_busy";
+      throw error;
+    }
     const action = String(payload?.command || "");
     if (action === "status") return snapshot();
     if (action === "close") {
@@ -605,18 +676,27 @@ export async function startBrowserBridge(options = {}) {
         }
         xhsAccessCache.remember(requestedUrl);
         const cached = xhsPageCache.get(cacheKey);
-        if (cached?.expiresAt > Date.now()) {
-          return { ...cached.state, ...xhsPublicGuard.status(), cache_hit: true };
+        for (const entry of cached?.accessEntries || []) xhsAccessCache.remember(entry.url);
+        const lostSearchGrant = cached?.state?.page_kind === "search" && (cached.state.candidates || []).some(item => item.access_grant && !hasXiaohongshuAccessGrant(xhsAccessCache.resolve(item.url)));
+        if (!lostSearchGrant && cached?.expiresAt > Date.now() && (cached.state.page_kind !== 'note' || cached.extractionVersion === 4)) {
+          const budget = xhsPublicGuard.status();
+          return { ...cached.state, cooldown_until: budget.cooldown_until, retry_after_ms: budget.retry_after_ms,
+            remaining_requests: budget.remaining_requests, request_limit: budget.request_limit, cache_hit: true };
         }
         if (cached) xhsPageCache.delete(cacheKey);
       }
       const access = isXhs ? xhsPublicGuard.beforeOpen(cacheKey) : null;
+      if (isXhs) { imageRequests.clear(); loadedImages.clear(); }
       if (access?.waitMs) await new Promise((resolve) => setTimeout(resolve, access.waitMs));
+      if (isXhs) xhsPublicGuard.assertAllowed();
       const url = await validateUrl(isXhs ? xhsAccessCache.resolve(cacheKey) : requestedUrl);
       const window = ensureWindow();
+      paintedFrame = null;
       // Web reads stay inside the agent. A visible window is reserved for an
       // explicit future user-login flow, so background tool calls never steal focus.
-      window.hide();
+      // This window is created hidden. Calling hide() again suspends the
+      // offscreen compositor on Windows, leaving DOM ready but no paint frame.
+      window.webContents.startPainting();
       // A newly-created BrowserWindow can still be completing its implicit
       // about:blank navigation. Wait for that document before navigating so
       // Electron does not surface its cancellation as the requested page's
@@ -625,7 +705,10 @@ export async function startBrowserBridge(options = {}) {
       try {
         await window.loadURL(url);
       } catch (error) {
-        if (!String(error?.message || error).includes("about:blank")) throw error;
+        if (!String(error?.message || error).includes("about:blank")) {
+          if (isXhs) xhsPublicGuard.afterOpen({ user_action: "network_error" });
+          throw error;
+        }
         await waitForLoad(window.webContents, 3000);
         await window.loadURL(url);
       }
@@ -635,47 +718,37 @@ export async function startBrowserBridge(options = {}) {
       // navigation shell as if it were a valid posting.
       let state = await snapshot();
       for (let index = 0; index < 15 && !state.job_ready && !state.xhs_ready; index += 1) {
-        if (state.login_required && state.page_kind !== "search") break;
+        if (state.login_required) break;
+        if (isXhs) xhsPublicGuard.assertAllowed();
         await new Promise((resolve) => setTimeout(resolve, 600));
         state = await snapshot();
       }
       if (isXhs && state.page_kind === "search" && !state.login_required) {
-        let previousCount = state.candidates?.length || 0;
-        let stableRounds = 0;
-        let reachedBottom = false;
+        // One deliberately paced incremental scroll at most. More scrolling
+        // creates real search requests even though it looks like local UI work.
         const discoveryStartedAt = Date.now();
-        // Search result cards are loaded by infinite scroll. Continue until
-        // the result set stabilizes at the bottom; the time boundary prevents
-        // a broken page from hanging the Agent but never imposes an item cap.
-        while (stableRounds < 3 && Date.now() - discoveryStartedAt < 30_000) {
-          const scrollState = await window.webContents.executeJavaScript(`(() => {
+        let stopReason = "page_budget";
+        try {
+          const access = xhsPublicGuard.beforeOpen(requestedUrl);
+          if (access.waitMs) await new Promise((resolve) => setTimeout(resolve, access.waitMs));
+          xhsPublicGuard.assertAllowed();
+          await window.webContents.executeJavaScript(`(() => {
             const root = document.scrollingElement || document.documentElement;
-            const before = root.scrollTop;
-            root.scrollTo({ top: root.scrollHeight, behavior: 'instant' });
-            return {
-              before,
-              after: root.scrollTop,
-              height: root.scrollHeight,
-              viewport: root.clientHeight,
-              atBottom: root.scrollTop + root.clientHeight >= root.scrollHeight - 8,
-            };
-          })()`, true).catch(() => ({ atBottom: true }));
-          await new Promise((resolve) => setTimeout(resolve, 700));
-          const nextState = await snapshot();
-          const nextCount = nextState.candidates?.length || 0;
-          stableRounds = nextCount > previousCount ? 0 : stableRounds + 1;
-          previousCount = Math.max(previousCount, nextCount);
-          reachedBottom = Boolean(scrollState?.atBottom);
-          state = nextState;
-          if (reachedBottom && stableRounds >= 2) break;
+            root.scrollBy({ top: Math.round(root.clientHeight * 0.8), behavior: 'instant' });
+          })()`, true);
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+          state = await snapshot();
+          if (state.login_required) stopReason = state.user_action || "access_protection";
+        } catch (error) {
+          stopReason = String(error.code || error.message || "read_failed");
         }
-        state = {
-          ...state,
-          discovery_exhausted: reachedBottom && stableRounds >= 2,
-          discovery_duration_ms: Date.now() - discoveryStartedAt,
-        };
+        state = { ...state, discovery_exhausted: false, discovery_stop_reason: stopReason,
+          discovery_duration_ms: Date.now() - discoveryStartedAt };
       }
       if (isXhs) {
+        if (state.page_kind === "note" && state.image_count > 0 && !state.login_required) {
+          state = await readVisibleImage(state);
+        }
         const accountSession = (await browserSession.cookies.get({ url: "https://www.xiaohongshu.com/" }))
           .some((cookie) => cookie.name === "web_session" && Boolean(cookie.value));
         const publicStatus = xhsPublicGuard.afterOpen(state);
@@ -686,9 +759,13 @@ export async function startBrowserBridge(options = {}) {
           account_session: accountSession,
           cache_hit: false,
         };
-        if (state.xhs_ready) {
+        if (state.xhs_ready && !state.login_required && !publicStatus.cooldown_until) {
           const ttlMs = state.page_kind === "search" ? XHS_SEARCH_CACHE_MS : XHS_NOTE_CACHE_MS;
-          xhsPageCache.set(cacheKey, { state, expiresAt: Date.now() + ttlMs });
+          const candidateKeys = new Set((state.candidates || []).map(item => item.url));
+          const accessEntries = state.page_kind === "search" ? xhsAccessCache.entries().filter(entry => candidateKeys.has(entry.canonical)) : [];
+          xhsPageCache.set(cacheKey, { state, expiresAt: Date.now() + ttlMs, extractionVersion: 4, accessEntries });
+          while (xhsPageCache.size > 80) xhsPageCache.delete(xhsPageCache.keys().next().value);
+          scheduleAccessCacheWrite(xhsAccessCache.entries());
         }
       }
       return state;
@@ -701,6 +778,7 @@ export async function startBrowserBridge(options = {}) {
     throw new Error("browser_command_invalid");
   }
 
+  const command = createBrowserCommandGate(runCommand);
   const server = http.createServer(async (request, response) => {
     if (request.method !== "POST" || request.url !== "/command") { jsonResponse(response, 404, { error: "not_found" }); return; }
     if (request.headers.authorization !== `Bearer ${token}`) { jsonResponse(response, 403, { error: "forbidden" }); return; }
@@ -711,7 +789,7 @@ export async function startBrowserBridge(options = {}) {
         "Controlled browser command failed:",
         error instanceof Error ? `${error.name}: ${error.message}` : String(error),
       );
-      jsonResponse(response, 400, { ok: false, error: error instanceof Error ? error.message : "browser_command_failed" });
+      jsonResponse(response, 400, { ok: false, error: error instanceof Error ? error.message : "browser_command_failed", code: error.code || "", details: error.details || {} });
     }
   });
   await new Promise((resolve, reject) => {
@@ -722,6 +800,36 @@ export async function startBrowserBridge(options = {}) {
   return {
     url: `http://${HOST}:${address.port}`,
     token,
+    accessStatus() { return xhsPublicGuard.status(); },
+    async beginLogin() {
+      if (loginWindow && !loginWindow.isDestroyed()) { loginWindow.show(); loginWindow.focus(); return { opened: true }; }
+      // Reject while an automated navigation is active; the gate also protects
+      // creation from racing with a subsequent command.
+      await command({ command: "status" });
+      loginWindow = new BrowserWindow({ width: 1080, height: 800, show: true, title: "小红书登录 · FetchCV",
+        webPreferences: { partition: PARTITION, nodeIntegration: false, contextIsolation: true, sandbox: true } });
+      loginWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+      loginWindow.on("closed", () => { loginWindow = null; });
+      await loginWindow.loadURL("https://www.xiaohongshu.com/explore");
+      return { opened: true };
+    },
+    async finishLogin() {
+      if (!loginWindow || loginWindow.isDestroyed()) return { connected: false, message: "请重新打开登录窗口并完成登录。" };
+      const authenticated = await loginWindow.webContents.executeJavaScript(`(() => {
+        const raw = window.__INITIAL_STATE__?.user?.userInfo;
+        const info = raw?.value !== undefined ? raw.value : raw;
+        if (info?.guest === true) return false;
+        const channel = document.querySelector('.main-container .user .link-wrapper .channel');
+        return Boolean(info && (info.userId || info.user_id) && !info.guest && channel && channel.getClientRects().length);
+      })()`, true).catch(() => false);
+      const cookies = await browserSession.cookies.get({ url: "https://www.xiaohongshu.com/" });
+      const hasSession = authenticated && cookies.some(cookie => cookie.name === "web_session" && Boolean(cookie.value));
+      if (!hasSession) return { connected: false, message: "尚未检测到登录会话，请在小红书窗口完成扫码登录。" };
+      await browserSession.cookies.flushStore();
+      if (loginWindow && !loginWindow.isDestroyed()) loginWindow.close();
+      const access = xhsPublicGuard.resumeAfterLogin();
+      return { connected: true, ...access, message: access.cooldown_until ? "登录会话已保存，访问保护冷却仍在生效。" : "登录会话已保存，可以继续调研；实际可用性以读取结果为准。" };
+    },
     async resolveExternal(value, context = {}) {
       lastBlockedRequest = null;
       const canonical = canonicalXiaohongshuUrl(value);
@@ -734,7 +842,7 @@ export async function startBrowserBridge(options = {}) {
         lastExternalResolution = { targetNoteId, queries: [], attempts, accessRestored: true, cacheHit: true };
         return resolved;
       }
-      for (const query of queries) {
+      for (const query of queries.slice(0, 1)) {
         const search = new URL("https://www.xiaohongshu.com/search_result");
         search.searchParams.set("keyword", query);
         search.searchParams.set("source", "web_search_result_notes");
@@ -748,6 +856,7 @@ export async function startBrowserBridge(options = {}) {
             loginRequired: Boolean(state?.login_required),
             candidateNoteIds: (state?.candidates || []).map((item) => xiaohongshuNoteId(item?.url)).filter(Boolean).slice(0, 20),
           });
+          if (state?.login_required || state?.cooldown_until) break;
           resolved = xhsAccessCache.resolve(canonical);
           if (hasXiaohongshuAccessGrant(resolved)) {
             lastExternalResolution = { targetNoteId, queries, attempts, accessRestored: true, cacheHit: false };
@@ -780,6 +889,7 @@ export async function startBrowserBridge(options = {}) {
       return lastExternalResolution;
     },
     stop() {
+      if (loginWindow && !loginWindow.isDestroyed()) loginWindow.destroy();
       if (accessCacheWriteTimer) {
         clearTimeout(accessCacheWriteTimer);
         accessCacheWriteTimer = null;

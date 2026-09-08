@@ -5,6 +5,7 @@ import {
   canonicalXiaohongshuUrl,
   createXiaohongshuAccessCache,
   createXiaohongshuPublicAccessGuard,
+  createBrowserCommandGate,
   isXiaohongshuUrl,
   xiaohongshuRecoveryQueries,
 } from "../electron/xiaohongshu-adapter.mjs";
@@ -20,6 +21,47 @@ test("xiaohongshu adapter retains share access URLs without exposing them throug
   assert.equal(cache.resolve(canonical), accessUrl);
   cache.clear();
   assert.equal(cache.resolve(canonical), canonical);
+});
+
+test("search cards never exempt login or CAPTCHA from persistent cooldown", () => {
+  let saved;
+  let now = 1_000_000;
+  const guard = createXiaohongshuPublicAccessGuard({ clock: () => now, cooldownMs: 30000, onChange: (state) => { saved = structuredClone(state); } });
+  guard.afterOpen({ page_kind: "search", candidates: [{ url: "public" }], login_required: true, user_action: "captcha" });
+  const restored = createXiaohongshuPublicAccessGuard({ clock: () => now, cooldownMs: 30000, initialState: saved });
+  assert.throws(() => restored.beforeOpen("https://www.xiaohongshu.com/explore/one"), /cooldown/);
+  now += 30001;
+  restored.afterOpen({ user_action: "rate_limited" });
+  assert.equal(Date.parse(restored.status().cooldown_until) - now, 60000);
+});
+
+test("repeated URLs and scrolls consume the same budget across restarts", () => {
+  let saved;
+  const options = { maxRequests: 2, minIntervalMs: 100, clock: () => 100000, onChange: (state) => { saved = structuredClone(state); } };
+  const guard = createXiaohongshuPublicAccessGuard(options);
+  guard.beforeOpen("https://www.xiaohongshu.com/search_result?keyword=test");
+  guard.beforeOpen("https://www.xiaohongshu.com/search_result?keyword=test");
+  const restored = createXiaohongshuPublicAccessGuard({ ...options, initialState: saved });
+  assert.throws(() => restored.beforeOpen("https://www.xiaohongshu.com/search_result?keyword=test"), /access_limit/);
+  assert.equal(restored.status().remaining_requests, 0);
+});
+
+test("shared browser coalesces duplicates and refuses racing navigation", async () => {
+  let finish;
+  let calls = 0;
+  const command = createBrowserCommandGate(() => { calls += 1; return new Promise((resolve) => { finish = resolve; }); });
+  const request = { command: "open", url: "https://www.xiaohongshu.com/explore/one" };
+  const first = command(request);
+  const second = command(request);
+  assert.equal(first, second);
+  await assert.rejects(command({ ...request, url: "https://example.com" }), /browser_busy/);
+  assert.equal(calls, 1);
+  finish({ text: "one" });
+  assert.deepEqual(await second, { text: "one" });
+  const third = command(request);
+  await Promise.resolve();
+  finish({ text: "two" });
+  assert.deepEqual(await third, { text: "two" });
 });
 
 test("xiaohongshu access cache restores locally encrypted entries after restart", () => {
@@ -58,6 +100,20 @@ test("old Xiaohongshu sources use bounded recovery queries", () => {
   );
 });
 
+test("search grants survive profile and recommendation cache pollution", () => {
+  const cache = createXiaohongshuAccessCache({ maxEntries: 3 });
+  const target = "https://www.xiaohongshu.com/explore/target?xsec_token=needed&xsec_source=pc_search";
+  cache.remember(target);
+  for (let index = 0; index < 300; index++) {
+    cache.remember(`https://www.xiaohongshu.com/user/profile/user${index}?xsec_token=profile`);
+    cache.remember(`https://www.xiaohongshu.com/explore/feed${index}?xsec_token=feed&xsec_source=pc_feed`);
+  }
+  assert.equal(cache.resolve(canonicalXiaohongshuUrl(target)), target);
+  assert.ok(cache.entries().length <= 3);
+  assert.ok(cache.entries().every(item => !item.url.includes("/user/profile/")));
+  assert.equal(createXiaohongshuAccessCache({ initialEntries: cache.entries() }).resolve(canonicalXiaohongshuUrl(target)), target);
+});
+
 test("xiaohongshu adapter does not rewrite unrelated URLs", () => {
   const url = "https://example.com/path?token=kept-by-this-site-specific-helper";
   assert.equal(isXiaohongshuUrl(url), false);
@@ -84,6 +140,27 @@ test("anonymous public access is bounded and never represents an account session
     () => guard.beforeOpen("https://www.xiaohongshu.com/explore/three"),
     /xiaohongshu_public_access_limit/,
   );
+});
+
+test("note extraction matches URL identity and excludes longer comments and recommendations", async () => {
+  const { extractXiaohongshuNote } = await import("../electron/xiaohongshu-adapter.mjs");
+  const state = { recommendations: { noteId: "target", desc: "not evidence" }, note: { noteDetailMap: {
+    other: { note: { noteId: "other", desc: "Other interview" } },
+    target: { note: { noteId: "target", title: "面经", desc: "真实正文", imageList: [{}, {}] }, comments: [{ desc: "Noise".repeat(200) }] },
+  } } };
+  assert.deepEqual(extractXiaohongshuNote(state, "target"), { title: "面经", description: "真实正文", imageCount: 2, imageUrls: [], imageGroups: [[], []], publishedAt: "" });
+  assert.equal(extractXiaohongshuNote(state, "missing"), null);
+});
+
+test("completed login clears only login cooldown and preserves request budget", () => {
+  const guard = createXiaohongshuPublicAccessGuard({ maxRequests: 1 });
+  guard.beforeOpen("https://www.xiaohongshu.com/explore/one");
+  guard.afterOpen({ login_required: true, user_action: "login" });
+  assert.equal(guard.resumeAfterLogin().cooldown_until, "");
+  assert.throws(() => guard.beforeOpen("https://www.xiaohongshu.com/explore/two"), /access_limit/);
+  guard.afterOpen({ user_action: "rate_limited" });
+  guard.afterOpen({ user_action: "login" });
+  assert.notEqual(guard.resumeAfterLogin().cooldown_until, "");
 });
 
 test("anonymous public access opens a circuit after login or captcha", () => {

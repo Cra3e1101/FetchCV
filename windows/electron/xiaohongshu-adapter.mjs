@@ -1,5 +1,32 @@
 const XHS_HOSTS = new Set(["xiaohongshu.com", "www.xiaohongshu.com", "xhslink.com", "www.xhslink.com"]);
 
+// Read only the requested note. Recommendations and comments in page state
+// must never become evidence for the current URL.
+export function extractXiaohongshuNote(state, noteId) {
+  const visited = new WeakSet();
+  let count = 0;
+  function walk(value, key = "", depth = 0) {
+    if (!value || typeof value !== "object" || visited.has(value) || depth > 9 || ++count > 7000) return null;
+    visited.add(value);
+    const note = value.note || value;
+    const id = note.noteId || note.note_id || note.id || key;
+    if (id === noteId && typeof note.desc === "string") {
+      return { title: typeof note.title === "string" ? note.title : "", description: note.desc,
+        publishedAt: note.time || note.publishTime || note.publish_time || "",
+        imageCount: Array.isArray(note.imageList) ? note.imageList.length : 0,
+        imageGroups: (note.imageList || []).map(image => [image.urlDefault, image.urlPre, image.url, ...(image.infoList || []).map(info => info.url)].filter(url => typeof url === "string" && url.startsWith("https://"))),
+        imageUrls: (note.imageList || []).flatMap(image => [image.urlDefault, image.urlPre, image.url, ...(image.infoList || []).map(info => info.url)]).filter(url => typeof url === "string" && url.startsWith("https://")) };
+    }
+    for (const [childKey, child] of Object.entries(value)) {
+      if (/comment|recommend/i.test(childKey)) continue;
+      const found = walk(child, childKey, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+  return noteId ? walk(state) : null;
+}
+
 export function isXiaohongshuUrl(value) {
   try {
     const host = new URL(String(value || "")).hostname.toLowerCase();
@@ -60,9 +87,14 @@ export function createXiaohongshuAccessCache({
   onChange = null,
 } = {}) {
   const entries = new Map();
+  const usable = (value) => {
+    try { const url = new URL(value); return isXiaohongshuUrl(value) && (/^\/(explore|discovery\/item)\/[^/]+/.test(url.pathname) || url.hostname.endsWith("xhslink.com")); }
+    catch { return false; }
+  };
+  const priority = (value) => { try { return new URL(value).searchParams.get("xsec_source") === "pc_search" ? 1 : 0; } catch { return 0; } };
 
   for (const item of initialEntries) {
-    if (!item || !isXiaohongshuUrl(item.url)) continue;
+    if (!item || !usable(item.url)) continue;
     const canonical = canonicalXiaohongshuUrl(item.canonical || item.url);
     const expiresAt = Number(item.expiresAt || 0);
     if (expiresAt > Date.now()) entries.set(canonical, { url: String(item.url), expiresAt });
@@ -82,7 +114,10 @@ export function createXiaohongshuAccessCache({
     for (const [key, item] of entries) {
       if (item.expiresAt <= now) entries.delete(key);
     }
-    while (entries.size > maxEntries) entries.delete(entries.keys().next().value);
+    while (entries.size > maxEntries) {
+      const lowPriority = [...entries].find(([, item]) => !priority(item.url));
+      entries.delete(lowPriority ? lowPriority[0] : entries.keys().next().value);
+    }
     if (emit && entries.size !== sizeBefore) notify();
   }
 
@@ -90,6 +125,7 @@ export function createXiaohongshuAccessCache({
     remember(value) {
       if (!isXiaohongshuUrl(value)) return String(value || "");
       const canonical = canonicalXiaohongshuUrl(value);
+      if (!usable(value)) return canonical;
       const incoming = String(value);
       const existing = entries.get(canonical);
       let incomingHasAccessGrant = false;
@@ -101,9 +137,12 @@ export function createXiaohongshuAccessCache({
         // Invalid values are rejected by isXiaohongshuUrl above.
       }
       if (!existingHasAccessGrant || incomingHasAccessGrant) {
+        entries.delete(canonical);
         entries.set(canonical, { url: incoming, expiresAt: Date.now() + ttlMs });
       } else {
         existing.expiresAt = Date.now() + ttlMs;
+        entries.delete(canonical);
+        entries.set(canonical, existing);
       }
       prune();
       notify();
@@ -132,60 +171,97 @@ function publicAccessError(code) {
 }
 
 export function createXiaohongshuPublicAccessGuard({
-  windowMs = 10 * 60 * 1000,
+  windowMs = 30 * 60 * 1000,
   maxUnique = null,
-  minIntervalMs = 1800,
+  maxRequests = 12,
+  minIntervalMs = 12000,
   cooldownMs = 30 * 60 * 1000,
   clock = () => Date.now(),
+  initialState = {},
+  onChange = null,
 } = {}) {
-  const opened = new Map();
-  let lastOpenAt = 0;
-  let cooldownUntil = 0;
-
+  const opened = new Map(initialState.opened || []);
+  let requests = Array.isArray(initialState.requests) ? initialState.requests.filter(Number.isFinite) : [];
+  let lastOpenAt = Number(initialState.lastOpenAt) || 0;
+  let cooldownUntil = Number(initialState.cooldownUntil) || 0;
+  let failures = Number(initialState.failures) || 0;
+  let restriction = String(initialState.restriction || "");
+  const persist = () => onChange?.({ opened: [...opened], requests, lastOpenAt, cooldownUntil, failures, restriction });
   function prune(now) {
-    for (const [key, openedAt] of opened) {
-      if (openedAt <= now - windowMs) opened.delete(key);
-    }
+    for (const [key, openedAt] of opened) if (openedAt <= now - windowMs) opened.delete(key);
+    requests = requests.filter((at) => at > now - windowMs);
   }
-
   function status(now = clock()) {
     prune(now);
+    const nextAllowedAt = Math.max(cooldownUntil, lastOpenAt + minIntervalMs,
+      requests.length >= maxRequests ? requests[0] + windowMs : 0);
     return {
-      anonymous: true,
-      account_session: false,
-      request_limit: Number.isFinite(maxUnique) ? maxUnique : null,
-      remaining_requests: Number.isFinite(maxUnique) ? Math.max(0, maxUnique - opened.size) : null,
+      anonymous: true, account_session: false,
+      request_limit: Number.isFinite(maxUnique) ? Math.min(maxUnique, maxRequests) : maxRequests,
+      remaining_requests: Math.max(0, Math.min(maxRequests - requests.length, Number.isFinite(maxUnique) ? maxUnique - opened.size : Infinity)),
       cooldown_until: cooldownUntil > now ? new Date(cooldownUntil).toISOString() : "",
+      retry_after_ms: Math.max(0, nextAllowedAt - now),
     };
   }
-
+  function fail(code) {
+    const error = publicAccessError(code);
+    error.details = status();
+    throw error;
+  }
   return {
     beforeOpen(value) {
       const now = clock();
       prune(now);
-      if (cooldownUntil > now) throw publicAccessError("xiaohongshu_public_access_cooldown");
+      if (cooldownUntil > now) fail("xiaohongshu_public_access_cooldown");
       const key = canonicalXiaohongshuUrl(value);
-      if (Number.isFinite(maxUnique) && !opened.has(key) && opened.size >= maxUnique) {
-        throw publicAccessError("xiaohongshu_public_access_limit");
-      }
-      const waitMs = Math.max(0, minIntervalMs - (now - lastOpenAt));
+      if (requests.length >= maxRequests || (Number.isFinite(maxUnique) && !opened.has(key) && opened.size >= maxUnique)) fail("xiaohongshu_public_access_limit");
+      const waitMs = lastOpenAt ? Math.max(0, minIntervalMs - (now - lastOpenAt)) : 0;
       opened.set(key, now + waitMs);
+      requests.push(now + waitMs);
       lastOpenAt = now + waitMs;
+      persist();
       return { key, waitMs, ...status(now) };
+    },
+    assertAllowed() {
+      if (cooldownUntil > clock()) fail("xiaohongshu_public_access_cooldown");
     },
     afterOpen(state) {
       const now = clock();
-      const publicSearchCandidates = state?.page_kind === "search" && (state?.candidates?.length || 0) > 0;
-      if (!publicSearchCandidates && (state?.login_required || ["captcha", "login"].includes(state?.user_action))) {
-        cooldownUntil = Math.max(cooldownUntil, now + cooldownMs);
+      if (state?.login_required || ["captcha", "login", "rate_limited", "network_error"].includes(state?.user_action)) {
+        const reason = state?.user_action || "login";
+        if (cooldownUntil <= now || !restriction || reason !== "login") restriction = reason;
+        // Every restriction counts, even if some search cards were visible.
+        // Repeated failures back off exponentially, surviving app restarts.
+        if (cooldownUntil <= now) failures = Math.min(failures + 1, 6);
+        cooldownUntil = Math.max(cooldownUntil, now + Math.min(24 * 60 * 60 * 1000, cooldownMs * (2 ** Math.max(0, failures - 1))));
+        persist();
       }
       return status(now);
     },
     status,
-    reset() {
-      opened.clear();
-      lastOpenAt = 0;
-      cooldownUntil = 0;
+    resumeAfterLogin() {
+      // A completed login resolves only a login stop, never a rate/captcha stop.
+      if (restriction === "login") { cooldownUntil = 0; restriction = ""; persist(); }
+      return status();
     },
+    reset() { opened.clear(); requests = []; lastOpenAt = 0; cooldownUntil = 0; failures = 0; persist(); },
+  };
+}
+
+// A shared BrowserWindow cannot safely navigate two jobs at once. Coalesce
+// identical requests and reject competing navigation instead of growing a queue.
+export function createBrowserCommandGate(handler) {
+  let active = null;
+  return (payload) => {
+    const key = JSON.stringify([payload?.command, canonicalXiaohongshuUrl(payload?.url || "")]);
+    if (active) {
+      if (active.key === key) return active.promise;
+      return Promise.reject(publicAccessError("browser_busy"));
+    }
+    const promise = Promise.resolve().then(() => handler(payload));
+    active = { key, promise };
+    const clear = () => { if (active?.promise === promise) active = null; };
+    promise.then(clear, clear);
+    return promise;
   };
 }

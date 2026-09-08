@@ -3,7 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 import re
-from typing import Any
+from typing import Any, Literal
+import time
 from urllib.parse import quote, urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -14,6 +15,7 @@ from applyos_harness.errors import HarnessError
 from applyos_harness.permissions import ToolContext, ToolGateway, ToolPermission, ToolSpec
 from applyos_harness.state_machine import PipelineStage
 from integrations.web import FirecrawlClient, WebClient, WebSearchResult
+from integrations.web.nowcoder import canonical_nowcoder_url
 
 from .browser_tools import BrowserBridgeClient
 from .tools import PipelineToolResult
@@ -46,6 +48,13 @@ class DiscoverInterviewSourcesInput(InterviewToolInput):
     role: str = Field(min_length=1, max_length=240)
     business_unit: str = Field(default="", max_length=240)
     query_terms: list[str] = Field(default_factory=list, max_length=12)
+    platforms: list[Literal["xiaohongshu", "nowcoder", "zhihu", "csdn"]] = Field(
+        default_factory=lambda: ["xiaohongshu", "nowcoder", "zhihu", "csdn"], min_length=1,
+        description="可指定只检索牛客：['nowcoder']。默认检索所有支持的平台。",
+    )
+    nowcoder_start_page: int = Field(default=1, ge=1, le=100)
+    nowcoder_query: str = Field(default="", max_length=500, description="续查时原样传入 nowcoder_continuations 中的 query，避免重复扩展关键词。")
+    nowcoder_page_limit: int = Field(default=3, ge=1, le=10, description="每组牛客关键词本轮最多读取的页数；未完成时返回 continuation，不代表来源耗尽。")
     max_results: int | None = Field(
         default=None,
         ge=1,
@@ -74,6 +83,10 @@ class AnalyzeInterviewSourceInput(InterviewToolInput):
     summary: str = Field(min_length=2, max_length=5000)
     questions: list[InterviewQuestionInput] = Field(default_factory=list, max_length=40)
     tags: list[str] = Field(default_factory=list, max_length=30)
+
+
+class CollectInterviewOcrInput(InterviewToolInput):
+    source_id: str = Field(min_length=1, max_length=80)
 
 
 class CommonInterviewQuestionInput(BaseModel):
@@ -194,7 +207,7 @@ def _is_supported_interview_candidate(value: str) -> bool:
         return _is_xiaohongshu_note_candidate(value)
     parsed = urlsplit(value)
     if platform == "nowcoder":
-        return bool(re.search(r"/(?:discuss|feed/main/detail|experience)/", parsed.path, re.I))
+        return bool(canonical_nowcoder_url(value))
     if platform == "zhihu":
         return bool(re.search(r"/(?:question|p|pin|zvideo)/", parsed.path, re.I))
     if platform == "csdn":
@@ -227,7 +240,7 @@ def _canonical_interview_url(web: WebClient, value: str) -> str:
     redacted = web.redact_url(value)
     parsed = urlsplit(redacted)
     if _interview_platform(redacted) == "nowcoder":
-        return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
+        return canonical_nowcoder_url(redacted) or redacted
     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, parsed.query, ""))
 
 
@@ -525,6 +538,9 @@ def register_interview_tools(
                 " ".join(item.tags or []),
                 " ".join(str(question.get("question") or "") for question in (item.extracted_questions or [])),
             ]).casefold()
+            if not _candidate_relevance(payload.company, payload.business_unit, payload.role,
+                                        f"{item.company} {item.role} {item.title}", "面经"):
+                return 0
             total = sum(3 if needle in {item.company.casefold(), item.role.casefold()} else 1 for needle in needles if needle in searchable)
             if item.status == "analyzed":
                 total += 1
@@ -539,7 +555,8 @@ def register_interview_tools(
         if payload.max_results is not None:
             matches = matches[:payload.max_results]
         analyzed = [item for item in matches if item.status == "analyzed" and item.extracted_questions]
-        ready_for_brief = len(analyzed) >= INTERVIEW_SOURCE_MINIMUM
+        nowcoder_count = sum(1 for item in analyzed if item.platform == "nowcoder")
+        ready_for_brief = len(analyzed) >= INTERVIEW_SOURCE_MINIMUM and nowcoder_count > 0
         return _result(
             context,
             (
@@ -555,6 +572,8 @@ def register_interview_tools(
                 "sources": [_source_payload(item) for item in matches],
                 "total_library_sources": len(rows),
                 "analyzed_source_count": len(analyzed),
+                "nowcoder_source_count": nowcoder_count,
+                "needs_nowcoder_discovery": nowcoder_count == 0,
                 "ready_source_ids": [item.id for item in analyzed],
                 "ready_for_brief": ready_for_brief,
                 "required_next_action": "build_interview_brief" if ready_for_brief else "discover_interview_sources",
@@ -562,6 +581,7 @@ def register_interview_tools(
         )
 
     def discover_sources(context: ToolContext, payload: DiscoverInterviewSourcesInput) -> PipelineToolResult:
+        platforms = set(payload.platforms)
         scope = " ".join(_normalized(item) for item in [payload.company, payload.business_unit] if _normalized(item))
         role_variants = _role_search_variants(payload.role, payload.query_terms)
         site_search_plan = _xiaohongshu_search_plan(
@@ -572,7 +592,7 @@ def register_interview_tools(
         )
         site_search_phrases = [item["query"] for item in site_search_plan]
         queries: list[str] = []
-        for role_term in role_variants:
+        for role_term in role_variants if PRIMARY_INTERVIEW_PLATFORM in platforms else []:
             queries.extend([
                 f"site:xiaohongshu.com {scope} {role_term} 面经",
                 f"{scope} {role_term} 面经 小红书",
@@ -637,8 +657,8 @@ def register_interview_tools(
         # it returns real note IDs plus short-lived access grants that make the
         # subsequent hidden read reliable. Search the exact business-unit role
         # first, then broaden to the same role across the company.
-        if browser.configured:
-            for search_entry in site_search_plan:
+        if browser.configured and PRIMARY_INTERVIEW_PLATFORM in platforms:
+            for search_entry in site_search_plan[:2]:
                 search_phrase = search_entry["query"]
                 if not search_phrase or search_phrase in attempted_site_searches:
                     continue
@@ -653,7 +673,7 @@ def register_interview_tools(
                 except HarnessError as exc:
                     public_access_reason = exc.code
                     public_access_detail = exc.message
-                    if exc.code in {"xiaohongshu_public_access_cooldown", "xiaohongshu_public_access_limit"}:
+                    if exc.code in {"xiaohongshu_public_access_cooldown", "xiaohongshu_public_access_limit", "browser_busy", "browser_bridge_failed"}:
                         public_access_stopped = True
                         break
                     continue
@@ -677,12 +697,15 @@ def register_interview_tools(
                         break
                 if candidates:
                     providers.append("xiaohongshu-session-browser" if state.get("account_session") else "xiaohongshu-anonymous-browser")
-                if state.get("login_required"):
+                if state.get("login_required") or state.get("cooldown_until"):
                     # Public cards can render before a login overlay appears.
                     # Keep those candidate URLs for later strict capture, but
                     # stop further browsing and never attempt to authenticate.
                     public_access_stopped = True
-                    public_access_reason = str(state.get("user_action") or "login_required")
+                    public_access_reason = str(state.get("user_action") or ("xiaohongshu_public_access_cooldown" if state.get("cooldown_until") else "login_required"))
+                    break
+                if state.get("discovery_exhausted") is False:
+                    public_access_reason = str(state.get("discovery_stop_reason") or "page_budget")
                     break
                 if at_result_limit():
                     break
@@ -739,55 +762,82 @@ def register_interview_tools(
         ))
         attempted_supplemental_searches: list[str] = []
         attempted_nowcoder_searches: list[str] = []
+        nowcoder_pages: list[dict[str, Any]] = []
+        nowcoder_continuations: list[dict[str, Any]] = []
+        nowcoder_stop_reason = ""
         direct_nowcoder_count = 0
         if not at_result_limit():
-            # One broad, high-signal site query is enough to expose all links
-            # on Nowcoder's result page. Repeating near-identical searches can
-            # trigger a simplified response and reduce recall.
-            company_search = re.sub(
-                r"(?:出行|科技|集团|有限公司)$",
-                "",
-                _normalized(payload.company),
-            ).strip() or _normalized(payload.company)
-            nowcoder_terms = [
-                f"{company_search} {role_variants[0] if role_variants else payload.role} 面经",
-            ]
+            company_search = re.sub(r"(?:出行|科技|集团|有限公司)$", "", _normalized(payload.company)).strip() or _normalized(payload.company)
+            nowcoder_terms = list(dict.fromkeys(
+                [f"{scope} {role_variants[0]} 面经"]
+                + [f"{company_search} {term} 面经" for term in role_variants]
+            )) if "nowcoder" in platforms else []
+            if payload.nowcoder_query and "nowcoder" in platforms:
+                nowcoder_terms = [_normalized(payload.nowcoder_query)]
+            deadline = time.monotonic() + 60
+            last_request_at = 0.0
             for term in nowcoder_terms:
                 normalized_term = _normalized(term)
-                if not normalized_term:
+                if nowcoder_stop_reason:
+                    nowcoder_continuations.append({"query": normalized_term, "page": payload.nowcoder_start_page})
                     continue
                 attempted_nowcoder_searches.append(normalized_term)
-                try:
-                    page = web.read_page(
-                        f"https://www.nowcoder.com/search/all?query={quote(normalized_term)}&type=all",
-                        max_chars=50000,
-                    )
-                except HarnessError:
-                    continue
-                added_this_page = 0
-                for item in page.links:
-                    item_url = str(item.get("url") or "")
-                    if _interview_platform(item_url) != "nowcoder":
-                        continue
-                    if append_result(
-                        WebSearchResult(
-                            title=str(item.get("title") or item_url)[:500],
-                            url=item_url,
-                        ),
-                        platform="nowcoder",
-                        coverage_scope=_coverage_scope(
-                            payload.business_unit,
-                            payload.role,
-                            str(item.get("title") or ""),
-                            "",
-                        ),
-                    ):
-                        added_this_page += 1
-                        direct_nowcoder_count += 1
-                if added_this_page:
-                    providers.append("nowcoder-site-search")
+                next_url = f"https://www.nowcoder.com/search/all?query={quote(normalized_term)}&type=all&page={payload.nowcoder_start_page}"
+                page_fingerprints: set[tuple[str, ...]] = set()
+                for offset in range(payload.nowcoder_page_limit):
+                    requested_page = payload.nowcoder_start_page + offset
+                    if time.monotonic() >= deadline:
+                        nowcoder_stop_reason = "time_budget"
+                        nowcoder_continuations.append({"query": normalized_term, "page": requested_page})
+                        break
+                    try:
+                        pause = 0.6 - (time.monotonic() - last_request_at)
+                        if pause > 0:
+                            time.sleep(pause)
+                        last_request_at = time.monotonic()
+                        page = web.read_page(next_url, max_chars=50000)
+                    except HarnessError as exc:
+                        nowcoder_pages.append({"query": normalized_term, "page": requested_page, "status": exc.code})
+                        nowcoder_continuations.append({"query": normalized_term, "page": requested_page})
+                        nowcoder_stop_reason = "request_failed"
+                        break
+                    site = page.site_metadata or {}
+                    if any(marker in page.text[:1500] for marker in ["安全验证", "请输入验证码", "访问过于频繁", "访问异常"]):
+                        nowcoder_stop_reason = "access_protection"
+                        nowcoder_pages.append({"query": normalized_term, "page": requested_page, "status": nowcoder_stop_reason})
+                        break
+                    fingerprint = tuple(sorted({canonical_nowcoder_url(str(item.get("url") or "")) for item in page.links} - {""}))
+                    if fingerprint and fingerprint in page_fingerprints:
+                        nowcoder_pages.append({"query": normalized_term, "page": requested_page, "status": "repeated_page"})
+                        nowcoder_continuations.append({"query": normalized_term, "page": requested_page})
+                        break
+                    page_fingerprints.add(fingerprint)
+                    added_this_page = 0
+                    for item in page.links:
+                        item_url = str(item.get("url") or "")
+                        if not canonical_nowcoder_url(item_url):
+                            continue
+                        title = str(item.get("title") or item_url)[:500]
+                        snippet = str(item.get("snippet") or "")
+                        if append_result(WebSearchResult(title=title, url=item_url, snippet=snippet), platform="nowcoder",
+                                         coverage_scope=_coverage_scope(payload.business_unit, payload.role, title, snippet)):
+                            added_this_page += 1
+                            direct_nowcoder_count += 1
+                    nowcoder_pages.append({"query": normalized_term, "page": requested_page, "status": "read", "candidate_count": added_this_page})
+                    if added_this_page:
+                        providers.append("nowcoder-site-search")
+                    next_url = site.get("next_url") or ""
+                    if not next_url:
+                        if site.get("extraction") == "unrecognized":
+                            nowcoder_pages[-1]["status"] = "unrecognized_page"
+                            nowcoder_continuations.append({"query": normalized_term, "page": requested_page})
+                        break
+                    if offset == payload.nowcoder_page_limit - 1:
+                        nowcoder_continuations.append({"query": normalized_term, "page": requested_page + 1})
 
             for query in supplemental_queries:
+                if not any(f"site:{domain}" in query for platform, domain in [("nowcoder", "nowcoder.com"), ("zhihu", "zhihu.com"), ("csdn", "blog.csdn.net")] if platform in platforms):
+                    continue
                 attempted_supplemental_searches.append(query)
                 results: list[WebSearchResult] = []
                 if firecrawl.configured:
@@ -806,7 +856,7 @@ def register_interview_tools(
                         results = []
                 for item in results:
                     platform = _interview_platform(item.url)
-                    if platform not in SUPPLEMENTAL_INTERVIEW_PLATFORMS:
+                    if platform not in SUPPLEMENTAL_INTERVIEW_PLATFORMS or platform not in platforms:
                         continue
                     append_result(
                         item,
@@ -826,6 +876,7 @@ def register_interview_tools(
         found.sort(
             key=lambda item: (
                 1 if result_platforms.get(item.url) == PRIMARY_INTERVIEW_PLATFORM else 0,
+                1 if result_scopes.get(item.url) == "same_business_role" else 0,
                 _xiaohongshu_note_timestamp(item.url),
             ),
             reverse=True,
@@ -845,7 +896,7 @@ def register_interview_tools(
         return _result(
             context,
             (
-                f"已发现 {xhs_count} 个小红书候选来源，并在小红书检索完成后发现 "
+                f"本轮发现 {xhs_count} 个小红书候选来源，以及 "
                 f"{supplemental_count} 个牛客等补充来源；每个链接仍需读取正文并通过有效性校验。"
                 if found
                 else "本轮检索暂未取回可直接读取的公开面经链接；这不代表公开渠道不存在相关内容，应继续扩展岗位称谓或读取用户提供的分享链接。"
@@ -860,6 +911,10 @@ def register_interview_tools(
                 "site_searches": attempted_site_searches,
                 "supplemental_searches": attempted_supplemental_searches,
                 "nowcoder_site_searches": attempted_nowcoder_searches,
+                "nowcoder_pages": nowcoder_pages,
+                "nowcoder_continuations": nowcoder_continuations,
+                "nowcoder_stop_reason": nowcoder_stop_reason,
+                "requested_platforms": payload.platforms,
                 "nowcoder_site_source_count": direct_nowcoder_count,
                 "site_search_candidates": site_search_phrases,
                 "search_plan": site_search_plan,
@@ -881,7 +936,7 @@ def register_interview_tools(
                 "public_access_detail": public_access_detail,
                 "result_limit": None,
                 "legacy_requested_limit": payload.max_results,
-                "discovery_exhausted": not public_access_stopped,
+                "discovery_exhausted": not public_access_stopped and not public_access_reason and not nowcoder_continuations and not nowcoder_stop_reason,
                 "primary_platform": PRIMARY_INTERVIEW_PLATFORM,
                 "primary_source_count": xhs_count,
                 "supplemental_source_count": supplemental_count,
@@ -941,26 +996,32 @@ def register_interview_tools(
         }
         browser_login_required = False
 
-        # Prefer public HTTP providers and the local cache. They do not touch
-        # browser cookies and are cheap to retry.
-        try:
-            page = web.read_page(target, max_chars=50000)
-            canonical = _canonical_interview_url(web, page.final_url or target)
-            carousel_counts = [int(item) for item in re.findall(r"\b\d+\s*/\s*(\d+)\b", page.text) if item.isdigit()]
-            image_count = max([len(page.images), *carousel_counts], default=0)
-            metadata.update({
-                "description": page.description,
-                "headings": page.headings,
-                "content_type": page.content_type,
-                "image_count": image_count,
-                "image_evidence_pending": image_count > 0,
-            })
-            if _is_supported_interview_candidate(canonical) and _usable_interview_content(page.title, page.text):
-                title, text, provider = page.title, page.text, "built-in-public"
-        except HarnessError:
-            pass
+        # XHS has one shared admission boundary; do not bypass it with HTTP
+        # or another crawler after a browser restriction.
+        if is_xhs and not browser.configured:
+            raise HarnessError("interview_source_public_access_stopped", "小红书读取需要受控浏览器；已停止该来源，可继续使用牛客与本地知识库。")
+        if not is_xhs:
+            try:
+                page = web.read_page(target, max_chars=50000)
+                canonical = _canonical_interview_url(web, page.final_url or target)
+                carousel_counts = [int(item) for item in re.findall(r"\b\d+\s*/\s*(\d+)\b", page.text) if item.isdigit()]
+                image_count = max([len(page.images), *carousel_counts], default=0)
+                metadata.update({
+                    "published_at": (page.site_metadata or {}).get("published_at", ""),
+                    "extraction": (page.site_metadata or {}).get("extraction", ""),
+                    "description": page.description,
+                    "headings": page.headings,
+                    "content_type": page.content_type,
+                    "image_count": image_count,
+                    "image_evidence_pending": image_count > 0,
+                })
+                if _is_supported_interview_candidate(canonical) and _usable_interview_content(page.title, page.text):
+                    title, text, provider = page.title, page.text, "built-in-public"
+            except HarnessError as exc:
+                if platform == "nowcoder" and exc.details.get("status") in {401, 403, 429}:
+                    raise HarnessError("interview_source_public_access_stopped", "牛客要求登录或限制访问，已停止读取该来源。", retryable=True) from exc
 
-        if not _usable_interview_content(title, text) and firecrawl.configured:
+        if not _usable_interview_content(title, text) and firecrawl.configured and not is_xhs and platform != "nowcoder":
             try:
                 crawled = firecrawl.scrape(target)
                 crawled_url = _canonical_interview_url(web, str((crawled.metadata or {}).get("source_url") or target))
@@ -971,9 +1032,8 @@ def register_interview_tools(
             except HarnessError:
                 pass
 
-        # Dynamic public notes are rendered only as a bounded anonymous
-        # fallback. The bridge uses an in-memory partition, cache and circuit
-        # breaker, and never imports the user's account session.
+        # XHS reads only use the shared public browser guard and encrypted cache.
+        # Other sites may use this browser as a fallback.
         if not _usable_interview_content(title, text) and browser.configured:
             try:
                 state = browser.open(target)
@@ -986,6 +1046,12 @@ def register_interview_tools(
                 metadata.update({
                     "description": str(state.get("description") or "")[:1000],
                     "content_type": "text/html; rendered",
+                    "ocr_status": str(state.get("ocr_status") or "not_attempted"),
+                    "ocr_text": str(state.get("ocr_text") or "")[:12000],
+                    "ocr_images_processed": int(state.get("ocr_images_processed") or 0),
+                    "ocr_job_id": str(state.get("ocr_job_id") or ""),
+                    "ocr_images_saved": int(state.get("ocr_images_saved") or 0),
+                    "ocr_capture_method": str(state.get("ocr_capture_method") or ""),
                     "image_count": image_count,
                     "image_evidence_pending": image_count > 0,
                     "page_kind": str(state.get("page_kind") or ""),
@@ -996,7 +1062,9 @@ def register_interview_tools(
                     "account_session_used": account_session_used,
                 })
                 trusted = bool(state.get("note_ready")) if is_xhs else False
-                if _is_supported_interview_candidate(canonical) and _usable_interview_content(rendered_title, rendered, trusted_note=trusted):
+                if is_xhs and not browser_login_required and (len(metadata.get("ocr_text", "")) >= 80 or metadata.get("ocr_images_saved", 0) > 0):
+                    title, text, provider = rendered_title, rendered, "xiaohongshu-browser-ocr-pending"
+                if _is_supported_interview_candidate(canonical) and not browser_login_required and _usable_interview_content(rendered_title, rendered, trusted_note=trusted):
                     title = rendered_title
                     text = rendered
                     provider = (
@@ -1006,15 +1074,17 @@ def register_interview_tools(
                     )
             except HarnessError as exc:
                 metadata["public_access_reason"] = exc.code
-                pass
+                if is_xhs:
+                    raise HarnessError("interview_source_public_access_stopped", "小红书访问已暂停；请复用已保存正文并继续读取牛客来源。", details={"reason": exc.code, **exc.details}) from exc
 
         text = _normalized(text)[:50000]
-        if not _usable_interview_content(title, text):
+        ocr_pending = not _usable_interview_content(title, text) and (len(metadata.get("ocr_text", "")) >= 80 or metadata.get("ocr_images_saved", 0) > 0)
+        if not _usable_interview_content(title, text) and not ocr_pending:
             if browser_login_required:
                 raise HarnessError(
                     "interview_source_public_access_stopped",
-                    "公开页面要求登录或触发验证，FetchCV 已停止读取且不会使用你的账号；可稍后重试，或粘贴仍可公开访问的分享链接",
-                    retryable=True,
+                    "页面要求登录或触发验证，FetchCV 已停止读取；可在面经页连接小红书并手动登录。验证码或限流冷却结束前不要重试。",
+                    retryable=False,
                 )
             raise HarnessError(
                 "interview_source_unreadable",
@@ -1060,7 +1130,7 @@ def register_interview_tools(
         )
         source.raw_text = text
         source.content_hash = sha256(text.encode("utf-8")).hexdigest()
-        source.status = "captured"
+        source.status = "ocr_pending" if ocr_pending else "captured"
         source.metadata_json = {
             **metadata,
             "provider": provider,
@@ -1085,7 +1155,7 @@ def register_interview_tools(
         }.get(platform, platform)
         return _result(
             context,
-            f"已验证链接并保存一篇{platform_label}面试经验，等待提取具体问题{image_note}。",
+            "已保存可见图片 OCR，需核对后才能作为面试问题证据。" if ocr_pending else f"已验证链接并保存一篇{platform_label}面试经验，等待提取具体问题{image_note}。",
             artifacts=[f"interview_source:{source.id}", f"url:{canonical}"],
             data={
                 "source": _source_payload(source, include_text=True),
@@ -1095,10 +1165,29 @@ def register_interview_tools(
             },
         )
 
+    def collect_ocr(context: ToolContext, payload: CollectInterviewOcrInput) -> PipelineToolResult:
+        source = context.session.get(InterviewSource, payload.source_id)
+        if source is None or source.candidate_id != context.run.candidate_id:
+            raise HarnessError("interview_source_not_found", "面经来源不存在或不属于当前资料库")
+        metadata = dict(source.metadata_json or {})
+        job_id = str(metadata.get("ocr_job_id") or "")
+        if not re.fullmatch(r"[a-f0-9]{64}", job_id):
+            raise HarnessError("interview_ocr_unavailable", "该来源没有本地 OCR 任务")
+        result = browser.command("ocr_result", job_id=job_id)
+        pages = result.get("pages") or []
+        metadata.update({"ocr_status": result.get("status", "unknown"), "ocr_pages": pages,
+                         "ocr_images_processed": result.get("completed", 0),
+                         "ocr_text": "\n\n".join(f"[图片 {page['index']}]\n{page.get('text', '')}" for page in pages if page and page.get("text"))[:50000]})
+        source.metadata_json = metadata
+        context.session.flush()
+        return _result(context, "已读取本地 OCR 进度；识别文本仍需核对，未访问原站。", data={"source": _source_payload(source, include_text=True), "ocr_status": metadata["ocr_status"]})
+
     def analyze_source(context: ToolContext, payload: AnalyzeInterviewSourceInput) -> PipelineToolResult:
         source = context.session.get(InterviewSource, payload.source_id)
         if source is None or source.candidate_id != context.run.candidate_id:
             raise HarnessError("interview_source_not_found", "面经来源不存在或不属于当前资料库")
+        if source.status == "ocr_pending":
+            raise HarnessError("interview_source_ocr_pending", "图片 OCR 尚未核对，不能自动作为已验证问题证据")
         normalized_text = _normalized(source.raw_text)
         verified_questions = []
         rejected = 0
@@ -1259,8 +1348,9 @@ def register_interview_tools(
         )
 
     specs = (
+        ToolSpec(name="collect_interview_ocr", description="读取已下载面经图片的本地 OCR 结果并更新快照，不访问原站。先批量采集其他帖子，再收集结果；queued/running 不应忙轮询。OCR 未核对前不能当作原文问题证据。", input_model=CollectInterviewOcrInput, output_model=PipelineToolResult, permission=ToolPermission.DRAFT_WRITE, allowed_stages=stages, handler=collect_ocr, read_only=False, side_effect=True),
         ToolSpec(name="search_interview_knowledge", description="先检索当前用户的本地面试知识库，复用同公司、业务线或相近岗位的已读面经与问题。开始任何面试调研前优先调用。", input_model=SearchInterviewKnowledgeInput, output_model=PipelineToolResult, permission=ToolPermission.READ, allowed_stages=stages, handler=search_knowledge, read_only=True),
-        ToolSpec(name="discover_interview_sources", description="围绕公司、业务线和岗位持续发现公开面经。先完整检索小红书，再检索牛客、知乎和 CSDN 作为补充；不会按固定条数截断总来源集。只返回候选来源，必须继续读取后才能据此总结。", input_model=DiscoverInterviewSourcesInput, output_model=PipelineToolResult, permission=ToolPermission.NETWORK_READ, allowed_stages=stages, handler=discover_sources, read_only=True),
+        ToolSpec(name="discover_interview_sources", description="围绕公司、业务线和岗位持续发现公开面经。默认检索小红书后补充牛客、知乎和 CSDN；platforms 可设为 [nowcoder] 独立检索牛客。牛客返回分页记录和续查位置，达到页数或时间预算不代表耗尽。只返回候选来源，必须继续读取后才能据此总结。", input_model=DiscoverInterviewSourcesInput, output_model=PipelineToolResult, permission=ToolPermission.NETWORK_READ, allowed_stages=stages, handler=discover_sources, read_only=True),
         ToolSpec(name="capture_interview_source", description="读取一个小红书、牛客、知乎或 CSDN 的公开面经链接并将原文保存到本地知识库。重复链接会去重；404、登录、验证码或不可读页面不会伪装成成功。", input_model=CaptureInterviewSourceInput, output_model=PipelineToolResult, permission=ToolPermission.NETWORK_READ, allowed_stages=stages, handler=capture_source, read_only=False, side_effect=True),
         ToolSpec(name="analyze_interview_source", description="把模型从已保存面经中识别的问题和原文引文写回知识库。没有逐字对应原文的条目会被拒绝。", input_model=AnalyzeInterviewSourceInput, output_model=PipelineToolResult, permission=ToolPermission.DRAFT_WRITE, allowed_stages=stages, handler=analyze_source, read_only=False, side_effect=True),
         ToolSpec(name="build_interview_brief", description="根据已分析的面经生成岗位简报，小红书作为主来源、牛客等作为补充。每个问题必须声明来源 ID；系统按真实来源数计算频次，单一来源必须明确标记。", input_model=BuildInterviewBriefInput, output_model=PipelineToolResult, permission=ToolPermission.DRAFT_WRITE, allowed_stages=stages, handler=build_brief, read_only=False, side_effect=True),

@@ -41,6 +41,7 @@ class WebPage:
     json_ld: list[str] = field(default_factory=list)
     content_sha256: str = ""
     truncated: bool = False
+    site_metadata: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -345,6 +346,13 @@ class WebClient:
             links = []
             images = []
             json_ld = []
+        from .nowcoder import extract_nowcoder
+        site_metadata = extract_nowcoder(text, final_url) if content_type in {"text/html", "application/xhtml+xml"} else {}
+        if site_metadata.get("kind") == "post":
+            visible = site_metadata.get("text", "")
+            title = site_metadata.get("title") or title
+        elif site_metadata.get("kind") == "search" and "links" in site_metadata:
+            links = site_metadata["links"]
         limit = max(1000, min(int(max_chars), 50000))
         truncated = len(visible) > limit
         return WebPage(
@@ -361,6 +369,7 @@ class WebClient:
             json_ld=json_ld,
             content_sha256=sha256(raw).hexdigest(),
             truncated=truncated,
+            site_metadata={key: value for key, value in site_metadata.items() if key not in {"text", "links", "title"}},
         )
 
     def search(self, query: str, *, max_results: int = 5) -> list[WebSearchResult]:

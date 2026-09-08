@@ -48,6 +48,8 @@ contextBridge.exposeInMainWorld("appRuntime", {
   deleteModelProvider: (id) => ipcRenderer.invoke("provider:delete", id),
   readClipboardText: () => ipcRenderer.invoke("clipboard:read-text"),
   openInterviewSource: (source) => ipcRenderer.invoke("source:open-external", source),
+  beginXiaohongshuLogin: () => ipcRenderer.invoke("xiaohongshu:begin-login"),
+  finishXiaohongshuLogin: () => ipcRenderer.invoke("xiaohongshu:finish-login"),
   getResumeSnapshot: (resumeId) => ipcRenderer.invoke("resume:get-snapshot", resumeId),
   renderResumePdf: (resumeId) => ipcRenderer.invoke("resume:render-pdf", resumeId),
 });

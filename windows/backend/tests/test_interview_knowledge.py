@@ -26,6 +26,20 @@ def _resolver(_host, port, **_):
     return [(2, 1, 6, "", (PUBLIC_IP, port))]
 
 
+class PublicPageBrowser:
+    """Fixture-only browser response from mock HTML, never a production fallback."""
+    configured = True
+
+    def __init__(self, web):
+        self.web = web
+
+    def open(self, url):
+        page = self.web.read_page(url)
+        return {"url": page.final_url, "title": page.title, "text": page.text,
+                "page_kind": "note", "login_required": False,
+                "image_count": 3 if page.images else 0}
+
+
 def test_xiaohongshu_note_id_provides_publication_date_fallback():
     url = "https://www.xiaohongshu.com/explore/69a58b24000000001a035e5d"
 
@@ -58,7 +72,7 @@ def test_interview_research_tools_capture_verify_deduplicate_and_build_brief(dat
         session.add(run)
         session.flush()
         gateway = ToolGateway(session, workspace_root=tmp_path)
-        register_interview_tools(gateway, web_client=web)
+        register_interview_tools(gateway, web_client=web, browser_client=PublicPageBrowser(web))
         for spec in gateway.registry.values():
             spec.allowed_stages.add(type(next(iter(spec.allowed_stages)))("ready_to_publish"))
 
@@ -690,7 +704,7 @@ def test_capture_upgrades_public_xhs_share_http_and_marks_image_evidence(databas
         session.add(run)
         session.flush()
         gateway = ToolGateway(session, workspace_root=tmp_path)
-        register_interview_tools(gateway, web_client=web)
+        register_interview_tools(gateway, web_client=web, browser_client=PublicPageBrowser(web))
         result = gateway.execute(
             tool_name="capture_interview_source",
             run=run,

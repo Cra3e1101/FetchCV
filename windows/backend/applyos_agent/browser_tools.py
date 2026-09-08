@@ -53,7 +53,7 @@ class BrowserBridgeClient:
             # public assets before their job body appears. This is an
             # internal localhost bridge timeout, not permission to wait
             # indefinitely on an external request.
-            with httpx.Client(timeout=httpx.Timeout(45.0, connect=2.0), trust_env=False, transport=self.transport) as client:
+            with httpx.Client(timeout=httpx.Timeout(90.0, connect=2.0), trust_env=False, transport=self.transport) as client:
                 response = client.post(
                     f"{self.base_url}/command",
                     headers={"authorization": f"Bearer {self.token}", "content-type": "application/json"},
@@ -62,14 +62,19 @@ class BrowserBridgeClient:
                 raw = response.text
                 if response.is_error:
                     try:
-                        detail = response.json().get("error")
+                        error_body = response.json()
+                        detail = error_body.get("error")
                     except (ValueError, TypeError):
                         detail = ""
+                        error_body = {}
+                    code = error_body.get("code")
+                    if code not in {"xiaohongshu_public_access_cooldown", "xiaohongshu_public_access_limit", "browser_busy"}:
+                        code = "browser_bridge_failed"
                     raise HarnessError(
-                        "browser_bridge_failed",
+                        code,
                         f"桌面受控浏览器命令失败{f'：{str(detail)[:180]}' if detail else ''}",
-                        retryable=True,
-                        details={"status": response.status_code},
+                        retryable=False if code != "browser_bridge_failed" else True,
+                        details={"status": response.status_code, **{key: value for key, value in (error_body.get("details") or {}).items() if key in {"cooldown_until", "retry_after_ms", "remaining_requests"}}},
                     )
                 body = json.loads(raw)
         except HarnessError:

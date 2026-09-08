@@ -84,7 +84,7 @@ export function SourceReaderDialog({ source, onClose }) {
           <button type="button" onClick={onClose} aria-label="关闭原文"><X size={16} /></button>
         </header>
         <div className="interview-reader-meta">
-          <span>{resolved.status === "analyzed" ? "已提取问题" : "已保存正文"}</span>
+          <span>{resolved.status === "ocr_pending" ? "图片 OCR 待核对" : resolved.status === "analyzed" ? "已提取问题" : "已保存正文"}</span>
           <span>{(resolved.extracted_questions || []).length} 个原文问题</span>
           <span>{formatInterviewSourceDate(resolved)} 发布</span>
           {resolved.metadata_json?.image_count > 0 && <span>{resolved.metadata_json.image_count} 张图片</span>}
@@ -105,6 +105,8 @@ export function SourceReaderDialog({ source, onClose }) {
             </section>
           )}
           {detail?.raw_text && <section className="interview-reader-raw"><small>保存的正文</small><p>{detail.raw_text}</p></section>}
+          {detail?.metadata_json?.ocr_job_id && <section className="interview-reader-raw"><small>本地图片识别</small><p>已保存 {detail.metadata_json.ocr_images_saved || 0} 张，已处理 {detail.metadata_json.ocr_images_processed || 0} 张。状态：{detail.metadata_json.ocr_status || "待处理"}。</p></section>}
+          {detail?.metadata_json?.ocr_text && <section className="interview-reader-raw"><small>图片 OCR · 待核对</small><p>只处理页面已加载的图片，可能未覆盖整组图片，也可能误识别，尚未作为面试题证据。</p><p>{detail.metadata_json.ocr_text}</p></section>}
         </div>
         <footer>
           <span>这里是 FetchCV 保存的备用原文；原始发布页面始终是主入口。</span>

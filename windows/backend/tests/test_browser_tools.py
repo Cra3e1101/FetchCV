@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import httpx
+import pytest
+from applyos_harness.errors import HarnessError
 
 from applyos_agent.browser_tools import BrowserBridgeClient, register_browser_tools
 from applyos_domain.models import AgentRun, Candidate, Job
@@ -9,6 +11,21 @@ from integrations.web import WebClient
 
 
 PUBLIC_IP = "93.184.216.34"
+
+
+def test_browser_cooldown_keeps_machine_readable_reason_and_does_not_retry():
+    calls = []
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(400, json={"ok": False, "code": "xiaohongshu_public_access_cooldown", "error": "paused", "details": {"retry_after_ms": 30000, "cooldown_until": "2026-09-07T10:00:00Z", "secret": "not-exported"}})
+    bridge = BrowserBridgeClient(base_url="http://127.0.0.1:32123", token="bridge-test-secret", transport=httpx.MockTransport(handler), web_client=WebClient(resolver=resolver))
+    with pytest.raises(HarnessError) as caught:
+        bridge.open("https://www.xiaohongshu.com/explore/test")
+    assert caught.value.code == "xiaohongshu_public_access_cooldown"
+    assert caught.value.retryable is False
+    assert caught.value.details["retry_after_ms"] == 30000
+    assert "secret" not in caught.value.details
+    assert len(calls) == 1
 
 
 def resolver(_host, port, **_):
