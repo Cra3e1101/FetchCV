@@ -1,29 +1,8 @@
+import { createHttpClient } from "./http-client";
 export const API_BASE = window.appRuntime?.apiBase || import.meta.env.VITE_FETCHCV_API || "http://127.0.0.1:8766";
 const API_TOKEN = window.appRuntime?.apiToken || "";
 
-async function request(path, options = {}) {
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(API_TOKEN ? { "X-FetchCV-Control-Token": API_TOKEN } : {}),
-      ...(options.headers || {}),
-    },
-  });
-  const contentType = response.headers.get("content-type") || "";
-  const raw = response.status === 204 ? "" : await response.text();
-  let payload = raw;
-  if (raw && contentType.includes("json")) {
-    try { payload = JSON.parse(raw); } catch { payload = raw; }
-  }
-  if (!response.ok) {
-    const message = payload?.error?.message || payload?.detail || payload?.message || `请求失败 (${response.status})`;
-    const error = new Error(message);
-    error.payload = payload;
-    throw error;
-  }
-  return payload;
-}
+const request = createHttpClient({ baseUrl: API_BASE, token: API_TOKEN });
 
 async function streamRequest(path, body, { signal, onEvent } = {}) {
   const response = await fetch(`${API_BASE}${path}`, {

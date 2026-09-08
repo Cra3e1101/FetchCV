@@ -1,11 +1,13 @@
 import { motion } from "framer-motion";
 import {
   AlertCircle, BriefcaseBusiness, Building2, CheckCircle2, ChevronRight, FileText, FileUp,
-  FolderKanban, Globe2, LoaderCircle, Minus, MoreHorizontal, Plus,
+  FolderKanban, Globe2, LayoutDashboard, LoaderCircle, Minus, MoreHorizontal, Plus,
   Search, Settings, Square, Trash2, X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AgentWorkspace } from "./components/AgentWorkspace";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CareerDashboard } from "./components/CareerDashboard";
+import { WorkspaceBoundary } from "./components/WorkspaceBoundary";
+const AgentWorkspace = lazy(() => import("./components/AgentWorkspace").then((module) => ({ default: module.AgentWorkspace })));
 import { ImportResumeDialog } from "./components/ImportResumeDialog";
 import { LibraryRail, LibraryView } from "./components/LibraryView";
 import { ModelSettingsDialog } from "./components/ModelSettingsDialog";
@@ -37,7 +39,7 @@ function WindowBar() {
   </div>;
 }
 
-function JobSidebar({ jobs, activeId, activeView, onLibrary, onSelect, onNew, onSettings, onManage, user, hasProfile }) {
+function JobSidebar({ jobs, activeId, activeView, onLibrary, onHome, onSelect, onNew, onSettings, onManage, user, hasProfile }) {
   const [query, setQuery] = useState("");
   const [collapsedCompanies, setCollapsedCompanies] = useState(() => new Set());
   const filtered = jobs.filter((job) => `${job.company}${job.role}`.toLowerCase().includes(query.toLowerCase()));
@@ -70,10 +72,11 @@ function JobSidebar({ jobs, activeId, activeView, onLibrary, onSelect, onNew, on
       <div className="workspace-title"><img src="./FetchCV_LOGO.png" alt="" /><span>FetchCV</span></div>
       <button className="icon-button" onClick={onNew} title={hasProfile ? "新增岗位" : "先导入简历"}><Plus size={17} /></button>
     </div>
+    <button className={`library-nav ${activeView === "home" ? "active" : ""}`} onClick={onHome}><LayoutDashboard size={15} /><span><strong>求职工作台</strong><small>总览与下一步</small></span><ChevronRight size={14} /></button>
     <button className={`library-nav ${activeView === "library" ? "active" : ""}`} onClick={onLibrary}>
       <FolderKanban size={15} /><span><strong>个人资料库</strong><small>{hasProfile ? "简历与经历" : "等待导入简历"}</small></span><ChevronRight size={14} />
     </button>
-    <div className="search-field"><Search size={14} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索岗位" /></div>
+    <div className="search-field"><Search size={14} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索岗位" aria-label="搜索侧栏岗位" /></div>
     <div className="sidebar-label">岗位项目 <span>{filtered.length}</span></div>
     <nav className="job-list">
       {companyGroups.map(({ company, jobs: companyJobs }) => {
@@ -254,7 +257,10 @@ export default function App() {
   const [library, setLibrary] = useState(null);
   const [activeId, setActiveId] = useState(null);
   const [activeCandidateId, setActiveCandidateId] = useState(null);
-  const [activeView, setActiveView] = useState("job");
+  const [activeView, setActiveView] = useState("home");
+  const [requestedTab, setRequestedTab] = useState(null);
+  const [selectionLoading, setSelectionLoading] = useState(false);
+  const librarySequence = useRef(0);
   const [runtime, setRuntime] = useState(null);
   const [initializing, setInitializing] = useState(true);
   const [offline, setOffline] = useState(false);
@@ -358,10 +364,13 @@ export default function App() {
     return value;
   }, []);
   const loadLibrary = useCallback(async (candidateId) => {
+    const sequence = ++librarySequence.current;
     if (!candidateId) { setLibrary(null); return; }
-    setLibrary(await api.candidateLibrary(candidateId));
+    const value = await api.candidateLibrary(candidateId);
+    if (sequence === librarySequence.current) setLibrary(value);
   }, []);
   const load = useCallback(async ({ progressive = false } = {}) => {
+    const selectionAtStart = activeJobRef.current;
     try {
       const runtimeRequest = api.runtime().then((value) => ({ value }), (requestError) => ({ error: requestError }));
       const nextWorkspace = await api.workspace();
@@ -371,13 +380,17 @@ export default function App() {
       // instead of holding the whole application behind secondary queries.
       if (progressive) setInitializing(false);
       const runtimeResult = await runtimeRequest;
-      if (runtimeResult.error) throw runtimeResult.error;
-      setRuntime(runtimeResult.value);
+      if (runtimeResult.error) {
+        setRuntime(null);
+        setNotice({ type: "error", message: "模型状态暂时无法读取，个人资料和岗位仍可使用。" });
+      } else setRuntime(runtimeResult.value);
+      if (activeJobRef.current !== selectionAtStart) return true;
       const candidateId = activeCandidateId || nextWorkspace.candidates[0]?.id;
-      if (candidateId) { setActiveCandidateId(candidateId); await loadLibrary(candidateId); } else setLibrary(null);
+      if (candidateId) { setActiveCandidateId(candidateId); await loadLibrary(candidateId).catch((error) => setNotice({ type: "error", message: error.message })); } else setLibrary(null);
       const jobId = activeId && nextWorkspace.jobs.some((item) => item.id === activeId) ? activeId : nextWorkspace.jobs[0]?.id;
-      if (jobId) { activeJobRef.current = jobId; setActiveId(jobId); await loadDetail(jobId); }
-      else { setDetail(null); setActiveView("library"); }
+      if (activeJobRef.current !== selectionAtStart) return true;
+      if (jobId) { activeJobRef.current = jobId; setActiveId(jobId); await loadDetail(jobId).catch((error) => setNotice({ type: "error", message: error.message })); }
+      else { setDetail(null); }
       return true;
     } catch (loadError) {
       setOffline(true); setError(loadError.message);
@@ -473,7 +486,10 @@ export default function App() {
     try { return await act(operation, success); }
     finally { setAgentActivity((current) => current?.jobId === jobId ? null : current); }
   };
-  const selectJob = async (id) => {
+  const selectJob = async (id, tab = null) => {
+    setRequestedTab(tab ? { jobId: id, tab, nonce: Date.now() } : null);
+    setSelectionLoading(true);
+    setDetail(null);
     activeJobRef.current = id;
     setActiveView("job"); setActiveId(id); setError("");
     try {
@@ -481,7 +497,8 @@ export default function App() {
       if (activeJobRef.current !== id) return;
       setActiveCandidateId(value.candidate.id); setOffline(false);
       await loadLibrary(value.candidate.id);
-    } catch (selectionError) { setError(selectionError.message); }
+    } catch (selectionError) { if (activeJobRef.current === id) setError(selectionError.message); }
+    finally { if (activeJobRef.current === id) setSelectionLoading(false); }
   };
   const selectLibrary = () => {
     setActiveView("library"); setError("");
@@ -676,7 +693,7 @@ export default function App() {
     }
   };
   const researchInterviews = () => sendMessage(
-    `请为当前岗位开展一次可追溯的面试情报调研。先读取岗位上下文并检索本地面试知识库；证据不足时先完整检索小红书：第一层优先搜索“同公司 + 已确认事业部 + 核心岗位”，第二层再搜索“同公司 + 同岗位”，允许来自其他事业部或没有注明事业部。不要以固定条数提前停止，应持续发现到结果耗尽、连续结果均重复或平台访问保护触发；随后再检索牛客、知乎、CSDN 等公开原文作为补充证据。精确岗位标题没有结果时，从完整标题中提取职能称谓并扩展常见写法，例如“两轮车事业部-策略运营”继续检索“策略运营”“运营策略”，同时保留“两轮车”“青桔”等业务线词。若用户提供公开原帖链接，应直接读取。每个候选链接必须先验证正文可读，失效、扫码、登录、导航和搜索结果页不得进入最终来源清单。只把有原文引文支持的问题写入知识库；图片中的问题未经 OCR 不得臆造。按真实来源数归纳共性问题，结合 JD 和已验证简历事实给出准备建议。最终回答强调问题和准备建议，并按时间倒序列出实际使用的原帖；原帖链接是主入口，本地快照只是备用。若平台要求验证或页面不可读，停止该来源，不进行点赞、评论、关注或发布。`,
+    `请为当前岗位开展可追溯的多站点面经调研，默认来源包含小红书和牛客网。先读取岗位并检索本地面试知识库，优先复用已核验正文；若尚无相关牛客来源，即使已有足够小红书来源也要检索牛客。小红书只在共享访问预算内少量读取，优先使用缓存和已加载页面；遵守工具返回的 cooldown_until、retry_after_ms、discovery_exhausted 和未完成原因。不得为了追求来源数连续换词、重试、滚动刷页或切换抓取通道。小红书受限后立即停止该站点，本轮继续读取牛客，不把受限说成没有帖子；随后再检索牛客、知乎、CSDN 的公开原文补齐证据。检索公司、已确认业务线与核心岗位，可适度扩展岗位称谓。每个候选原帖都必须经过 capture_interview_source 和 analyze_interview_source，搜索摘要不能作为证据，只保留有原文引文支持的问题。图片未做 OCR 时标记待识别，不臆造图片问题。区分真实面试问题与准备建议，按真实独立来源归纳频次，结合 JD 和已验证简历事实形成简报。原帖链接是主入口，本地快照只是备用。按时间倒序列出实际使用的原帖，明确牛客与小红书各自实际读取数和受限原因；若牛客没有可验证结果如实说明，不编造来源。不登录、不点赞、不评论、不关注、不发布。`,
     { thinkingLevel: "deep", taskKind: "interview_research" },
   );
   const deleteInterviewSource = (sourceId) => act(
@@ -725,16 +742,24 @@ export default function App() {
 
   return <div className="app-shell">
     <WindowBar />
-    <div className="app-grid">
-      <JobSidebar jobs={jobs} activeId={activeId} activeView={activeView} onLibrary={selectLibrary} onSelect={selectJob} onNew={openNewJob} onManage={setManagedJob} onSettings={() => setModelSettingsOpen(true)} user={currentUser} hasProfile={workspace.candidates.length > 0} />
+    <div className={`app-grid ${activeView === "home" ? "home-grid" : ""}`}>
+      <JobSidebar jobs={jobs} activeId={activeId} activeView={activeView} onHome={() => { setActiveView("home"); setError(""); }} onLibrary={selectLibrary} onSelect={selectJob} onNew={openNewJob} onManage={setManagedJob} onSettings={() => setModelSettingsOpen(true)} user={currentUser} hasProfile={workspace.candidates.length > 0} />
+      <WorkspaceBoundary resetKey={`${activeView}:${activeId}`}><Suspense fallback={<main className="workspace-recovery" role="status"><LoaderCircle className="spin" size={24} /><p>正在打开工作区…</p></main>}>
       {offline
         ? <EmptyWorkspace offline />
+        : activeView === "home"
+          ? <CareerDashboard jobs={jobs} user={currentUser} hasProfile={workspace.candidates.length > 0} runtime={runtime} onNew={openNewJob} onImport={() => setImportOpen(true)} onLibrary={selectLibrary} onSelect={selectJob} onSettings={() => setModelSettingsOpen(true)} />
         : activeView === "library"
           ? library ? <LibraryView library={library} busy={busy} onImportResume={() => setImportOpen(true)} onAddMaterial={importWorkspaceMaterials} onNewJob={openNewJob} onDeleteInterviewSource={deleteInterviewSource} onDeleteInterviewBrief={deleteInterviewBrief} /> : <EmptyWorkspace onImport={() => setImportOpen(true)} offline={false} hasProfile={false} busy={busy} />
+          : selectionLoading
+            ? <main className="workspace-recovery" role="status"><LoaderCircle className="spin" size={24} /><p>正在读取岗位资料…</p></main>
+          : !detail && error
+            ? <main className="workspace-recovery" role="alert"><AlertCircle size={24} /><h2>岗位资料暂时无法读取</h2><p>{error}</p><button className="primary-button" onClick={() => selectJob(activeId)}>重试</button></main>
           : !detail
             ? <EmptyWorkspace onNew={openNewJob} onImport={() => setImportOpen(true)} offline={false} hasProfile={workspace.candidates.length > 0} busy={busy} />
-            : <AgentWorkspace detail={detail} runtime={workspaceRuntime} busy={busy || activeConversationState.busy} error={activeConversationState.error || error} activity={activeConversationState.activity || (agentActivity?.jobId === detail.job.id ? agentActivity : null)} task={latestTask} onStart={start} onRestart={restart} onFactReview={reviewFacts} onReview={review} onPublishApproval={approvePublish} onRetry={retryTask} onPauseTask={pauseTask} onResumeTask={resumeTask} onCancelTask={cancelTask} onResolveInvocation={resolveToolInvocation} onFinalize={() => setFreezeOpen(true)} onSendMessage={sendMessage} onResearchInterviews={researchInterviews} onCancelMessage={() => conversationControllers.current.get(detail.job.id)?.abort()} onAddMaterial={importWorkspaceMaterials} onApprovalDecision={decideToolApproval} onModelActivated={handleRuntimeChanged} onOpenModelSettings={() => setModelSettingsOpen(true)} onSaveResumeEditor={saveResumeEditor} onResumePdfSaved={refreshResumeArtifact} />}
-      {activeView === "library" ? <LibraryRail library={library} /> : !detail ? <aside className="context-blank"><FolderKanban size={19} /><span>岗位上下文会显示在这里</span></aside> : null}
+            : <AgentWorkspace requestedTab={requestedTab} detail={detail} runtime={workspaceRuntime} busy={busy || activeConversationState.busy} error={activeConversationState.error || error} activity={activeConversationState.activity || (agentActivity?.jobId === detail.job.id ? agentActivity : null)} task={latestTask} onStart={start} onRestart={restart} onFactReview={reviewFacts} onReview={review} onPublishApproval={approvePublish} onRetry={retryTask} onPauseTask={pauseTask} onResumeTask={resumeTask} onCancelTask={cancelTask} onResolveInvocation={resolveToolInvocation} onFinalize={() => setFreezeOpen(true)} onSendMessage={sendMessage} onResearchInterviews={researchInterviews} onCancelMessage={() => conversationControllers.current.get(detail.job.id)?.abort()} onAddMaterial={importWorkspaceMaterials} onApprovalDecision={decideToolApproval} onModelActivated={handleRuntimeChanged} onOpenModelSettings={() => setModelSettingsOpen(true)} onSaveResumeEditor={saveResumeEditor} onResumePdfSaved={refreshResumeArtifact} />}
+      </Suspense></WorkspaceBoundary>
+      {activeView === "library" ? <LibraryRail library={library} /> : activeView === "job" && !detail && !selectionLoading && !error ? <aside className="context-blank"><FolderKanban size={19} /><span>岗位上下文会显示在这里</span></aside> : null}
     </div>
     <NewJobModal open={newOpen} candidates={workspace.candidates} onClose={() => setNewOpen(false)} onCreate={createJob} busy={busy} />
     <JobManageDialog job={managedJob} busy={busy} onClose={() => setManagedJob(null)} onSave={saveManagedJob} onDelete={deleteManagedJob} />
