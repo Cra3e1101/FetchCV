@@ -5,7 +5,7 @@
 > 产品版本：0.4.19 Alpha  
 > PRD 版本：V4.2  
 > 更新日期：2026-08-02  
-> 基线：`D:\hesan\Desktop\VSCODES\FetchCV_Windows`
+> 基线：仓库中的 `windows/` 源码目录
 
 ## 1. 产品定义
 

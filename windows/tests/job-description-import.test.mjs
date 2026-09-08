@@ -6,8 +6,10 @@ import { splitJobDescriptions } from "../src/lib/job-description.js";
 
 const root = path.resolve(import.meta.dirname, "..");
 
-test("splits the real multi-job JD fixture without hard-coded company names", () => {
-  const source = fs.readFileSync(path.join(root, "test use", "JD.txt"), "utf8");
+test("splits the real multi-job JD fixture without hard-coded company names", (context) => {
+  const fixture = path.join(root, "test use", "JD.txt");
+  if (!fs.existsSync(fixture)) return context.skip("private real-JD fixture is not present");
+  const source = fs.readFileSync(fixture, "utf8");
   const jobs = splitJobDescriptions(source);
   assert.equal(jobs.length, 7);
   assert.deepEqual(jobs.slice(0, 3).map((item) => [item.company, item.role]), [

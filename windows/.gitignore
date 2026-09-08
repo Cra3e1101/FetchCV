@@ -31,3 +31,15 @@ backend/data/
 *.log
 *.tmp
 .DS_Store
+
+# Local credentials, browser state, and diagnostic databases.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+.tmp-*/

@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from reportlab.pdfgen import canvas
 
@@ -116,6 +117,8 @@ def test_legacy_job_snapshot_rebases_on_source_layout_without_losing_body_edit(d
 
     monkeypatch.setattr(importer_module, "artifact_root", lambda *parts: tmp_path.joinpath("artifacts", *parts))
     source = Path(__file__).resolve().parents[2] / "test use" / "高子强的简历.pdf"
+    if not source.exists():
+        pytest.skip("private real-resume fixture is not present")
     imported = PdfResumeImporter(database).import_file(source)
     with database.session() as session:
         base = session.get(ResumeVersion, imported["resume_id"])

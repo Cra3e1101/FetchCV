@@ -138,7 +138,7 @@ Pi 只负责观察上下文、选择工具、读取结果并继续决策。Pytho
 在 PowerShell 中执行：
 
 ```powershell
-Set-Location "D:\hesan\Desktop\VSCODES\FetchCV_Windows"
+Set-Location "<path-to-FetchCV>\windows"
 npm ci
 python -m venv backend\.venv
 backend\.venv\Scripts\python.exe -m pip install -e "backend[dev]"
