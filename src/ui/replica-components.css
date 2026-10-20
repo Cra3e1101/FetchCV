@@ -1,0 +1,231 @@
+/* Component geometry from the rendered local replica, not OpenBitFun overrides.
+ * Source: replica.css .rp-sidebar*, .rp-threadcol, .rp-md, .rp-composer*;
+ * index.html .rp-set-* and [cmdk-*]. App-shared.css remains read-only. */
+:root:is([data-interface-theme=white],[data-interface-theme=neutral-dark]) {
+  --ui-font:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  --ui-chat-width:800px;
+}
+:root[data-interface-theme=white] {--ui-under:#fff;--ui-selection:#ededed;}
+.source-grid>.source-sidebar.rp-sidebar {display:flex;flex-direction:column;overflow:hidden;padding:0;border:0;background:var(--ui-sidebar);}
+.rp-sidebar .rp-sidebar-head {height:56px;flex:none;display:flex;align-items:center;gap:6px;padding:0 12px 0 10px;}
+.rp-sidebar .rp-mode.source-workspace-name {height:32px;padding:0 6px;display:flex;align-items:center;gap:6px;font:430 14px/24px var(--ui-font);color:var(--ui-ink);}
+.rp-sidebar .source-sidebar-controls {margin-left:auto;display:flex;gap:6px;}
+.rp-sidebar .source-icon {border-radius:9.375px;width:28px;height:28px;}
+.rp-sidebar .rp-scroll {flex:1;min-height:0;overflow:auto;padding:0 10px 12px;}
+.rp-sidebar .rp-row {display:flex;align-items:center;gap:8px;min-height:30px;width:100%;padding:5px 8px;border:0;border-radius:12.5px;background:transparent;color:var(--ui-ink);font:430 13px/18.57px var(--ui-font);text-align:left;white-space:nowrap;overflow:hidden;}
+.rp-row>.lbl {min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.rp-row>svg {flex:none;}
+.rp-sidebar .rp-row:hover {background:var(--ui-hover);}
+.rp-sidebar .rp-row[aria-current=page] {background:var(--ui-selection);}
+.rp-sidebar .rp-section {margin:0;padding:0;}
+.rp-sidebar .rp-sec {display:flex;align-items:center;gap:4px;height:36px;margin-left:-4px;padding:2px 4px;border-radius:10px;font:500 14px/21px var(--ui-font);color:var(--ui-muted);}
+.rp-sidebar .rp-sec .source-icon {margin-left:auto;}
+.rp-sidebar .rp-row.source-job-item {min-height:30px!important;padding-right:28px!important;}
+.rp-sidebar .source-job-menu {top:1px;right:2px;}
+.rp-sidebar .source-empty {margin:0;padding:5px 8px;font:430 13px/18.57px var(--ui-font);}
+.source-grid .task-header {padding-inline:14px;}
+.source-grid .task-header h1 {font:430 14px/24px var(--ui-font);}
+.source-grid .conversation-stream,.source-grid .standalone-transcript {width:100%;max-width:800px;margin:0 auto;padding:16px 24px 24px;}
+.source-grid .agent-message {font:430 14px/24.5px var(--ui-font);margin:22px 0 0;}
+.source-grid .agent-message:first-child {margin-top:8px;}
+.source-grid .agent-message-content,.source-grid .agent-markdown,.source-grid .agent-message-content :is(p,ul,ol) {font:430 14px/24.5px var(--ui-font);}
+.source-grid .agent-message-content p {margin:0 0 14px;}
+.source-grid .agent-message-content p:last-child {margin-bottom:0;}
+.source-grid .agent-message.user {font:430 14px/22.4px var(--ui-font);margin-left:auto;}
+.source-grid .agent-message.user p {font:inherit;margin:0;}
+.source-grid .agent-message.user .agent-message-content {font:inherit;}
+.source-grid .agent-markdown ul {padding-left:22px;margin:0 0 14px;}
+.source-grid .agent-markdown li {margin:4px 0;}
+.source-grid .agent-markdown strong {font-weight:590;}
+.source-grid .agent-message-actions {margin-top:6px;gap:2px;}
+.source-grid .agent-message-actions button {border-radius:6px;}
+.source-grid .agent-message-actions svg {width:15px;height:15px;}
+/* conversation.html: elapsed row + actual activity groups + answer, without
+ * the legacy timeline rail or generated stage descriptions. */
+.source-grid .agent-message {margin-bottom:0;}
+.source-grid .processing-disclosure {margin:0 0 10px;}
+.source-grid .processing-elapsed {font:430 13px/24px var(--ui-font);color:var(--ui-secondary);}
+:root[data-interface-theme=white] .source-grid .processing-elapsed {color:rgba(0,0,0,.6);}
+:root[data-interface-theme=neutral-dark] .source-grid .processing-elapsed {color:rgba(255,255,255,.7);}
+.source-grid .processing-disclosure>.outline-none:has(.processing-elapsed):not(:last-child) {margin-bottom:16px;}
+.source-grid .processing-summary {width:auto;min-height:18.57px;gap:4px;}
+.source-grid .processing-summary:disabled {opacity:1;cursor:default;}
+.source-grid .processing-summary>svg {opacity:0;transition:opacity .12s,transform .2s var(--ease-enter-snappy);}
+.source-grid .processing-summary:is(:hover,:focus-visible)>svg {opacity:1;}
+.source-grid .processing-detail {border:0;margin:0;padding:8px 0 4px;}
+.source-grid .processing-detail .activity-line {display:flex;align-items:center;gap:6px;padding:0;min-height:18.57px;}
+.source-grid .processing-detail .activity-line+.activity-line {margin-top:16px;}
+.source-grid .processing-detail .activity-line-copy strong,.source-grid .activity-line-state {font:430 13px/18.57px var(--ui-font);color:var(--ui-status);}
+.source-grid .processing-detail .activity-line-icon {width:16px;height:16px;flex:none;color:var(--ui-status);}
+.source-grid .activity-line-state {margin-left:auto;}
+/* Same composer subtree as the reference: surface > editor + controls. */
+.source-grid .source-composer.rp-composer-wrap {width:calc(100% - 212px);max-width:none;margin:12px auto 16px;padding:0;}
+.source-grid .standalone-composer {width:calc(100% - 212px);max-width:none;margin:12px auto 16px;padding:0;}
+.source-grid .standalone-composer>.source-composer.rp-composer-wrap {width:100%;margin:0;}
+.source-grid .source-composer .rp-composer {display:block;flex:none;width:100%;padding:0;margin:0;gap:0;background:var(--ui-surface);border:0;border-radius:22px;box-shadow:var(--ui-composer-shadow);overflow:visible;}
+.source-grid .source-composer .source-composer-editor.rp-editor {display:block;flex:none;width:100%;padding:12px 14px 0;min-height:34px;margin:0;}
+.source-grid .source-composer textarea {display:block;padding:0;margin:0;height:22px;min-height:22px;font:430 14px/20px var(--ui-font);}
+.source-grid .source-composer .rp-controls {display:flex;align-items:center;gap:4px;width:100%;padding:8px 12px 12px;min-height:52px;}
+.source-composer .rp-controls-start,.source-composer .rp-controls-end {display:flex;align-items:center;gap:4px;min-width:0;}
+.source-composer .rp-controls-end {margin-left:auto;}
+.source-composer .composer-add {width:28px;height:28px;min-width:28px;}
+.source-grid .source-composer :is(.composer-mode,.model-effort-trigger) {height:28px;padding:0 6px;font:430 13px/18.57px var(--ui-font);}
+.source-grid .source-composer .model-effort-trigger {padding-inline:8px;}
+.source-grid .source-composer .composer-send {width:32px;height:32px;flex:0 0 32px;padding:0;border-radius:9999px;}
+.source-grid .source-composer .composer-send:disabled {background:#d7d7d7;color:#fff;opacity:1;}
+.source-composer .composer-send svg {width:17px;height:17px;}
+.source-grid .source-composer .composer-popover {bottom:calc(100% + 8px);}
+.source-grid .agent-effort-panel>header {display:grid;grid-template-columns:32px minmax(0,1fr) 32px;justify-content:normal;}
+.source-grid .effort-model-menu {min-width:0;width:100%;}
+.source-grid .source-composer .effort-help {width:32px;height:32px;border-radius:8px;}
+.source-grid .effort-track-shell input:hover::-webkit-slider-thumb {box-shadow:0 0 2px rgba(0,0,0,.1);}
+.source-grid .effort-track-shell input:focus-visible {outline-color:var(--ui-blue);}
+.source-grid .standalone-welcome {margin:22px 0 0;font:590 32px/40px var(--ui-font);letter-spacing:-.01em;text-align:center;}
+.source-grid .standalone-home {padding-top:152px;display:flex;flex-direction:column;align-items:center;}
+.source-grid .standalone-home>svg {width:44px;height:44px;color:var(--ui-muted);}
+.source-grid .standalone-transcript:has(.standalone-home) {padding-top:0;}
+/* Command palette follows the reference input/list hierarchy, without a
+ * decorative search icon, footer or extra command-row icons. */
+.command-backdrop {inset:0;background:rgba(0,0,0,.12);backdrop-filter:blur(1px);}
+.command-menu {padding:4px;background:var(--ui-surface);box-shadow:0 16px 32px #0002;}
+.command-search {display:block;min-height:38px;padding:0;border:0;}
+.command-search input {display:block;width:100%;height:38px;padding:8px 10px;border-radius:12.5px;font:430 13px/18.57px var(--ui-font);}
+.command-search input:focus-visible {outline:1px solid var(--ui-ink);outline-offset:-1px;}
+.command-results {padding:4px 0 0;}
+.command-results h2 {font:500 14px/21px var(--ui-font);padding:8px;margin:0;color:var(--ui-muted);}
+.command-results button {height:34px;padding:5px 8px 5px 32px;border-radius:15px;}
+.command-results button[aria-selected=true] {background:var(--ui-shell-surface);}
+.command-menu kbd {padding:2px 6px;border-radius:6px;background:var(--ui-shell-surface);font:430 12px/12px var(--ui-font);}
+/* Corresponding settings controls use reference row/card nesting. Business
+ * fields remain unchanged; the workspace numbers are rows, not dashboard tiles. */
+.settings-window.settings-window .settings-sidebar {background:color-mix(in srgb,var(--ui-ink) 2%,var(--ui-surface));border-right:.5px solid var(--ui-popover-ring);}
+.settings-window.settings-window .settings-sidebar nav button svg,.settings-sidebar nav button>i {display:none;}
+.settings-window.settings-window .settings-sidebar nav section>button {display:block;text-align:left;}
+.settings-window.settings-window .settings-sidebar nav section>button>span {display:block;}
+.settings-window.settings-window .settings-search input:focus {outline:none;box-shadow:none;}
+.settings-window.settings-window .settings-pane>header {border:0;padding-bottom:26px;}
+.settings-window.settings-window .settings-pane>header h2 {font-weight:590;}
+.settings-window .settings-back {margin:auto 4px 0;height:30px;flex:none;text-align:left;padding:0 8px;background:none;border:0;border-radius:12.5px;font:430 13px/18.57px var(--ui-font);color:var(--ui-muted);}
+.settings-back:hover {background:var(--ui-hover);color:var(--ui-ink);}
+.model-settings-dialog.settings-window .settings-content>.modal-close {display:none;}
+.settings-window.settings-window .settings-group {padding:0;margin:0 0 34px;border:0;}
+.settings-window.settings-window .settings-group>h3 {font:500 14px/21px var(--ui-font);margin:0 0 12px;}
+.settings-window .rp-set-card {border-radius:14px;background:var(--ui-surface);box-shadow:0 0 0 .5px var(--ui-shell-border),0 1px 2px #00000008;overflow:hidden;}
+.settings-window .rp-set-row {display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:12px 14px;}
+.settings-window .rp-set-row+.rp-set-row {box-shadow:inset 0 .5px 0 var(--ui-line);}
+.settings-window .rp-set-row>span {min-width:0;flex:1;}
+#root .settings-window .rp-set-row strong {display:block;font:500 13px/18.57px var(--ui-font);}
+#root .settings-window .rp-set-row small {display:block;font:430 12px/16px var(--ui-font);margin-top:2.43px;color:var(--ui-muted);}
+.settings-window .rp-set-row select {height:30px;padding:0 10px;border-radius:9px;border:.5px solid var(--ui-shell-border);background:var(--ui-surface);font:430 13px/18.57px var(--ui-font);color:var(--ui-ink);}
+.settings-window .rp-set-value {font:430 13px/18.57px var(--ui-font);color:var(--ui-muted);}
+.settings-window.settings-window .settings-capabilities {border-radius:14px;box-shadow:0 0 0 .5px var(--ui-shell-border);overflow:hidden;}
+.settings-window.settings-window .settings-capabilities>div {padding:12px 14px;gap:16px;}
+.settings-window .settings-capabilities>div>svg {display:none;}
+.source-grid .agent-tool-receipt {margin:0 0 10px;}
+.source-grid .agent-tool-receipt>.ui-collapse {padding:0;border:0;display:block;}
+.source-grid .agent-tool-receipt>.outline-none {padding:0;border:0;display:block;}
+.source-grid .agent-tool-receipt article {display:block;}
+.source-grid .tool-group-toggle,.source-grid .tool-detail-toggle {min-height:24px;padding:0;justify-content:flex-start;}
+.source-grid .tool-detail-toggle {padding-inline:0;}
+.source-grid .tool-detail-toggle small {margin-left:6px;}
+.source-grid .tool-detail-toggle>svg:last-child {opacity:0;}
+.source-grid .tool-detail-toggle:is(:hover,:focus-visible)>svg:last-child {opacity:1;}
+.source-grid .tool-output-card {margin:4px 2px 8px 26px;}
+.source-grid .tool-output-card p {font:430 13px/18.57px var(--ui-code-font);padding:8px 10px;margin:0;color:var(--ui-secondary);}
+.source-grid .tool-output-card footer {padding:2px 10px 4px;}
+/* replica.css .rp-permmenu / .rp-permrow. Only supported permission modes render. */
+.rp-perm-wrap {position:relative;display:flex;align-items:center;}
+.source-composer .rp-permmenu {position:absolute;left:0;bottom:calc(100% + 8px);width:312px;max-width:calc(100vw - 24px);z-index:70;border-radius:20px;background:color-mix(in srgb,var(--ui-surface) 95%,transparent);backdrop-filter:blur(16px);padding:8px;box-shadow:0 0 0 .5px var(--ui-popover-ring),0 8px 24px rgba(0,0,0,.1),0 2px 6px rgba(0,0,0,.06);animation:ui-pop-enter .2s var(--ease-enter-snappy) both;}
+.rp-permmenu .h {font:500 13px/18px var(--ui-font);color:var(--ui-ink);padding:6px 8px 10px;}
+.source-composer .rp-permrow {width:100%;display:flex;align-items:flex-start;gap:8px;min-height:0;padding:7px 8px;border:0;border-radius:15px;background:none;color:var(--ui-ink);text-align:left;transition:background .12s,transform .12s;}
+.source-composer .rp-permrow:hover,.source-composer .rp-permrow:focus-visible {background:var(--ui-hover);}
+.source-composer .rp-permrow:active {transform:scale(.94);}
+.source-composer .rp-permrow:disabled {opacity:.5;cursor:default;}
+.rp-permrow .txt {flex:1;min-width:0;}
+.rp-permrow .t {display:block;font:430 13px/18.57px var(--ui-font);}
+.rp-permrow .d {display:block;margin-top:1px;font:430 12px/16px var(--ui-font);color:var(--ui-muted);}
+.rp-permrow .check {width:16px;height:16px;margin-top:2px;visibility:hidden;}
+.rp-permrow[aria-checked=true] .check {visibility:visible;}
+.source-grid .source-composer .rp-editor {font:430 14px/20px var(--ui-font);}
+.settings-window.settings-window .settings-search input {font-weight:430;}
+.replica-activity-header {position:relative;display:inline-flex;align-items:center;max-width:100%;gap:4px;padding:0;text-align:left;}
+.source-grid .replica-activity-header>button {position:absolute;inset:0;width:100%;height:100%;min-height:0;padding:0;border:0;border-radius:6px;background:transparent;}
+.replica-activity-label {position:relative;pointer-events:none;display:inline-flex;align-items:center;min-width:0;gap:6px;color:var(--ui-status);font:430 13px/18.57px var(--ui-font);}
+.replica-activity-label>span {overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.replica-activity-label>svg {flex:none;}
+.replica-activity-arrow {position:relative;display:flex;pointer-events:none;opacity:0;color:var(--ui-status);transition:opacity .12s;}
+.replica-activity-header:is(:hover,:focus-within) .replica-activity-arrow {opacity:1;}
+.replica-activity-arrow>svg {transition:transform .2s var(--ease-enter-snappy);}
+.rp-actgroup[data-open=true]>.outline-none .replica-activity-arrow>svg {transform:rotate(180deg);}
+/* handoff/activity-fold.html: aggregate -> command -> output. Scoped here,
+ * never imported as global upstream CSS. All rows share the corrected nesting. */
+:root {--fold-ease:cubic-bezier(.23,1,.32,1);--fold-enter:.2s;--fold-collapse:.3s;--fold-hover:rgba(13,13,13,.05);}
+:root:is([data-interface-theme=neutral-dark],[data-interface-theme=dark]) {--fold-hover:rgba(255,255,255,.05);}
+.fold-body {overflow:hidden;height:0;transition:height var(--fold-collapse) var(--fold-ease);}
+.fold-body[hidden] {display:none;}
+.fold-body:not([hidden]) {height:auto;}
+.source-grid .fold-group,.source-grid .fold-command-row {min-width:0;width:100%;}
+.source-grid .agent-tool-receipt>.fold-body {padding:0;border:0;display:block;}
+.source-grid .agent-tool-receipt>.fold-body[hidden] {display:none;}
+.source-grid .fold-group .group\/activity-header {width:100%;min-width:0;}
+.source-grid .fold-command-row>div>div {display:flex;min-width:0;flex-direction:column;overflow:clip;}
+.source-grid .fold-group .replica-activity-header {display:flex;align-items:center;gap:4px;height:24px;cursor:pointer;transition:background-color .12s ease;}
+.source-grid .fold-group .group\/activity-header:is(:hover,:focus-within) {background:var(--fold-hover);border-radius:6px;}
+.source-grid .fold-group .replica-activity-label {font:430 13px/24px var(--ui-font);color:var(--ui-secondary);}
+.source-grid .fold-group .fold-toggle {position:absolute;inset:0;width:100%;height:100%;min-height:0;padding:0;border:0;border-radius:6px;background:transparent;cursor:pointer;}
+.source-grid .fold-group .fold-toggle:focus-visible {outline:2px solid var(--ui-ink);outline-offset:-2px;}
+.source-grid .fold-group .processing-summary {width:100%;min-height:24px;}
+/* The source sample's collapsed three-row body measures 100px. Its last two
+ * rows have inconsistent nesting and contribute a trailing inline line box.
+ * Preserve that measured 20px trailing space explicitly, not the broken DOM. */
+.fold-command-list {padding-bottom:20px;}
+.fold-command-list>.fold-command-row:not(:first-child) {margin-top:4px;}
+.fold-chev {position:relative;display:flex;flex:none;pointer-events:none;opacity:.45;color:var(--ui-secondary);transition:opacity .12s ease;}
+.fold-command-row:is(:hover,:focus-within,[data-open=true])>.text-size-chat .fold-chev {opacity:.75;}
+.fold-chev>svg {width:16px;height:16px;transition:transform var(--fold-enter) var(--fold-ease);}
+.fold-command-row[data-open=true]>div>div>.group\/activity-header .fold-chev>svg,
+.fold-group[data-open=true]>.outline-none .group\/activity-header .fold-chev>svg {transform:rotate(180deg);}
+.fold-body [data-testid=exec-shell-body] {max-height:260px;overflow:auto;overscroll-behavior:contain;}
+.fold-output-spacing {display:flex;flex-direction:column;gap:8px;padding:8px 0 4px;}
+.source-grid .fold-command-row .tool-output-card {display:flex;flex-direction:column;margin:0;border:1px solid var(--ui-shell-border);border-radius:12.5px;background:var(--ui-shell-surface);overflow:hidden;}
+.source-grid .fold-command-row .tool-output-card header {display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 8px;font:430 12px/17.1429px var(--ui-font);color:var(--ui-secondary);}
+.source-grid .fold-command-row .tool-output-card header button {display:flex;align-items:center;justify-content:center;padding:0;width:16px;height:16px;min-height:0;opacity:0;transition:opacity .12s ease;}
+.source-grid .fold-command-row .tool-output-card:is(:hover,:focus-within) header button {opacity:1;}
+.fold-output-content {padding:8px 8px 0;}
+.source-grid .fold-command-row .tool-output-card pre {margin:0;padding:0;white-space:pre-wrap;overflow-wrap:anywhere;font:430 12px/24px var(--ui-code-font);color:var(--ui-secondary);}
+.source-grid .fold-command-row .tool-output-card footer {display:flex;align-items:center;justify-content:flex-end;gap:4px;padding:2px 10px 4px;font:430 13px/24px var(--ui-font);color:var(--ui-muted);}
+.source-grid .fold-command-row .tool-output-card footer svg {width:12px;height:12px;}
+@media(prefers-reduced-motion:reduce){.fold-body,.fold-chev,.fold-chev>svg {transition:none;}}
+.source-grid .agent-code-block.rp-mdx {background:var(--ui-tray);border:0;border-radius:16px;overflow:hidden;margin:14px 0;}
+.source-grid .rp-mdx .bar {display:flex;align-items:center;gap:8px;padding:10px 14px;font:430 12.5px/24px var(--ui-font);background:none;border:0;color:var(--ui-muted);}
+.source-grid .rp-mdx .bar .hbtn {margin-left:auto;width:24px;height:24px;padding:0;border:0;border-radius:6px;display:flex;align-items:center;justify-content:center;opacity:1;color:var(--ui-muted);background:none;}
+.source-grid .rp-mdx .bar .hbtn:hover {background:var(--ui-hover);color:var(--ui-ink);}
+.source-grid .rp-mdx pre {margin:0;padding:2px 16px 16px;font:430 13px/21.45px var(--ui-code-font);white-space:pre-wrap;color:var(--ui-ink);}
+.source-grid .rp-mdx pre code {padding:0;background:none;font:inherit;}
+/* index.html .rp-set-navhead/.rp-set-main: rendered file takes precedence
+ * over the older hand-transcribed search coordinates. */
+.settings-window.settings-window .settings-sidebar {padding:0;}
+.rp-set-navhead {padding:16px 16px 8px;display:flex;flex-direction:column;gap:10px;flex:none;}
+.settings-sidebar .settings-sidebar-title {font:590 18px/24px var(--ui-font);padding-left:8px;margin:0;}
+.settings-window.settings-window .settings-search {display:flex;height:36px;min-height:36px;width:auto;gap:8px;margin:0;padding:0 10px;border-radius:9999px;background:var(--ui-hover);}
+.settings-window.settings-window .settings-search input {flex:1;min-width:0;width:0;font:430 14px/18px var(--ui-font);}
+.settings-search .rp-set-searchicon {font-size:14px;opacity:.6;}
+.settings-window.settings-window .settings-sidebar nav {padding:0 8px 12px;}
+#root .settings-window.settings-window .settings-sidebar nav section>small {padding:8px 8px 4px;}
+.settings-window.settings-window .settings-pane {padding-top:42px;}
+.settings-window.settings-window .settings-pane>header {padding:0 0 26px;}
+.settings-window .settings-back {margin:8px 12px 12px;height:30px;}
+@media(max-width:759px){.settings-window.settings-window .rp-set-navhead{padding:16px 8px 8px;}.settings-window.settings-window .settings-search {display:none;}.settings-window .settings-back{margin:0;}}
+/* Settings nav leading icons.
+ * The live client renders a 16px icon before every settings label (bell, download,
+ * person, palette, …) on a 30px row with an 8px gap; the local replica file simply
+ * omitted them. The icons already exist in ModelSettingsDialog, so only the previous
+ * `display:none` override is replaced — business behaviour is untouched.
+ * The trailing <i> stays hidden: it is the provider-status dot, not a reference icon. */
+.settings-window.settings-window .settings-sidebar nav section>button {display:flex;align-items:center;gap:8px;text-align:left;}
+.settings-window.settings-window .settings-sidebar nav section>button>svg {display:block;flex:0 0 16px;width:16px;height:16px;color:var(--ui-muted);}
+.settings-window.settings-window .settings-sidebar nav section>button.active>svg,
+.settings-window.settings-window .settings-sidebar nav section>button:is(:hover,:focus-visible)>svg {color:var(--ui-ink);}
+.settings-window.settings-window .settings-sidebar nav section>button>span {min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+@media(max-width:1050px){.source-grid .source-composer.rp-composer-wrap,.source-grid .standalone-composer {width:calc(100% - 48px);}}
+@media(max-width:759px){.source-grid .source-composer.rp-composer-wrap,.source-grid .standalone-composer {width:calc(100% - 24px);}.source-grid .standalone-composer>.source-composer.rp-composer-wrap{width:100%;}.source-composer .rp-controls{padding-inline:8px;}.source-grid .conversation-stream,.source-grid .standalone-transcript{padding-inline:12px;}.source-grid .standalone-home{padding-top:56px;}.source-grid .standalone-welcome{font-size:28px;line-height:33.6px;}.settings-window .settings-back{position:absolute;top:16px;right:8px;margin:0;}}

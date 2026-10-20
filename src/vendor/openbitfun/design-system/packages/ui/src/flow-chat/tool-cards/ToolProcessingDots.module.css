@@ -1,0 +1,10 @@
+@layer openbitfun.components {
+  .root {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    color: inherit;
+    vertical-align: middle;
+  }
+}

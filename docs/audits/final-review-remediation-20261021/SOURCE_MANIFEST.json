@@ -1,0 +1,181 @@
+{
+  "root": "D:\\hesan\\Desktop\\VSCODES\\FetchCV_Windows",
+  "scope": "本轮相关源码；不能归因整个 dirty tree",
+  "files": [
+    {
+      "path": "backend/applyos_agent/host_approval.py",
+      "sha256": "6a4b47e6d6818e5b2372c127aaf1527579906a770794396f5cc1fd121a33ac66",
+      "bytes": 1253,
+      "before_sha256": "73d859c71b71f9491a2bd4555efc16e0ad0222ff47373c487395382a1b88f40b",
+      "baseline": "本轮首次备份快照；不是 Git HEAD"
+    },
+    {
+      "path": "backend/applyos_agent/interview_evidence.py",
+      "sha256": "3ba16c50c99e72947c6355e6832eb9faa3a36270939247db47e1a5d36fe1925d",
+      "bytes": 691,
+      "before_sha256": "0d4ca81ed5c17e712929467a1e3cce91b17d557d8d819340dc705714b656c86a",
+      "baseline": "本轮首次备份快照；不是 Git HEAD"
+    },
+    {
+      "path": "backend/applyos_agent/interview_tools.py",
+      "sha256": "995e56eda54c98c420f986422588da4a310c62221e41f58514a6f962b7c23a31",
+      "bytes": 71787,
+      "before_sha256": "db0814404ad072c07175ef1b965b1cc070066d877613f4a57981167bb3e4fdd5",
+      "baseline": "本轮首次备份快照；不是 Git HEAD"
+    },
+    {
+      "path": "backend/applyos_agent/pi_domain_tools.py",
+      "sha256": "9cecd28266692321dda90aab27b8c5544e549a2bdc7a429abce84c776401cd65",
+      "bytes": 25288,
+      "before_sha256": "87255893f4f8242885e65435189808546641532e3fd890f09ba6e344fdd528ec",
+      "baseline": "本轮首次备份快照；不是 Git HEAD"
+    },
+    {
+      "path": "backend/applyos_api/conversations.py",
+      "sha256": "770b9abe92d7183c7632e21731ad87693445e2e599a07618c965329203b48090",
+      "bytes": 19436,
+      "before_sha256": "4bc426dafc19f2c01d31c727e5bcd65796034ce963e91c5983cb245ca230c89a",
+      "baseline": "本轮首次备份快照；不是 Git HEAD"
+    },
+    {
+      "path": "backend/applyos_api/main.py",
+      "sha256": "e282a42b373d642884ac254cae0cb611fbfedb067e264f2c779af9975c3ddfca",
+      "bytes": 84667,
+      "before_sha256": "6ca343d8443c2493cdf1f0eab611dde49ee9c013916ed1f832f59324d6b6d0ee",
+      "baseline": "本轮首次备份快照；不是 Git HEAD"
+    },
+    {
+      "path": "backend/applyos_api/pi_bridge.py",
+      "sha256": "565d15cbdf9402dca51bc487190e1c178851993e4ddd703daa8c031b5b988585",
+      "bytes": 45080,
+      "before_sha256": "ffee76757470eb7493235ad00d4d6f399aece2bb5bce4cc4f3a890cd686b973f",
+      "baseline": "本轮首次备份快照；不是 Git HEAD"
+    },
+    {
+      "path": "backend/applyos_harness/permissions.py",
+      "sha256": "981c57796a7cbd62f362727a0a9b3c93bdf46d7b402bf3dd17e448fdd17894b1",
+      "bytes": 23663,
+      "before_sha256": "92342a5ad2d1554de6b49a2dff5aa44e85dbe1279b52284397ee053bceafbc53",
+      "baseline": "本轮首次备份快照；不是 Git HEAD"
+    },
+    {
+      "path": "electron/main.mjs",
+      "sha256": "410b1ab0eceb710d30005d75af8e768c0d3b6dfcecf1b1dc4576e84aa844ca7e",
+      "bytes": 38340,
+      "before_sha256": "c85638e7d355445730ecf3cd48f9491c170bef944ce17f8a1f9bf2034e62ec5f",
+      "baseline": "本轮首次备份快照；不是 Git HEAD"
+    },
+    {
+      "path": "electron/pi/context-policy.mjs",
+      "sha256": "5b68c6c386d338cf98f52d15307be28c97156ca920c5431c1e23e0ca5ef21193",
+      "bytes": 6673,
+      "before_sha256": "10579ea48e708c63d8c1b8934c71df8b84cf0d951d3482050a771319a96b5e9d",
+      "baseline": "本轮首次备份快照；不是 Git HEAD"
+    },
+    {
+      "path": "electron/pi/conversation-tools.mjs",
+      "sha256": "474466af0adbfd5eed441c487d217e29bb590992b872dac15e9a1165d4eca70d",
+      "bytes": 1353,
+      "before_sha256": "efeb6c6dcc6178a167f0f56bb34196853d44ed4c867d890f58a0de8df646f258",
+      "baseline": "本轮首次备份快照；不是 Git HEAD"
+    },
+    {
+      "path": "electron/pi/provider-adapter.mjs",
+      "sha256": "ea27ad591a257bf9b7e00631b3bdec674ccd0e80113b46273d4f43b89bb4c40e",
+      "bytes": 3850,
+      "before_sha256": "f47d34135d98a2e16ccf27d925cef083dbc2d88c3d653d00a96b4b39d0eaff06",
+      "baseline": "本轮首次备份快照；不是 Git HEAD"
+    },
+    {
+      "path": "electron/pi/provider-probe.mjs",
+      "sha256": "d7b5d1623fe03130b8f9c399ebed758108d1855af00526a9c809cba935705c84",
+      "bytes": 2645,
+      "before_sha256": "245366ea6598201d759c0a75e24fb6f533c3282763780d5c77e5b9e0c706b3aa",
+      "baseline": "本轮首次备份快照；不是 Git HEAD"
+    },
+    {
+      "path": "electron/pi-agent-runtime.mjs",
+      "sha256": "5aa8b3a4581444b8c3a88774718efdcac1bb349461c54d7111d627edab9f7e42",
+      "bytes": 31622,
+      "before_sha256": "dacc1ebb28d9cb2eec39e2beb197076c389949075ec12a7eebbf132ee59841f5",
+      "baseline": "本轮首次备份快照；不是 Git HEAD"
+    },
+    {
+      "path": "src/App.jsx",
+      "sha256": "81eaf9c9378d10951c93288ca6e20d80759c8cb9741d31b05eb797c51f1dca79",
+      "bytes": 49402,
+      "before_sha256": "d8ec106ab3ef3ffcab0c1713d5c06fea6f00e630c3c7cee73f867a1dc6369b1a",
+      "baseline": "本轮首次备份快照；不是 Git HEAD"
+    },
+    {
+      "path": "src/components/AgentWorkspace.jsx",
+      "sha256": "84138a854d1e982f6949648d7c732b4eb5d1232dcfe1643b881cd0a9fdbff8de",
+      "bytes": 65579,
+      "before_sha256": "8e7ef93f004a7755cd0af2241aadb206270bbd8bb4364017c2ab5a90e3fab0b4",
+      "baseline": "本轮首次备份快照；不是 Git HEAD"
+    },
+    {
+      "path": "src/ui/WorkspaceSidebar.jsx",
+      "sha256": "9accdfcf48563ed17b4319e8803cc339c0aca45bc39dded1648f6a3bb24c0dd4",
+      "bytes": 3275,
+      "before_sha256": "c87a896224a38d12ef3b45bbf17f500327ac5ecea86e0138ae1cf1cdba0a1bfd",
+      "baseline": "本轮首次备份快照；不是 Git HEAD"
+    },
+    {
+      "path": "src/lib/api.js",
+      "sha256": "55b32ed66b9d619072a143c4c93c695a4df768fc1b56ce4453a8afbf1937791e",
+      "bytes": 10838,
+      "before_sha256": null,
+      "baseline": "新增或未保留编辑前快照；api.js 首次备份已含新增删除方法，请看完整当前文件"
+    },
+    {
+      "path": "backend/tests/test_final_review_regressions.py",
+      "sha256": "5e1b1facd47200baea2bd89814677229fe232346178f82fd3f0ed934a4cecea9",
+      "bytes": 11433,
+      "before_sha256": null,
+      "baseline": "新增或未保留编辑前快照；api.js 首次备份已含新增删除方法，请看完整当前文件"
+    },
+    {
+      "path": "backend/tests/test_standalone_conversations.py",
+      "sha256": "1d2ccaa05d27a767737b24c4b2a988a73be7da2fe71cd17a58085d4b0d169cff",
+      "bytes": 11424,
+      "before_sha256": null,
+      "baseline": "新增或未保留编辑前快照；api.js 首次备份已含新增删除方法，请看完整当前文件"
+    },
+    {
+      "path": "backend/tests/test_tool_gateway.py",
+      "sha256": "89f7087a0914d5ff4683e942cf2f5c1620db2b205bf24b6c8b6b043276b8661e",
+      "bytes": 11654,
+      "before_sha256": null,
+      "baseline": "新增或未保留编辑前快照；api.js 首次备份已含新增删除方法，请看完整当前文件"
+    },
+    {
+      "path": "backend/tests/test_stage7_e2e.py",
+      "sha256": "d89d17634303bfbee808631ff7243ef3cf56cb6a8c769ca5e625f06f95bb90d0",
+      "bytes": 6079,
+      "before_sha256": null,
+      "baseline": "新增或未保留编辑前快照；api.js 首次备份已含新增删除方法，请看完整当前文件"
+    },
+    {
+      "path": "tests/conversation-tools.test.mjs",
+      "sha256": "d5da19af8eabbb4ebab6b1f725d932ac130367fe7c99faee3047f41ef35d3f5d",
+      "bytes": 2612,
+      "before_sha256": null,
+      "baseline": "新增或未保留编辑前快照；api.js 首次备份已含新增删除方法，请看完整当前文件"
+    },
+    {
+      "path": "tests/final-review-regressions.test.mjs",
+      "sha256": "9a5577f728fb034f2dc013133a25ad4bfa3520b664595597ca923a3c33afbd35",
+      "bytes": 3242,
+      "before_sha256": null,
+      "baseline": "新增或未保留编辑前快照；api.js 首次备份已含新增删除方法，请看完整当前文件"
+    },
+    {
+      "path": "tests/pi-contract-regression.test.mjs",
+      "sha256": "d9517eeb3968df4047365880f62365390579e9ee5408fe8cf34c75fcc95bbe06",
+      "bytes": 9407,
+      "before_sha256": null,
+      "baseline": "新增或未保留编辑前快照；api.js 首次备份已含新增删除方法，请看完整当前文件"
+    }
+  ]
+}

@@ -1,0 +1,77 @@
+/* Static Electron defaults from the locally installed Codex 26.1007 build.
+ * Evidence and the limits of static inspection: docs/ui/codex-reference.md.
+ * No proprietary font or icon assets are copied into FetchCV.
+ */
+:root[data-interface-theme] {
+  font-size: 16px;
+  --ui-font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --ui-code-font: ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --ui-font-size: 16px;
+  --ui-font-small: 13px;
+  --ui-font-caption: 12px;
+  --ui-font-weight: 430;
+  --ui-line-height: 1.5;
+  --ui-unit: 4px;
+  --ui-titlebar-height: 44px;
+  --ui-toolbar-height: 52px;
+  --ui-sidebar-width: 288px;
+  --ui-chat-width: 48rem;
+  --ui-chat-gutter: 32px;
+  --ui-composer-radius: 22px;
+  --ui-composer-gutter: 12px;
+  --ui-control-size: 28px;
+  --ui-menu-gutter: 4px;
+  --ui-menu-item-padding: 5px 8px;
+  --ui-surface: #fff;
+  --ui-under: #f9f9f9;
+  --ui-sidebar: color-mix(in oklab, var(--ui-surface) 65%, transparent);
+  --ui-ink: #1a1c1f;
+  --ui-secondary: color-mix(in oklab, var(--ui-ink) 70%, transparent);
+  --ui-muted: color-mix(in oklab, var(--ui-ink) 50%, transparent);
+  --ui-line: color-mix(in oklab, var(--ui-ink) 5%, transparent);
+  --ui-line-strong: color-mix(in oklab, var(--ui-ink) 12%, transparent);
+  --ui-selection: color-mix(in oklab, var(--ui-ink) 8%, transparent);
+  --ui-hover: color-mix(in oklab, var(--ui-ink) 5%, transparent);
+  --ui-user-message: color-mix(in oklab, var(--ui-ink) 5%, transparent);
+  --ui-accent: var(--ui-ink);
+  --ui-composer-shadow: 0 0 0 1px #0000000a, 0 2px 8px 0 #0000000a, 0 4px 80px 8px #00000006;
+  --ui-overlay-shadow: 0 8px 28px #00000014;
+  /* Business adaptation: dialog and row radii use a restrained common scale. */
+  --ui-radius-control: 12.5px;
+  --ui-radius-menu: 20px;
+  --ui-radius-panel: 12.5px;
+  --openbitfun-font-family-sans: var(--ui-font);
+  --openbitfun-font-family-control: var(--ui-font);
+  --openbitfun-layout-navigation-panel-inline-size: var(--ui-sidebar-width);
+  --openbitfun-layout-navigation-panel-item-height: 32px;
+  --openbitfun-layout-navigation-panel-content-gap: 20px;
+  --openbitfun-layout-navigation-panel-item-icon-size: 16px;
+  --openbitfun-layout-navigation-panel-item-padding-inline: 8px;
+  --openbitfun-layout-navigation-panel-item-radius: 8px;
+  --openbitfun-type-label-md-font-size: var(--ui-font-size);
+  --openbitfun-type-label-sm-font-size: var(--ui-font-small);
+  --openbitfun-type-label-xs-font-size: var(--ui-font-caption);
+  --openbitfun-type-label-selected-font-weight: var(--ui-font-weight);
+  color-scheme: light;
+}
+
+/* Existing user-requested warm themes remain available, separate from the
+ * measured neutral desktop defaults. These are FetchCV theme adaptations. */
+:root[data-interface-theme=light] {
+  --ui-font: ui-serif, Georgia, Cambria, "Times New Roman", Times, "Noto Serif SC", serif;
+  --ui-surface: #f5f4ee;
+  --ui-under: #eeede6;
+  --ui-ink: #141413;
+  --ui-accent: #da7756;
+}
+:root[data-interface-theme=dark] {
+  --ui-font: ui-serif, Georgia, Cambria, "Times New Roman", Times, "Noto Serif SC", serif;
+  --ui-surface: #262624;
+  --ui-under: #20201e;
+  --ui-ink: #f5f4ee;
+  --ui-accent: #cc785c;
+  --ui-line: color-mix(in oklab, var(--ui-ink) 8%, transparent);
+  --ui-line-strong: color-mix(in oklab, var(--ui-ink) 16%, transparent);
+  --ui-composer-shadow: 0 0 0 1px #ffffff12, 0 2px 8px #0002;
+  color-scheme: dark;
+}

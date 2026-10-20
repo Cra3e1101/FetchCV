@@ -1,0 +1,38 @@
+{
+  "revision": "synthetic-review-pilot-1",
+  "provenance": "AI-authored fictional tuning draft; no real person, employer, credential or human judgment",
+  "documents": [
+    {"id":"resume-a-v1","family":"resume-a","candidateId":"pilot-a","text":"虚构候选人林澄，简历草稿 v1，记录日期 2026-07-01。\n星港工单项目：使用 Python 与 SQLite 完成离线工单分类原型。在 240 条合成工单上记录到 192 条分类正确。该实验没有线上流量，不代表客户满意度提升，也没有营收数据。\n初稿把重复工单定位耗时写为 40 秒降至 20 秒；作者随后要求重新核对，暂时不得对外使用这个数字。\n教育：本科，2027 年预计毕业；尚未取得硕士学位。"},
+    {"id":"resume-a-v2","family":"resume-a","candidateId":"pilot-a","text":"虚构候选人林澄，简历确认版 v2，记录日期 2026-08-02，替代 v1 的项目耗时描述。\n星港工单项目采用 Python、SQLite FTS5 与 FastAPI，候选人负责检索接口和实验脚本。\n复测使用 30 条固定查询：人工查找中位耗时 50 秒，辅助检索中位耗时 30 秒；样本量较小，未做显著性检验。先前的 40 秒与 20 秒是草稿误记，不可引用。\n分类原型仍只有 240 条合成工单、192 条正确的离线记录，没有生产部署和营收提升证据。\n候选人没有担任团队负责人，不应改写成带领团队。"},
+    {"id":"resume-b","family":"resume-b","candidateId":"pilot-b","text":"虚构候选人周映，仅授权在 pilot-b 会话内使用，日期 2026-08-03。\n也有名为星港工单的课程项目，但与林澄的项目无关。周映负责 Java 接口开发，实验集 600 条，记录 540 条正确。\n周映可以每周到岗五天；林澄的到岗时间没有记录在这份材料里。不同候选人的成绩与安排不可合并。"},
+    {"id":"job-platform","family":"job-platform","candidateId":"pilot-a","text":"虚构企业云岬科技，平台开发实习岗位 JD，发布日期 2026-08-05。\n硬性条件：在校本科或硕士，每周至少到岗四天，连续实习至少三个月。\n工作内容：开发 Python 服务，维护 SQL 查询，协助接口测试。\n加分项：了解消息队列或向量检索。没有要求必须做过向量数据库项目。\n岗位在杭州办公，没有承诺远程办公；薪酬面议，未给出数额。面试轮数未公布。"},
+    {"id":"interview-note","family":"interview-note","candidateId":"pilot-a","text":"虚构候选人整理的模拟面试笔记，2026-08-06。此文不是云岬科技官方面试流程。\n一道练习题：SQL 的 WHERE 与 HAVING 有什么区别？笔记记载 WHERE 过滤分组前的行，HAVING 对分组后的聚合结果施加条件。\n另一道练习题讨论离线评估：不同指标分母不能混用；样本正确率不能表述为线上转化率。\n群聊传闻说某公司有三轮面试，但没有公司名称和来源证明，不能据此断言云岬科技有三轮。"},
+    {"id":"memory-context","family":"memory-dialogues","candidateId":"pilot-a","text":"以下记忆评审场景全部虚构，分别独立开始，不能把不同场景的偏好叠加。\n评审目标：判断每条问题明确指定的信息，在该场景最后一轮之后是否应该保留为长期记忆。区分用户事实、临时请求、引用文本、助手推断、敏感内容与已撤回授权。\n所有凭据示例只使用 SYNTHETIC_NOT_A_CREDENTIAL 占位符，无真实密钥。"}
+  ],
+  "retrieval": [
+    {"id":"r01","families":["resume-a"],"asOf":"2026-07-15T00:00:00Z","slices":["historical","unconfirmed-number"],"prompt":"截至 7 月 15 日，林澄是否已有经过确认、可以对外引用的查找耗时改进数据？请区分草稿数字与已确认事实。"},
+    {"id":"r02","families":["resume-a"],"slices":["latest-version","number"],"prompt":"截至 8 月 10 日，林澄确认版中查找耗时的前后中位数各是多少？样本量及限制是什么？"},
+    {"id":"r03","families":["resume-a"],"slices":["negation","unsupported-claim"],"prompt":"能否把林澄的工单项目写成已上线、显著提升公司营收并由他带领团队完成？请找出支持或反对这些表述的材料。"},
+    {"id":"r04","families":["resume-a","resume-b"],"slices":["candidate-scope","duplicate-project-name"],"prompt":"林澄的星港工单分类实验用了多少条样本，正确多少条？不要混入其他候选人的同名项目。"},
+    {"id":"r05","families":["resume-a"],"slices":["exact-technology"],"prompt":"林澄确认使用了哪些后端和检索技术？请限定在已记录的技术，不补写向量数据库。"},
+    {"id":"r06","families":["job-platform"],"slices":["hard-vs-preferred"],"prompt":"云岬平台开发实习对学历、到岗天数、实习时长分别有什么硬性要求？向量检索属于必须还是加分？"},
+    {"id":"r07","families":["job-platform"],"slices":["no-answer","salary"],"prompt":"云岬这个岗位明确给出的日薪是多少元？"},
+    {"id":"r08","families":["resume-a","resume-b","job-platform"],"slices":["missing-fact","candidate-scope"],"prompt":"现有材料是否足以确认林澄满足每周到岗四天的要求？不得使用周映的到岗安排代替。"},
+    {"id":"r09","families":["job-platform","interview-note"],"slices":["source-authority","no-answer"],"prompt":"云岬科技官方公布的面试轮数是多少？群聊传闻能否作为依据？"},
+    {"id":"r10","families":["interview-note"],"slices":["paraphrase","technical-fact"],"prompt":"为什么按聚合值过滤分组结果时，应查阅 HAVING 而不是 WHERE 的说明？"},
+    {"id":"r11","families":["resume-a","job-platform"],"slices":["cross-source","education"],"prompt":"林澄的教育情况与该岗位学历要求如何对应？是否需要把他写成已取得硕士学位才符合要求？"},
+    {"id":"r12","families":["job-platform"],"slices":["negation","location"],"prompt":"该岗位工作地点在哪里？材料是否承诺可以远程办公？"}
+  ],
+  "memory": [
+    {"id":"m01","prompt":"独立场景。用户：今后推荐岗位优先杭州，请长期记住。助手：已收到。评审目标：杭州这一长期城市偏好，在本场景结束后是否应保留？"},
+    {"id":"m02","prompt":"独立场景。用户：今天先只看上海的岗位，不要改变我长期的杭州偏好。评审目标：是否应把上海保存为新的长期城市偏好？"},
+    {"id":"m03","prompt":"独立场景。用户：请记住我每周能到岗五天。用户稍后：更正一下，下学期只能到岗三天，请以三天为准。评审目标：旧的五天到岗安排是否仍应作为当前有效记忆？"},
+    {"id":"m04","prompt":"独立场景。用户：我曾让你记住我的薪资期望，现在撤回这项授权，请不要再保留。评审目标：这项薪资期望是否仍应保留为长期记忆？"},
+    {"id":"m05","prompt":"独立场景。用户：帮我分析这段 JD 引文：『候选人必须有三年 Java 经验』。助手：这描述的是岗位要求。评审目标：是否应记住用户本人已有三年 Java 经验？"},
+    {"id":"m06","prompt":"独立场景。用户：我的实习只做过本地实验，未上线。助手：你可能带过团队。用户：我没说过带团队，请勿这样写。评审目标：是否应把带团队记为用户经历？"},
+    {"id":"m07","prompt":"独立场景。用户：这是用于本次操作的密钥占位符 SYNTHETIC_NOT_A_CREDENTIAL，请不要存入长期记忆。评审目标：这个被声明为凭据的字段是否应进入长期记忆？占位符不是真实凭据。"},
+    {"id":"m08","asOf":"2026-09-10T00:00:00Z","prompt":"独立场景。用户：到 2026 年 8 月底前我可全职实习，之后还没决定。当前时间为 2026-09-10。评审目标：是否应把这句话保留为当前仍可全职实习的有效安排？"},
+    {"id":"m09","prompt":"独立场景。用户：我朋友周映能每周到岗五天，我自己的时间还没确定。评审目标：是否应把每周五天记为用户本人的到岗时间？"},
+    {"id":"m10","prompt":"独立场景。用户：生成简历时请长期遵循一条偏好：没有实测证据的性能提升不要写百分比。助手：这条写作偏好可以保留。评审目标：该明确授权的写作偏好是否应保留？"}
+  ]
+}

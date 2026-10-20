@@ -1,0 +1,445 @@
+{
+  "review": "architecture-remediation-20261021",
+  "claim": "不是全部关闭；partial/deferred/retained 显式保留",
+  "findings": [
+    {
+      "id": "F01",
+      "status": "fixed",
+      "disposition": "区分本地事务回滚与外部未知结果；savepoint 证明失败才可重试。",
+      "files": [
+        "backend/applyos_harness/permissions.py"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F02",
+      "status": "fixed",
+      "disposition": "CAS 消费 retry_authorized 并记录 attempt；恢复接口拒绝活动 running。",
+      "files": [
+        "backend/applyos_harness/permissions.py",
+        "backend/applyos_api/main.py"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F03",
+      "status": "fixed_previous_batch",
+      "disposition": "稳定合法别名和原名分发；十个冲突/非法名称用例。",
+      "files": [
+        "backend/applyos_agent/mcp_tools.py"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F04",
+      "status": "hardened",
+      "disposition": "拒绝 FETCHCV_* 与常用模型密钥变量转发；不是对本地可执行程序的沙箱。",
+      "files": [
+        "backend/applyos_agent/mcp_tools.py"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F05",
+      "status": "partial_retained_tradeoff",
+      "disposition": "保留偏保守字节估算；新增结果引用与分页降级，未实现精确 tokenizer/自动摘要。",
+      "files": [
+        "electron/pi/context-budget.mjs"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F06",
+      "status": "fixed",
+      "disposition": "自动输出按窗口/已知上限约束，移除统一 2048 限制；未知模型窗口仍要求配置。",
+      "files": [
+        "shared/model-profile.mjs"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F07",
+      "status": "fixed",
+      "disposition": "真实持久化归档、scope 验证、分页回读及前置事实 ID 索引。",
+      "files": [
+        "backend/applyos_agent/result_archive.py",
+        "electron/pi/context-policy.mjs"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F08",
+      "status": "fixed",
+      "disposition": "摘要作为预算内固定 user 数据消息，不拼进 system。",
+      "files": [
+        "electron/pi/fetchcv-harness.mjs",
+        "electron/pi/context-budget.mjs"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F09",
+      "status": "fixed_policy_inconsistency",
+      "disposition": "共享面经证据政策；来源不足仍必须说明限制，不放宽事实约束。",
+      "files": [
+        "backend/applyos_agent/interview_evidence.py",
+        "backend/applyos_agent/interview_tools.py"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F10",
+      "status": "fixed",
+      "disposition": "增加用户核对 OCR 精确文本后的状态流转，未授权模型代替用户确认。",
+      "files": [
+        "backend/applyos_api/main.py",
+        "src/components/InterviewSourceReader.jsx"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F11",
+      "status": "partial_retained_guard",
+      "disposition": "保留 model_draft、按本轮过滤来源；防伪造简报门禁仍会替换不合规回答，未重写整个展示契约。",
+      "files": [
+        "backend/applyos_api/pi_bridge.py"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F12",
+      "status": "retained_optional_contract",
+      "disposition": "语义去重保留；target_revision 仍为可选 API 前置条件，宿主未自动提供，不宣称已接通；审批另有内容哈希。",
+      "files": [
+        "backend/applyos_harness/permissions.py"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F13",
+      "status": "fixed",
+      "disposition": "批准绑定简历内容哈希，批准后内容改变会拒绝应用。",
+      "files": [
+        "backend/applyos_harness/approval.py",
+        "backend/applyos_harness/pipeline.py"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F14",
+      "status": "fixed",
+      "disposition": "检查点 active/settled 生命周期；恢复资料按 JSON 不可信数据注入。",
+      "files": [
+        "backend/applyos_api/pi_bridge.py"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F15",
+      "status": "fixed",
+      "disposition": "岗位聊天活动轮次互斥及 host reconcile；同 Job/Run 锁定后判断。",
+      "files": [
+        "backend/applyos_api/pi_bridge.py"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F16",
+      "status": "partial_hardened",
+      "disposition": "签名批准取代布尔值；逐调用回执/参数绑定/归档回放；尚未统一到 ToolGateway。",
+      "files": [
+        "backend/applyos_api/conversations.py",
+        "backend/applyos_agent/host_approval.py",
+        "electron/pi/conversation-tools.mjs"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F17",
+      "status": "retained_migration_debt",
+      "disposition": "Python JD/PDF 单次抽取仍有活路径，不贸然撤密钥；须单独迁移并验证。",
+      "files": [
+        "backend/applyos_agent/runtime.py",
+        "electron/main.mjs"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F18",
+      "status": "withdrawn",
+      "disposition": "沿用二审撤回结论；真实缺陷由 N01 处理。",
+      "files": [
+        "electron/pi-agent-runtime.mjs"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F19",
+      "status": "partial",
+      "disposition": "完整 MCP 会话加超时；持久会话和完整取消通知未实现。",
+      "files": [
+        "backend/applyos_agent/mcp_tools.py"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F20",
+      "status": "hardened",
+      "disposition": "全局 ask/deny 作用于注册与调用；只读声明不视为进程隔离。",
+      "files": [
+        "backend/applyos_agent/mcp_tools.py"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F21",
+      "status": "partial",
+      "disposition": "最小 PATH、分页发现、准确不支持错误；HTTP 认证头和自动 .cmd 启动未实现。",
+      "files": [
+        "backend/applyos_agent/mcp_tools.py"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F22",
+      "status": "decision_recorded",
+      "disposition": "默认 Python，V2 保留且不重复扩业务；未宣称迁移完成。",
+      "files": [
+        "docs/architecture/BACKEND_TRANSITION_20261021.md"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F23",
+      "status": "fixed",
+      "disposition": "完整源文件含 frontmatter 的哈希；旧授权会失效需重新批准。",
+      "files": [
+        "backend/applyos_agent/skills.py"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F24",
+      "status": "verified_guard_present",
+      "disposition": "CONVERSATION 的副作用工具排除 CANCELLED/FROZEN；恢复性会话不一概禁止所有状态。",
+      "files": [
+        "backend/applyos_agent/capabilities.py"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F25",
+      "status": "fixed",
+      "disposition": "未达到交付阶段时 task 暂停；Agent 结束不再自动代表业务完成。",
+      "files": [
+        "backend/applyos_api/pi_bridge.py"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F26",
+      "status": "fixed",
+      "disposition": "回滚操作可批准且执行 scoped restore，新增端到端 API 用例。",
+      "files": [
+        "backend/applyos_api/main.py",
+        "backend/tests/test_tool_gateway.py"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F27",
+      "status": "partial_cleanup",
+      "disposition": "移除未注册 finalize_resume_version 的死函数，保留历史标签兼容旧 trace；尚非完全后端标签驱动。",
+      "files": [
+        "backend/applyos_agent/pi_domain_tools.py"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F28",
+      "status": "partial_hardened",
+      "disposition": "未注入控制令牌的生产业务 API 返回 503；查询参数令牌兼容现有产物消费，短期票据未实现。",
+      "files": [
+        "backend/applyos_api/main.py"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F29",
+      "status": "fixed",
+      "disposition": "未使用旧 analyze/resume-strategy 路由改为 410，保留明确迁移提示。",
+      "files": [
+        "backend/applyos_api/main.py"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F30",
+      "status": "fixed_profile",
+      "disposition": "模型画像支持 text/image；不等于所有附件已接入视觉推理。",
+      "files": [
+        "shared/model-profile.mjs",
+        "electron/pi/provider-adapter.mjs"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F31",
+      "status": "withdrawn",
+      "disposition": "沿用二审撤回结论，不人为增加工具重试机制。",
+      "files": [
+        "electron/pi-agent-runtime.mjs"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F32",
+      "status": "fixed",
+      "disposition": "岗位普通搜索的描述提示先激活面经专用流程；仅在存在激活工具的普通模式追加。",
+      "files": [
+        "backend/applyos_api/pi_bridge.py"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F33",
+      "status": "partial",
+      "disposition": "BOM、重名、启用列表、只读列举、目录截断提示修复；相对资源读取未新增。",
+      "files": [
+        "backend/applyos_agent/skills.py"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F34",
+      "status": "fixed",
+      "disposition": "MCP 错误脱敏后可见，保留文本及结构化内容，长结果由归档层处理。",
+      "files": [
+        "backend/applyos_agent/mcp_tools.py"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F35",
+      "status": "partial",
+      "disposition": "面经工具白名单保留工作区读取/回读/OCR 轮询；不宣称通用图像附件已全链路完成。",
+      "files": [
+        "backend/applyos_api/pi_bridge.py"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "F36",
+      "status": "partial",
+      "disposition": "独立聊天模型输入限最近 200 条，数据库历史保留；未知姓名不猜测，画像明确身份脱敏范围；未做自动摘要。",
+      "files": [
+        "backend/applyos_api/conversations.py"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "N01",
+      "status": "fixed_previous_batch",
+      "disposition": "真实 Harness 验证 execute 内工具刷新，去除死订阅分支。",
+      "files": [
+        "electron/pi-agent-runtime.mjs",
+        "tests/pi-contract-regression.test.mjs"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "N02",
+      "status": "fixed_electron_path",
+      "disposition": "测试连接与正式运行共用 adapter/SDK/地址解析；Python 活路径有对应规范化但未统一运行栈。",
+      "files": [
+        "shared/provider-endpoint.mjs",
+        "electron/pi/provider-probe.mjs"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "N03",
+      "status": "fixed_profile",
+      "disposition": "增加严格 compat 白名单和设置入口，与锁定 Pi 类型对齐。",
+      "files": [
+        "shared/model-profile.mjs",
+        "src/components/ModelParameters.jsx"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "N04",
+      "status": "decision_recorded",
+      "disposition": "冻结双线扩展，不迁移真实数据；仍需未来能力映射与移交计划。",
+      "files": [
+        "docs/architecture/BACKEND_TRANSITION_20261021.md"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "N05",
+      "status": "deferred_architecture",
+      "disposition": "完整类型化 AgentBackend 双适配器未重写；请最后复核决定是否阻断发布。",
+      "files": [
+        "electron/pi-agent-runtime.mjs"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "N06",
+      "status": "fixed",
+      "disposition": "预算再压缩保留真实分页引用和预览；无引用时不建议无限重复原工具。",
+      "files": [
+        "electron/pi/context-budget.mjs"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "N07",
+      "status": "partial_contract_tests",
+      "disposition": "新增真实 Harness/SDK 契约回归，保留 0.80.10；尚未评估新版全部变更。",
+      "files": [
+        "tests/pi-contract-regression.test.mjs"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "N08",
+      "status": "retained_tradeoff",
+      "disposition": "持久化权威继续在后端，不额外启用 Pi 双份会话存储。",
+      "files": [
+        "electron/pi/fetchcv-harness.mjs"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "N09",
+      "status": "fixed",
+      "disposition": "后端分段政策，宿主按 activeTools 动态组装系统提示词。",
+      "files": [
+        "backend/applyos_agent/prompt_contract.py",
+        "electron/pi/fetchcv-harness.mjs"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "N11",
+      "status": "partial",
+      "disposition": "脱敏轮转日志/实例 nonce/失败收尾已做；没有端口冲突自动重试一次。",
+      "files": [
+        "electron/sidecar.mjs"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    },
+    {
+      "id": "X01",
+      "status": "fixed_new_finding",
+      "disposition": "拆分草稿内容门禁与真实 PDF 验证，不再写入虚假已生成 PDF 状态。",
+      "files": [
+        "backend/applyos_harness/gates.py",
+        "backend/applyos_harness/pipeline.py"
+      ],
+      "evidence": "REPORT.md 验证表；静态处理与运行验证不同，未覆盖者见限制"
+    }
+  ]
+}

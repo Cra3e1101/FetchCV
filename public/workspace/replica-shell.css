@@ -1,0 +1,85 @@
+/* IPC workspace business adaptation of the same HANDOFF §2 measurements. */
+:root{--rail-width:52px;--panel-width:288px;--ui-snappy:cubic-bezier(.23,1,.32,1);--output-bg:rgba(26,28,31,.055);--output-border:rgba(26,28,31,.118);--bubble:#0d0d0d;--bubble-text:#fff;--popup:oklab(1 0 0 / .9);font-weight:430;}
+:root[data-interface-theme=neutral-dark]{--ground:#212121;--sidebar:#0d0d0d;--ink:#ececec;--muted:#ffffff94;--line:#ffffff1a;--hover:#ffffff0e;--accent:#ececec;color-scheme:dark;}
+:root:is([data-interface-theme=neutral-dark],[data-interface-theme=dark]){--output-bg:rgba(255,255,255,.055);--output-border:rgba(255,255,255,.118);--bubble:#ececec;--bubble-text:#0d0d0d;--popup:color-mix(in oklab,var(--ground) 90%,transparent);--composer-shadow:0 0 0 1px #ffffff12,0 2px 8px #0002;}
+body{font-size:16px;line-height:24px;}
+button{transition:background-color .12s,color .12s,transform .12s;}
+button:active:not(:disabled){transform:scale(.94);}
+.app-shell{margin-top:44px;padding:0;height:calc(100dvh - 44px);grid-template-columns:52px 288px minmax(0,1fr);}
+body:not(.navigation-open) .app-shell{grid-template-columns:52px minmax(0,1fr);}
+#sidebar{grid-column:2;grid-row:1;min-width:0;border-right:1px solid var(--line);border-radius:12px 0 0 12px;background:var(--ground);}
+#work-content{grid-column:3;border:0;border-radius:0;}
+body:not(.navigation-open) #work-content{grid-column:2;}
+.ipc-rail{grid-column:1;grid-row:1;display:flex;flex-direction:column;gap:8px;padding:8px 8px 4px;min-height:0;}
+.ipc-rail button{display:grid;place-items:center;width:36px;height:36px;border-radius:12.5px;border:0;background:transparent;color:var(--muted);padding:0;}
+.ipc-rail button:hover{background:var(--hover);color:var(--ink);}
+.ipc-rail svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;}
+.ipc-rail button:last-child{margin-top:auto;}
+.workspace-header,.brand-row{height:52px;min-height:52px;}
+#items button,.primary-nav button{font-size:13px;line-height:18.57px;font-weight:430;border-radius:12.5px;}
+.list-heading{font-size:14px;line-height:21px;font-weight:500;}
+.message{font-size:16px;line-height:24px;}
+.message-user{max-width:62%;padding:12px 16px;border-radius:18px;background:var(--bubble);color:var(--bubble-text);}
+.message-user pre{color:inherit;}
+.message-user .message-action{color:var(--bubble-text);opacity:.65;}
+#agent-input{font-size:16px;line-height:24px;}
+#agent-form{border-radius:22px;}
+.composer-actions button{font-size:13px;line-height:18.57px;font-weight:430;border-radius:9999px;}
+.message-tool,article details{font-size:13px;line-height:18.57px;color:var(--muted);}
+.source-reader,input,select,textarea{color:var(--ink);background:var(--ground);}
+.source-reader,#utility-drawer,#approval-mode-dialog{border-radius:20px;}
+#approval-mode-dialog{background:var(--popup);animation:ipc-enter .2s var(--ui-snappy);}
+#approval-actions{background:var(--output-bg);border:1px solid var(--output-border);border-radius:12.5px;}
+#workspace-settings-menu>div{border-radius:20px;background:var(--popup);animation:ipc-enter .2s var(--ui-snappy);}
+#workspace-settings-menu button{border-radius:15px;}
+dialog.ipc-settings-page,#interface-settings-dialog.ipc-settings-page{position:fixed;inset:36px 0 0 52px;margin:0;padding:0;width:calc(100vw - 52px);max-width:none;height:calc(100dvh - 36px);max-height:none;border:0;border-radius:0;background:var(--ground);color:var(--ink);overflow:hidden;box-shadow:none;}
+dialog.ipc-settings-page[open]{display:grid;grid-template-columns:288px minmax(0,1fr);}
+.ipc-settings-page::backdrop{background:transparent;}
+.ipc-settings-nav{padding:22px 8px;}
+.ipc-settings-nav h2{font-size:18px;line-height:24px;font-weight:500;margin:0 8px 32px;}
+#interface-settings-dialog .ipc-settings-nav h2{font-size:18px;line-height:24px;font-weight:500;margin:0 8px 32px;}
+.ipc-settings-nav button{display:block;width:262px;height:30px;margin:0 0 1px;padding:5px 8px;border:0;border-radius:12.5px;text-align:left;font-size:13px;line-height:18.57px;font-weight:400;background:transparent;}
+.ipc-settings-nav button[aria-current=page]{background:var(--output-bg);}
+.ipc-settings-content{box-sizing:content-box;width:732px;max-width:calc(100% - 32px);margin-left:108px;padding:70px 0 32px;overflow:auto;}
+.ipc-settings-content h2,#interface-settings-dialog .ipc-settings-content h2{font-size:28px;line-height:33.6px;font-weight:500;}
+/* Reference section/row nesting for the IPC settings page.
+ * The page content is whatever each settings module renders (fieldsets of labels),
+ * so the card and row looks are applied by CSS only — no state, IPC or save path
+ * is touched. Section title 14/21 w500; card radius 14 with a .5px ring; rows
+ * 13/18.57 w500 with 12/16 descriptions and hairline separators. */
+.ipc-settings-content>header{display:flex;align-items:flex-start;justify-content:space-between;padding:0 0 26px;}
+.ipc-settings-content>fieldset{position:relative;border:0;margin:0 0 34px;padding:0;min-width:0;}
+.ipc-settings-content>fieldset>legend{display:block;width:100%;margin:0;padding:0 0 12px;font-size:14px;line-height:21px;font-weight:500;color:var(--ink);}
+.ipc-settings-content>fieldset::before{content:"";position:absolute;left:0;right:0;top:33px;bottom:0;border-radius:14px;background:var(--ground,#fff);box-shadow:0 0 0 .5px var(--output-border);pointer-events:none;}
+.ipc-settings-content>fieldset>label{position:relative;display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0;padding:12px 14px;font-size:13px;line-height:18.57px;font-weight:500;color:var(--ink);cursor:pointer;}
+.ipc-settings-content>fieldset>label+label{box-shadow:inset 0 .5px 0 var(--line,rgba(26,28,31,.07));}
+.ipc-settings-content>fieldset>label>small{display:block;margin-top:2.43px;font-size:12px;line-height:16px;font-weight:430;color:var(--muted);}
+.ipc-settings-content>fieldset>label>input[type=radio],.ipc-settings-content>fieldset>label>input[type=checkbox]{order:2;flex:none;width:16px;height:16px;margin:0;accent-color:#3a83f7;}
+.ipc-settings-content p{font-size:13px;line-height:18.57px;}
+.ipc-settings-content button{font-size:13px;line-height:18.57px;border-radius:12.5px;}
+@keyframes ipc-enter{from{opacity:0;transform:translateY(3px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}
+@media(max-width:1279px){.ipc-settings-content{margin-inline:auto;max-width:calc(100% - 48px);}}
+@media(max-width:1050px){.app-shell{grid-template-columns:52px 240px minmax(0,1fr);}}
+@media(max-width:720px){.app-shell,body:not(.navigation-open) .app-shell{grid-template-columns:52px minmax(0,1fr);}.app-shell #work-content{grid-column:2;}body.navigation-open #sidebar{left:52px;top:44px;width:min(288px,calc(100vw - 52px));}.message-user{max-width:90%;}.workspace-actions{flex-wrap:wrap;}.workspace-header{height:auto;min-height:52px;}dialog.ipc-settings-page[open]{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);}.ipc-settings-nav{padding:12px 8px;display:flex;gap:4px;overflow:auto;align-items:center;}.ipc-settings-nav h2{display:none;}.ipc-settings-nav button{flex:none;width:auto;white-space:nowrap;}.ipc-settings-content{padding-top:24px;max-width:calc(100% - 32px);}#interface-settings-dialog fieldset{flex-wrap:wrap;}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important;}}
+/* Shared controls now follow the same rendered replica geometry as React. */
+:root:is([data-interface-theme=white],[data-interface-theme=neutral-dark]){font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;}
+:root[data-interface-theme=white]{--sidebar:#fff;--ink:#1a1c1f;}
+#sidebar{padding:0 10px 12px;border:0;}
+.brand-row{height:56px;min-height:56px;padding:0;}
+.brand-row strong{padding:0 6px;font-size:14px;font-weight:430;}
+#items button,.primary-nav button,.new-chat{min-height:30px;padding:5px 8px;}
+.content-column{width:100%;max-width:800px;padding:16px 24px 24px;}
+.message{font-size:14px;line-height:24.5px;margin:22px 0 0;}
+.message:first-child{margin-top:8px;}
+.message-user{font-size:14px;line-height:22.4px;}
+.composer-dock{padding:12px 106px 16px;}
+#agent-form{width:100%;max-width:none;min-height:86px;padding:12px 14px 12px;border:0;box-shadow:0 0 0 1px #0000000a,0 2px 8px #0000000a,0 4px 80px 8px #00000006;}
+#agent-input{display:block;height:22px;min-height:22px;font-size:14px;line-height:20px;}
+.composer-actions{height:32px;margin-top:8px;}
+.composer-actions button{height:28px;}
+#composer-upload{width:28px;}
+#agent-send,#agent-cancel{width:32px;height:32px;}
+.ipc-settings-nav{border-right:.5px solid var(--output-border);background:var(--output-bg);}
+@media(max-width:1050px){.composer-dock{padding-inline:24px;}}
+@media(max-width:720px){.composer-dock{padding-inline:12px;}.content-column{padding-inline:12px;}}

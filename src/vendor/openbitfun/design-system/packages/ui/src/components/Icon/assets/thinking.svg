@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" fill="none">
+  <g stroke="currentColor" stroke-linecap="round" stroke-width="2">
+    <path d="M19.5 3.75 3.5 10.5" />
+    <path d="M19.5 3.75 35.5 10.5" />
+    <path d="M3.5 10.5 19.5 19.5" />
+    <path d="M35.5 10.5 19.5 19.5" />
+    <path d="M19.5 19.5 3.5 28.5" />
+    <path d="M19.5 19.5 35.5 28.5" />
+    <path d="M3.5 28.5 19.5 35.25" />
+    <path d="M35.5 28.5 19.5 35.25" />
+  </g>
+  <g fill="currentColor">
+    <circle cx="19.5" cy="3.75" r="4" />
+    <circle cx="3.5" cy="10.5" r="4" />
+    <circle cx="35.5" cy="10.5" r="4" />
+    <circle cx="19.5" cy="19.5" r="4" />
+    <circle cx="3.5" cy="28.5" r="4" />
+    <circle cx="35.5" cy="28.5" r="4" />
+    <circle cx="19.5" cy="35.25" r="4" />
+  </g>
+</svg>

@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import path from 'node:path';
+import {readFile,writeFile,realpath} from 'node:fs/promises';
+import {fileURLToPath} from 'node:url';
+import {createHash} from 'node:crypto';
+import {auditAnnotations} from './annotation-audit.mjs';
+const [input,output]=process.argv.slice(2),root=process.env.M1_ALLOWED_DELETE_ROOT;
+assert.ok(input&&output&&root&&path.isAbsolute(root),'input, output and guarded root required');
+const project=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
+const stable=path.resolve(project,'../FetchCV_M1_work/20260910-235136');
+const inside=(parent,file)=>{const rel=path.relative(parent,file);return rel===''||!path.isAbsolute(rel)&&rel!=='..'&&!rel.startsWith('..'+path.sep);};
+const actualInput=await realpath(input),actualRoot=await realpath(root);
+assert.ok(inside(await realpath(stable),actualRoot)&&actualRoot!==await realpath(stable),'approved run root');
+assert.ok(inside(await realpath(project),actualInput)||inside(await realpath(stable),actualInput),'input scope');
+const parent=await realpath(path.dirname(path.resolve(output)));assert.ok(inside(actualRoot,parent),'output scope');
+const bytes=await readFile(actualInput),report=auditAnnotations(JSON.parse(bytes));
+await writeFile(path.join(parent,path.basename(output)),JSON.stringify({...report,inputSha256:createHash('sha256').update(bytes).digest('hex')},null,2),{flag:'wx'});
+console.log(JSON.stringify({readyForMetricRun:report.readyForMetricRun,reviewed:report.reviewed,unresolved:report.unresolved}));

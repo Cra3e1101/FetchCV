@@ -1,0 +1,12 @@
+.standalone-chat { display:flex; flex-direction:column; min-width:0; min-height:0; height:100%; }
+.standalone-chat .task-header { flex-shrink:0; gap:20px; }
+.standalone-chat .task-header h1 { font-size:var(--ui-font-size); font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.standalone-chat .task-header select { max-width:260px; font:inherit; font-size:13px; color:inherit; background:transparent; border:1px solid var(--border-color,#e8e8e8); border-radius:8px; padding:6px 10px; }
+.standalone-scroll { flex:1; min-height:0; overflow:auto; }
+.standalone-transcript { display:flex; flex-direction:column; gap:0; width:min(calc(100% - 2 * var(--ui-chat-gutter)),var(--ui-chat-width)); margin:0 auto; padding:32px 0 24px; box-sizing:border-box; }
+.standalone-welcome { font-size:26px; font-weight:500; text-align:center; margin:17vh 0 40px; }
+.standalone-composer { width:min(calc(100% - 2 * var(--ui-chat-gutter)),var(--ui-chat-width)); margin:12px auto 16px; padding:0; box-sizing:border-box; }
+@media(max-width:720px) { .standalone-chat .task-header select { max-width:140px; } .standalone-transcript { padding:24px 0; } .standalone-composer { margin-bottom:12px; } }
+
+/* The outer wrapper owns gutters; do not shrink the shared composer twice. */
+.source-grid .standalone-composer > .source-composer { width:100%; max-width:none; margin:0; }

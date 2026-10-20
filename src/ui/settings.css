@@ -1,0 +1,120 @@
+/* Settings share the workspace palette; controls stay neutral in every theme. */
+.model-settings-backdrop:has(.settings-window) { inset:var(--ui-titlebar-height) 0 0; background: #0003; backdrop-filter: none; padding: 24px; }
+.model-settings-dialog.settings-window {
+  width: min(1040px, calc(100vw - 48px)); height: min(800px, calc(100dvh - var(--ui-titlebar-height) - 48px));
+  grid-template-columns: 216px minmax(0, 1fr); padding: 0; border: 1px solid var(--ui-line);
+  border-radius: var(--ui-radius-panel); color: var(--ui-ink); background: var(--ui-surface);
+  font: var(--ui-font-weight) var(--ui-font-size)/1.5 var(--ui-font); box-shadow: var(--ui-overlay-shadow);
+}
+.settings-window.settings-window :is(button,input,select,textarea) { font-family: var(--ui-font); font-size: 14px; }
+.settings-window.settings-window :is(button,input,select,summary):focus-visible { outline: 2px solid var(--ui-secondary); outline-offset: 3px; }
+.settings-window.settings-window .settings-sidebar { background: var(--ui-under); border-color: var(--ui-line); padding: 24px 16px 16px; gap: 0; }
+.settings-sidebar-title { font-size: 18px; font-weight: 600; margin: 0 10px 22px; }
+.settings-window.settings-window .settings-search { height: 36px; margin: 0 0 20px; border-color: var(--ui-line); background: var(--ui-surface); color: var(--ui-muted); box-shadow: none; }
+.settings-window.settings-window .settings-sidebar nav section > small { font-size: 12px; font-weight: 400; color: var(--ui-muted); padding: 0 10px 6px; }
+.settings-window.settings-window .settings-sidebar nav section > button { height: 32px; margin-bottom: 4px; color: var(--ui-ink); font-weight: var(--ui-font-weight); }
+.settings-window.settings-window .settings-sidebar nav section > button:is(:hover,.active) { background: var(--ui-selection); }
+.settings-window.settings-window .settings-sidebar nav section > button.active { font-weight: 500; }
+.settings-window.settings-window .settings-sidebar nav section > button svg { color: var(--ui-secondary); }
+.settings-window.settings-window .settings-sidebar nav section > button i { display: none; }
+.settings-window.settings-window .settings-sidebar-profile { border-color: var(--ui-line); align-items: center; padding: 16px 8px 0; }
+.settings-window.settings-window .settings-sidebar-profile > span { background: var(--ui-selection); color: var(--ui-ink); box-shadow: none; border-radius: 50%; }
+.settings-window.settings-window .settings-sidebar-profile strong { font-size: 13px; font-weight: 500; }
+.settings-window.settings-window .settings-sidebar-profile small { font-size: 12px; }
+.settings-window.settings-window .settings-content { background: var(--ui-surface); scrollbar-gutter: stable; }
+.settings-window.settings-window .settings-content > .modal-close { position: sticky; display: flex; align-items: center; justify-content: center; top: 16px; right: 0; float: right; margin: 16px 16px -48px 0; width: 30px; height: 30px; padding: 0; background: var(--ui-surface); color: var(--ui-secondary); border: 1px solid var(--ui-line); border-radius: 50%; z-index: 3; }
+.settings-window.settings-window .settings-pane { width: calc(100% - 80px); max-width: 660px; margin: 0 auto; padding: 34px 0 32px; }
+.settings-window.settings-window .settings-pane > header { padding: 0 24px 24px 0; border-bottom: 1px solid var(--ui-line); }
+.settings-window.settings-window .settings-pane > header > p { display: none; }
+.settings-window.settings-window .settings-pane > header h2 { font: 600 22px/1.4 var(--ui-font); letter-spacing: 0; }
+.settings-window.settings-window .settings-pane > header > span { font-size: 13px; color: var(--ui-secondary); line-height: 1.7; margin-top: 8px; }
+.settings-window.settings-window .settings-group { margin-top: 28px; }
+.settings-window.settings-window .settings-group > h3 { font-size: 14px; font-weight: 600; color: var(--ui-ink); }
+.settings-window.settings-window .settings-detail-row { padding: 18px 0; min-height: 64px; }
+.settings-window.settings-window :is(.settings-detail-row,.settings-capabilities,.settings-section-toolbar) strong { font-size: 14px; font-weight: 500; }
+.settings-window.settings-window :is(.settings-detail-row,.settings-capabilities) select { min-width: 108px; height: 36px; border-color: var(--ui-line); background: var(--ui-surface); color: var(--ui-ink); font-size: 13px; appearance: auto; text-align: start; }
+.settings-window.settings-window .settings-overview-grid { background: transparent; border: 0; border-radius: 0; }
+.settings-window.settings-window .settings-overview-grid > div { place-content: start; text-align: left; padding: 14px 20px; }
+.settings-window.settings-window .settings-overview-grid > div:first-child { padding-left: 0; }
+.settings-window.settings-window .settings-overview-grid strong { font: 500 22px/1.4 var(--ui-font); }
+.settings-window.settings-window .settings-overview-grid small { font-size: 13px; }
+.settings-window.settings-window .interface-theme-picker { gap: 16px; padding: 12px 0 20px; }
+.settings-window.settings-window .interface-theme-picker legend { font-size: 13px; color: var(--ui-secondary); }
+.settings-window.settings-window .interface-theme-picker label { min-width: 0; font-size: 13px; gap: 10px; }
+.settings-window.settings-window .interface-swatch { height: 88px; position: relative; overflow: hidden; border-radius: 10px; }
+.settings-window.settings-window .interface-swatch::before { content: ''; position: absolute; inset: 0 auto 0 0; width: 25%; background: #8881; border-right: 1px solid #8883; }
+.settings-window.settings-window .interface-swatch::after { content: ''; position: absolute; left: 35%; right: 10%; bottom: 12px; height: 16px; border: 1px solid #8884; border-radius: 6px; }
+.settings-window.settings-window .interface-theme-picker input { z-index: 1; }
+.settings-window.settings-window .settings-current-status { padding: 16px 0; }
+.settings-window.settings-window .settings-current-status strong { font-size: 14px; font-weight: 500; }
+.settings-window.settings-window :is(.settings-current-status > b,.settings-current-status small) { color: var(--ui-secondary); font-size: 12px; }
+.settings-window.settings-window .provider-status-dot { background: var(--ui-secondary); }
+.settings-window.settings-window .provider-row { background: var(--ui-surface); border-color: var(--ui-line); padding: 12px; border-radius: 9px; }
+.settings-window.settings-window .provider-row.active { background: var(--ui-selection); border-color: var(--ui-line); }
+.settings-window.settings-window :is(.provider-row em,.provider-row small,.provider-health,.provider-delete) { color: var(--ui-secondary); background: transparent; }
+.settings-window.settings-window :is(.provider-row strong,.provider-form-head strong) { font-size: 14px; font-weight: 500; }
+.settings-window.settings-window .provider-presets { display: flex; flex-wrap: wrap; gap: 8px; }
+.settings-window.settings-window .provider-presets > button { flex: 0 1 auto; padding: 7px 10px; border: 1px solid var(--ui-line); border-radius: 7px; background: transparent; color: var(--ui-secondary); font-size: 12px; }
+.settings-window.settings-window .provider-presets > button.active { background: var(--ui-selection); color: var(--ui-ink); border-color: var(--ui-secondary); }
+.settings-window.settings-window .provider-presets small { display: none; }
+.settings-window.settings-window .model-form { gap: 20px 16px; }
+.settings-window.settings-window :is(.model-form label > span,.protocol-field legend,.settings-advanced label > span) { font-size: 13px; color: var(--ui-ink); font-weight: 500; }
+.settings-window.settings-window :is(.model-form input,.model-form select,.settings-advanced input,.mcp-form-section input) { height: 40px; background: var(--ui-surface); color: var(--ui-ink); border: 1px solid var(--ui-line); border-radius: 8px; padding: 0 11px; box-shadow: none; min-width: 0; width: 100%; }
+.settings-window.settings-window input::placeholder { color: var(--ui-muted); }
+.settings-window.settings-window .secret-input { background: var(--ui-surface); border: 1px solid var(--ui-line); border-radius: 8px; height: 40px; }
+.settings-window.settings-window .secret-input input { border: 0; background: transparent; height: 36px; padding: 0 68px 0 31px; }
+.settings-window.settings-window .secret-input :is(svg,button) { color: var(--ui-secondary); }
+.settings-window.settings-window :is(.protocol-segments,.mcp-transport-switch) { background: var(--ui-sidebar); border: 1px solid var(--ui-line); border-radius: 8px; }
+.settings-window.settings-window :is(.protocol-segments,.mcp-transport-switch) button { color: var(--ui-secondary); font-size: 13px; }
+.settings-window.settings-window :is(.protocol-segments,.mcp-transport-switch) button.active { background: var(--ui-surface); color: var(--ui-ink); box-shadow: 0 1px 3px #0001; }
+.settings-advanced { margin: 20px 0; border-block: 1px solid var(--ui-line); padding: 12px 0; }
+.settings-advanced summary { cursor: pointer; font-size: 13px; color: var(--ui-secondary); width: fit-content; }
+.settings-advanced label { display: grid; gap: 8px; margin-top: 16px; }
+.settings-advanced label small { font-size: 12px; color: var(--ui-muted); margin-left: 8px; font-weight: 400; }
+.settings-window.settings-window .model-parameters { border-color: var(--ui-line); margin: 24px 0; }
+.settings-window.settings-window .model-parameter-source { font-size: 13px; color: var(--ui-secondary); opacity: 1; }
+.settings-window.settings-window .provider-privacy { padding: 0; background: none; color: var(--ui-muted); display: flex; align-items: center; gap: 6px; }
+.settings-window.settings-window .provider-privacy p { margin: 0; font-size: 12px; }
+.settings-window.settings-window :is(.provider-privacy svg,.provider-status,.provider-status svg,.settings-inline-status) { color: var(--ui-secondary); }
+.settings-window.settings-window :is(.provider-status,.settings-inline-status) { background: var(--ui-selection); border: 1px solid var(--ui-line); border-radius: 8px; font-size: 13px; }
+.settings-window.settings-window .settings-actions { position: sticky; bottom: 0; padding: 16px 0; margin-top: 20px; background: var(--ui-surface); z-index: 2; }
+.settings-window.settings-window .settings-actions button { min-height: 38px; padding-inline: 16px; border-radius: 8px; font-size: 13px; }
+.settings-window.settings-window .primary-button,.settings-window.settings-window .mcp-config-form > footer > button { background: var(--ui-ink); color: var(--ui-surface); border-color: var(--ui-ink); box-shadow: none; }
+.settings-window.settings-window :is(.model-input-row > button,.provider-form-head button,.settings-section-toolbar > button) { color: var(--ui-ink); background: var(--ui-surface); border-color: var(--ui-line); font-size: 12px; }
+.settings-window.settings-window :is(.settings-capabilities small,.settings-skill-list small,.mcp-form-title small,.mcp-form-section small) { font-size: 13px; color: var(--ui-secondary); }
+.settings-window.settings-window .settings-capabilities > div { gap: 12px; padding-block: 20px; }
+.settings-window.settings-window .settings-capabilities > div > svg { color: var(--ui-secondary); }
+.settings-window.settings-window .settings-skill-list strong { font-size: 14px; }
+.settings-window.settings-window .settings-skill-list > button:hover { background: var(--ui-selection); }
+.settings-window.settings-window .skill-switches button[aria-pressed=true] i { background: var(--ui-ink); }
+.settings-window.settings-window .mcp-config-form { border-color: var(--ui-line); background: transparent; }
+.settings-window.settings-window .mcp-form-title strong { font: 500 15px/1.5 var(--ui-font); }
+.settings-window.settings-window :is(.mcp-config-form .mcp-add-row,.mcp-repeat-row > button:hover) { background: var(--ui-selection); color: var(--ui-ink); }
+.settings-window.settings-window .mcp-config-form > footer > span svg { color: var(--ui-secondary); }
+.settings-window.settings-window .model-catalog { background: transparent; border-color: var(--ui-line); }
+.settings-window.settings-window .model-catalog button.active { color: var(--ui-ink); background: var(--ui-selection); }
+@media (max-width: 760px) {
+  .model-settings-dialog.settings-window { width: calc(100vw - 24px); height: calc(100dvh - var(--ui-titlebar-height) - 24px); grid-template-columns: 172px minmax(0, 1fr); }
+  .settings-window.settings-window .settings-sidebar { padding: 20px 10px 12px; }
+  .settings-window.settings-window .settings-pane { width: calc(100% - 40px); }
+  .settings-window.settings-window .model-form { grid-template-columns: minmax(0, 1fr); }
+  .settings-window.settings-window .provider-presets { gap: 6px; }
+}
+@media (max-width: 540px) {
+  .model-settings-backdrop:has(.settings-window) { padding: 0; }
+  .model-settings-dialog.settings-window { width: 100vw; height: calc(100dvh - var(--ui-titlebar-height)); border-radius: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .settings-window.settings-window .settings-sidebar { padding: 16px 16px 10px; border-right: 0; border-bottom: 1px solid var(--ui-line); }
+  .settings-sidebar-title { margin: 0 0 12px; }
+  .settings-window.settings-window .settings-search { display: none; }
+  .settings-window.settings-window .settings-sidebar nav { display: flex; overflow-x: auto; gap: 4px; flex: none; }
+  .settings-window.settings-window .settings-sidebar nav section { display: contents; }
+  .settings-window.settings-window .settings-sidebar nav section > small,.settings-window.settings-window .settings-sidebar-profile { display: none; }
+  .settings-window.settings-window .settings-sidebar nav section > button { width: auto; flex-shrink: 0; display: flex; gap: 6px; padding-inline: 10px; }
+  .settings-window.settings-window .settings-sidebar nav section > button svg { width: 14px; }
+  .settings-window.settings-window .settings-pane { padding-top: 24px; width: calc(100% - 32px); }
+  .settings-window.settings-window .interface-theme-picker { gap: 12px; }
+  .settings-window.settings-window .interface-swatch { height: 68px; }
+  .settings-window.settings-window .settings-capabilities > div { grid-template-columns: 22px minmax(0, 1fr); }
+  .settings-window.settings-window .settings-capabilities select { grid-column: 2; justify-self: start; }
+  .settings-window.settings-window .mcp-config-form > footer { flex-wrap: wrap; }
+}

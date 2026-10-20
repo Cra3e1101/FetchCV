@@ -1,0 +1,2 @@
+const infrastructureCodes=new Set(['parser_unavailable','parser_retention_limit','parser_retention_link','parser_disk_space_low','parser_platform_unsupported','invalid_parser_paths','invalid_parser_runtime','parser_work_root_escape','ENOENT','ENOTDIR','EACCES','EPERM','ENOSPC','EIO','EMFILE','ENFILE']);
+export const isParserInfrastructureError=error=>infrastructureCodes.has(error?.code)||error?.code==='parser_infrastructure_failed'||String(error?.code??'').startsWith('parser_runtime_');
