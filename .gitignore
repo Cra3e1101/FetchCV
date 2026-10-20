@@ -58,3 +58,6 @@ backend/data/
 /codex-ui-replica/
 /codex-ui-replica.html
 /cdp-ladder-top.json
+
+# Internal architecture audits and remediation reports (local only).
+/docs/audits/

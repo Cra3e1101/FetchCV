@@ -18,19 +18,13 @@ FetchCV 是本地优先的 Windows 桌面求职 Agent。它把个人资料、目
 
 ## 首版说明
 
-本仓库提供 FetchCV 的首版实现，包含桌面界面、Agent 运行时、业务后端和验证记录。
+本仓库提供 FetchCV 的首版实现，包含桌面界面、Agent 运行时、业务后端。
 
 - 构建版本号：`0.4.19`
 - 平台：Windows 10/11 x64
 - 前端：React 18、Vite、Electron、Radix UI、Framer Motion
 - Agent Runtime：`@earendil-works/pi-agent-core`、`@earendil-works/pi-ai`
 - 本地 Sidecar：FastAPI、SQLAlchemy、SQLite
-- 2026-10-21 源码验证（[完整整改报告](docs/audits/final-review-remediation-20261021/REPORT.md)）：
-  - Python 后端：197 项通过、2 项跳过；3 项因缺失私人 PDF 测试材料未执行。
-  - Node / Pi / Provider 定向回归：54 项通过。
-  - 补充边界回归：14 项通过，与后端全套存在重叠，不累加。
-  - 前端生产构建、Electron 依赖打包与修改相关 ESLint 检查通过。
-  - 安装包的安装与桌面端端到端验收尚未完成；当前提供源码，尚未发布正式安装包。
 
 源码不包含个人数据库、模型密钥、私人测试材料、运行缓存及本地 UI 取证资源。
 
@@ -206,7 +200,7 @@ backend/integrations/        PDF、DOCX、简历编辑器和外部适配
 public/resume-editor/        嵌入式简历编辑器
 tests/                       前端、Electron 和 Pi Runtime 回归测试
 backend/tests/               后端与 Agent 业务测试
-docs/                        架构、交互与审查记录
+docs/                        架构与开发文档
 test use/                    本机真实材料，不进入 GitHub
 ```
 
