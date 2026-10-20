@@ -14,13 +14,13 @@ FetchCV 是本地优先的 Windows 桌面求职 Agent。它把个人资料、目
 → 准备面试
 ```
 
-FetchCV 不是关键词拼接器，也不是在聊天界面外硬编码一套伪 Agent 流程。桌面端使用单一 Pi Agent Loop，由模型根据完整语义决定直接回答还是调用工具；所有工具统一经过 FetchCV ToolGateway 的权限、审批、作用域、幂等、版本和审计约束。
+桌面端使用单一 Pi Agent Loop，由模型根据完整语义决定直接回答还是调用工具；所有工具统一经过 FetchCV ToolGateway 的权限、审批、作用域、幂等、版本和审计约束。
 
-## 当前版本
+## 首版说明
 
-后端默认入口、V2 过渡范围与迁移前置条件见 [后端过渡边界](docs/architecture/BACKEND_TRANSITION_20261021.md)。
+本仓库提供 FetchCV 的首版实现，包含桌面界面、Agent 运行时、业务后端和验证记录。
 
-- 产品版本：`0.4.19`
+- 构建版本号：`0.4.19`
 - 平台：Windows 10/11 x64
 - 前端：React 18、Vite、Electron、Radix UI、Framer Motion
 - Agent Runtime：`@earendil-works/pi-agent-core`、`@earendil-works/pi-ai`
@@ -30,7 +30,7 @@ FetchCV 不是关键词拼接器，也不是在聊天界面外硬编码一套伪
   - Node / Pi / Provider 定向回归：54 项通过。
   - 补充边界回归：14 项通过，与后端全套存在重叠，不累加。
   - 前端生产构建、Electron 依赖打包与修改相关 ESLint 检查通过。
-  - 本轮没有执行新安装包的安装、升级或桌面端端到端验收；不代表已发布新版安装包。
+  - 安装包的安装与桌面端端到端验收尚未完成；当前提供源码，尚未发布正式安装包。
 
 源码不包含个人数据库、模型密钥、私人测试材料、运行缓存及本地 UI 取证资源。
 
@@ -198,7 +198,7 @@ FETCHCV_FIRECRAWL_URL=http://127.0.0.1:3002
 ```text
 src/                         React 桌面界面
 electron/                    Electron、Pi Runtime、安全存储、Sidecar 生命周期
-backend/applyos_api/         FastAPI API（旧内部包名暂留以兼容迁移）
+backend/applyos_api/         FastAPI 业务 API
 backend/applyos_domain/      SQLAlchemy 领域模型
 backend/applyos_harness/     权限、审批、状态机、版本、事实与审计
 backend/applyos_agent/       业务工具、网页、Skill、MCP 与兼容层
