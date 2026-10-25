@@ -10,7 +10,7 @@ const python = process.env.FETCHCV_PYTHON || path.join(backendRoot, ".venv", isW
 const executableName = isWindows ? "fetchcv-api.exe" : "fetchcv-api";
 const args = [
   "-m", "PyInstaller",
-  "--noconfirm", "--clean", "--onedir",
+  "--noconfirm", "--clean", "--onedir", "--noupx",
   "--name", "fetchcv-api",
   "--paths", backendRoot,
   "--collect-data", "applyos_agent",

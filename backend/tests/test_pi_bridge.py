@@ -84,9 +84,9 @@ def test_pi_interview_research_exposes_dedicated_multi_source_evidence_tools(dat
             "build_interview_brief",
         }.issubset(names)
         assert {"search_web", "read_web_page", "open_browser_page", "read_browser_page"}.isdisjoint(names)
-        assert "牛客" in body["system_prompt"]
-        assert "以小红书公开面经为主" in body["system_prompt"]
-        assert "牛客等专业社区为补充" in body["system_prompt"]
+        assert "Nowcoder" in body["system_prompt"]
+        assert "Use public Xiaohongshu interview accounts as the primary sources" in body["system_prompt"]
+        assert "supplemented by professional communities such as Nowcoder" in body["system_prompt"]
 
         bypass = client.post(
             f"/api/pi/runs/{body['run_id']}/tools/search_web",
@@ -127,7 +127,7 @@ def test_pi_model_can_semantically_switch_a_plain_conversation_to_interview_rese
         # Routing lives with the activation tool; the full workflow is lazy.
         assert INTERVIEW not in body["system_prompt"]
         activation = next(t for t in body["tools"] if t["name"] == "activate_interview_research")
-        assert "先调用此工具" in activation["description"]
+        assert "Call this tool first" in activation["description"]
 
         activated = client.post(
             f"/api/pi/runs/{body['run_id']}/tools/activate_interview_research",
@@ -202,6 +202,11 @@ def test_pi_task_bootstrap_replaces_python_agent_worker_loop(database):
         body = started.json()
         assert body["task"]["status"] == "running"
         assert body["task"]["payload_json"]["agent_runtime"] == "pi"
+        assert body["recovery_state"]["scope"]["task_id"] == body["task_id"]
+        assert body["recovery_state"]["scope"]["run_id"] == run["id"]
+        assert body["recovery_state"]["current"]["stage"] == "created"
+        assert "First call inspect_application_workspace" not in body["prompt"]
+        assert "read_recovery_context" in body["prompt"]
         tool_names = {tool["name"] for tool in body["tools"]}
         assert {"inspect_application_workspace", "prepare_job_review"}.issubset(tool_names)
         assert "validate_run_input" not in tool_names
@@ -229,9 +234,11 @@ def test_pi_task_bootstrap_replaces_python_agent_worker_loop(database):
         assert executed.status_code == 200
         assert executed.json()["stage"] == "awaiting_fact_review"
         assert executed.json()["result"]["requires_user_action"] is True
+        assert executed.json()["recovery_state"]["current"]["stage"] == "awaiting_fact_review"
         refreshed = client.get(f"/api/pi/runs/{run['id']}/task-tools")
         assert refreshed.status_code == 200
         assert executed.json()["tools"] == refreshed.json()["tools"]
+        assert refreshed.json()["recovery_state"]["current"]["stage"] == "awaiting_fact_review"
         refreshed_names = {tool["name"] for tool in refreshed.json()["tools"]}
         assert "prepare_resume_review" in refreshed_names
         assert "generate_resume_strategy" not in refreshed_names
@@ -268,6 +275,7 @@ def test_pi_task_checkpoint_survives_electron_host_restart(database):
                 "phase": "working",
                 "partial_text": "已读取岗位，准备核对经历。",
                 "processing_trace": [{"id": "tool-1", "label": "读取工作区", "status": "completed"}],
+                "tool_receipts": [{"tool_call_id": "old-call", "summary": "SYNTHETIC_OLD_RECEIPT" * 1000}],
             },
         )
         assert saved.status_code == 200
@@ -287,11 +295,47 @@ def test_pi_task_checkpoint_survives_electron_host_restart(database):
         assert body["capability_fingerprint"] != first["capability_fingerprint"]
         assert "permission policy changed" in body["prompt"]
         assert body["prior_checkpoint"]["partial_text"] == "已读取岗位，准备核对经历。"
+        assert "已读取岗位，准备核对经历。" not in body["prompt"]
+        assert "SYNTHETIC_OLD_RECEIPT" not in body["prompt"]
+        assert "processing_trace" not in body["prompt"]
+        assert "<untrusted_checkpoint_hint>" in body["prompt"]
+        assert len(body["prompt"]) < 3000
+        assert body["recovery_state"]["scope"]["task_id"] == body["task_id"]
         assert body["task"]["payload_json"]["host_id"] == "electron-host-b"
         workspace = client.get(f"/api/jobs/{job['id']}/workspace").json()
         old_task = next(item for item in workspace["tasks"] if item["id"] == first["task_id"])
         assert old_task["status"] == "paused"
         assert old_task["result_json"]["stop_reason"] == "host_restarted"
+
+
+def test_pi_recovery_index_reads_do_not_archive_their_own_index(database):
+    with TestClient(create_app(database)) as client:
+        candidate, job = _workspace(client)
+        run = client.post(
+            "/api/agent-runs",
+            headers={"Idempotency-Key": "pi-recovery-index-run"},
+            json={"candidate_id": candidate["id"], "job_id": job["id"], "auto_start": False},
+        ).json()
+        boot = client.post(
+            f"/api/pi/runs/{run['id']}/tasks",
+            json={"kind": "start", "provider": _turn_payload()["provider"]},
+        ).json()
+        revisions = []
+        for section in [None, "state", "tool_results", "tool_results", "facts"]:
+            response = client.post(
+                f"/api/pi/runs/{run['id']}/task-tools/read_recovery_context",
+                json={"task_id": boot["task_id"], "arguments": {"section": section} if section else {},
+                      "idempotency_key": f"pi-recovery-read-{section}-{len(revisions)}"},
+            )
+            assert response.status_code == 200
+            body = response.json()
+            if section == "facts":
+                assert body["result_reference"]["tool"] == "read_tool_result"
+            else:
+                assert body["result_reference"] is None
+            if section == "tool_results":
+                revisions.append(body["result"]["page_revision"])
+        assert revisions[0] == revisions[1]
 
 
 def test_pi_host_reconciliation_releases_orphaned_running_tasks(database):

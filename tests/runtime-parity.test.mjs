@@ -53,14 +53,14 @@ for (const runtime of ["fake", "real"]) test(`${runtime} Pi satisfies the same p
   };
   const host = new FetchCVAgentHost({
     getApiBase: () => `http://127.0.0.1:${server.address().port}`, getControlToken: () => "synthetic-control",
-    getProviderConfig: () => ({ model: "fixture", baseUrl: "https://example.invalid", apiKey: "synthetic-key" }),
+    getProviderConfig: () => ({ model: "fixture", contextWindow: 128000, baseUrl: "https://example.invalid", apiKey: "synthetic-key" }),
     loadModules: async () => [runtime === "real" ? core : { ...core, AgentHarness: FakeHarness }, node, ai,
       { openAICompletionsApi: () => ({ stream: streamSimple, streamSimple }) }, {}],
   });
   const rpc = new RuntimeRpc(host); const events = [];
   const result = await rpc.dispatch({ v: 1, id: `parity-${runtime}`, method: "agent.turn", workspaceId: "local", deadlineMs: Date.now() + 30000,
     payload: { jobId: "job-1", content: "synthetic" } }, "window-1", event => events.push(event));
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, true, JSON.stringify(result.error));
   assert.equal(result.result.assistant.content, "synthetic result");
   assert.deepEqual(events.map(event => event.seq), events.map((_, index) => index + 1));
   assert.ok(events.some(event => event.name === "done"));

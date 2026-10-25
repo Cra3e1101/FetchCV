@@ -1,12 +1,15 @@
 import {probeProvider} from './pi/provider-probe.mjs';
 import {modelProfilesFor, resolveModelProfile} from '../shared/model-profile.mjs';
+import {normalizeProviderDetails, providerRequestHeaders, restoreSavedHeaders, SAVED_HEADER} from '../shared/provider-settings.mjs';
+import {resolveProviderEndpoint} from '../shared/provider-endpoint.mjs';
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, safeStorage, shell, utilityProcess } from "electron";
 import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildModelsUrlCandidates, parseModelsResponse, redactProviderError } from "./provider-utils.mjs";
-import { prepareBrowserBridge, startBrowserBridge } from "./browser-bridge.mjs";
+import { prepareBrowserBridge, startBrowserBridge } from "./browser-bridge-service.mjs";
+import { createStartupState, createStartupTrace } from "./startup.mjs";
 import { PiAgentRuntime } from "./pi-agent-runtime.mjs";
 import { RuntimeRpc, isTrustedFrame } from "../packages/app/runtime-rpc.mjs";
 import { choosePort, startSidecar, stopSidecar } from "./sidecar.mjs";
@@ -20,9 +23,8 @@ const projectRoot = app.getAppPath();
 const renderer = rendererEntry({ projectRoot, isPackaged: app.isPackaged });
 let sidecar = null;
 let browserBridge = null;
-let backendError = null;
-let backendState = "starting";
 let backendApiBase = "";
+let quitting = false;
 const controlToken = randomBytes(32).toString("hex");
 const approvalKey = randomBytes(32).toString("hex");
 let webApprovalQueue = Promise.resolve();
@@ -60,6 +62,14 @@ if (renderer.development) {
   if (process.env.FETCHCV_E2E_SESSION_DATA) app.setPath("sessionData", process.env.FETCHCV_E2E_SESSION_DATA);
   if (process.env.FETCHCV_E2E_TEMP) app.setPath("temp", process.env.FETCHCV_E2E_TEMP);
 }
+
+const startupTrace = createStartupTrace({ directory: path.join(app.getPath("userData"), "logs"), kind: process.env.FETCHCV_STARTUP_KIND });
+startupTrace.mark("main.entry");
+const startupState = createStartupState({ mark: startupTrace.mark, warm: () => piAgentRuntime.warm(), notify: status => {
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed() && window.webContents.getURL() === renderer.url) window.webContents.send("backend:state", status);
+  }
+} });
 
 function isSafeExternal(url, apiBase) {
   try {
@@ -107,12 +117,26 @@ function decodeProvider(saved, { includeSecret = false } = {}) {
       apiKey = "";
     }
   }
+  let requestHeaders = {};
+  if (saved?.encryptedRequestHeaders && safeStorage.isEncryptionAvailable()) {
+    try { requestHeaders = JSON.parse(safeStorage.decryptString(Buffer.from(saved.encryptedRequestHeaders, "base64"))); }
+    catch { /* Keep masked header names so a re-save requires replacing unreadable values. */
+      requestHeaders = Object.fromEntries((saved.requestHeaderNames || []).map(name => [name, SAVED_HEADER]));
+    }
+  }
   return {
     id: saved?.id || "",
     providerName: saved?.providerName || "",
     protocol: saved?.protocol || "openai",
     baseUrl: saved?.baseUrl || "",
     model: saved?.model || "",
+    notes: saved?.notes || "",
+    website: saved?.website || "",
+    displayName: saved?.displayName || "",
+    authMode: saved?.authMode || "auto",
+    userAgent: saved?.userAgent || "",
+    requestBody: saved?.requestBody || {},
+    requestHeaders: includeSecret ? requestHeaders : Object.fromEntries(Object.keys(requestHeaders).map(name => [name, SAVED_HEADER])),
     modelProfiles: modelProfilesFor(saved || {}),
     modelsUrlOverride: saved?.modelsUrlOverride || "",
     availableModels: Array.isArray(saved?.availableModels) ? saved.availableModels : [],
@@ -170,16 +194,22 @@ function validateProviderConfig(config, { requireModel = true } = {}) {
   if (parsed.username || parsed.password) throw new Error("Base URL 不能包含用户名或密码");
   const localHttp = parsed.protocol === "http:" && new Set(["127.0.0.1", "localhost"]).has(parsed.hostname);
   if (parsed.protocol !== "https:" && !localHttp) throw new Error("远程模型地址必须使用 HTTPS");
+  resolveProviderEndpoint(parsed.toString(), protocol);
+  const details = normalizeProviderDetails(config);
+  const saved = readProviderStore().profiles.find(item => item.id === config.id);
+  details.requestHeaders = restoreSavedHeaders(details.requestHeaders, saved ? decodeProvider(saved, {includeSecret:true}).requestHeaders : {});
+  if (Object.values(details.requestHeaders).includes(SAVED_HEADER)) throw new Error("部分请求头无法解密，请重新填写");
   const apiKey = String(config.apiKey || storedApiKeyFor(config) || "").trim();
   if (!apiKey) throw new Error("请输入 API Key");
   if (requireModel && !String(config.model || "").trim()) throw new Error("请输入模型名称");
   return {
+    ...details,
     id: String(config.id || ""),
     providerName: String(config.providerName || "Custom provider").trim() || "Custom provider",
     protocol,
     baseUrl: parsed.toString().replace(/\/$/, ""),
     apiKey,
-    model: String(config.model).trim(),
+    model: String(config.model || "").trim(),
     modelProfiles: modelProfilesFor(config),
     modelsUrlOverride: String(config.modelsUrlOverride || "").trim(),
     modelsEndpoint: String(config.modelsEndpoint || "").trim(),
@@ -191,8 +221,12 @@ function validateProviderConfig(config, { requireModel = true } = {}) {
 
 
 
-function providerErrorDetail(raw, apiKey) {
-  return redactProviderError(raw, apiKey);
+function providerErrorDetail(raw, config) {
+  let result = String(raw || "");
+  for (const value of [config.apiKey, ...Object.values(config.requestHeaders || {})]) {
+    if (value) result = result.split(value).join("[已隐藏]");
+  }
+  return redactProviderError(result, config.apiKey);
 }
 
 async function testProviderConnection(input) {
@@ -204,7 +238,7 @@ async function testProviderConnection(input) {
     const capabilities=await probeProvider(config,{signal:controller.signal});
     return {ok:true,latencyMs:Date.now()-started,providerName:config.providerName,protocol:config.protocol,model:config.model,config,capabilities,message:capabilities.message};
   } catch(error) {
-    throw new Error(providerErrorDetail(error?.message||'连接诊断失败',config.apiKey));
+    throw new Error(providerErrorDetail(error?.message||'连接诊断失败',config));
   } finally {clearTimeout(timer);}
 }
 
@@ -212,7 +246,7 @@ async function fetchProviderModels(input) {
   const config = validateProviderConfig(input, { requireModel: false });
   let candidates;
   try {
-    candidates = buildModelsUrlCandidates(config.baseUrl, { modelsUrlOverride: config.modelsUrlOverride });
+    candidates = buildModelsUrlCandidates(config.baseUrl, { modelsUrlOverride: config.modelsUrlOverride, isFullUrl: /\/(chat\/completions|messages)\/?$/i.test(config.baseUrl) });
   } catch {
     throw new Error("无法从 Base URL 推导模型列表地址，请填写自定义 Models URL");
   }
@@ -222,10 +256,7 @@ async function fetchProviderModels(input) {
     const timer = setTimeout(() => controller.abort(), 15000);
     try {
       const response = await fetch(endpoint, {
-        headers: {
-          Authorization: `Bearer ${config.apiKey}`,
-          ...(config.protocol === "anthropic" ? { "x-api-key": config.apiKey, "anthropic-version": "2023-06-01" } : {}),
-        },
+        headers: providerRequestHeaders(config),
         signal: controller.signal,
         redirect: "error",
       });
@@ -237,11 +268,11 @@ async function fetchProviderModels(input) {
         if (!models.length) throw new Error("服务返回了空模型列表，可继续手动填写模型名");
         return { ok: true, endpoint, candidates, models };
       }
-      const detail = providerErrorDetail(raw, config.apiKey);
+      const detail = providerErrorDetail(raw, config);
       lastError = `HTTP ${response.status}${detail ? ` · ${detail}` : ""}`;
       if (![404, 405].includes(response.status)) break;
     } catch (error) {
-      lastError = error?.name === "AbortError" ? "连接超时" : error.message;
+      lastError = error?.name === "AbortError" ? "连接超时" : providerErrorDetail(error.message,config);
     } finally {
       clearTimeout(timer);
     }
@@ -249,7 +280,7 @@ async function fetchProviderModels(input) {
   throw new Error(`未能读取模型列表（${lastError}）。你仍可以手动填写模型名称。`);
 }
 
-function saveProviderConfig(config, metadata = {}) {
+function saveProviderConfig(config, metadata = {}, {activate = true} = {}) {
   if (!safeStorage.isEncryptionAvailable()) throw new Error("当前系统无法使用安全凭据存储，已拒绝保存明文密钥");
   const target = providerFile();
   fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -262,6 +293,14 @@ function saveProviderConfig(config, metadata = {}) {
     protocol: config.protocol,
     baseUrl: config.baseUrl,
     model: config.model,
+    notes: config.notes,
+    website: config.website,
+    displayName: config.displayName,
+    authMode: config.authMode,
+    userAgent: config.userAgent,
+    requestBody: config.requestBody,
+    requestHeaderNames: Object.keys(config.requestHeaders || {}),
+    encryptedRequestHeaders: safeStorage.encryptString(JSON.stringify(config.requestHeaders || {})).toString("base64"),
     modelProfiles: modelProfilesFor(config),
     modelsUrlOverride: config.modelsUrlOverride || "",
     availableModels: config.availableModels || [],
@@ -273,7 +312,7 @@ function saveProviderConfig(config, metadata = {}) {
   };
   const index = store.profiles.findIndex((item) => item.id === id);
   if (index >= 0) store.profiles[index] = saved; else store.profiles.push(saved);
-  store.activeId = id;
+  if (activate) store.activeId = id;
   writeProviderStore(store);
   return id;
 }
@@ -287,15 +326,6 @@ function writeProviderStore(store) {
   try { fs.chmodSync(target, 0o600); } catch { /* Windows ACLs are managed by the OS. */ }
 }
 
-function updateProviderMetadata(id, metadata) {
-  if (!id) return;
-  const store = readProviderStore();
-  const profile = store.profiles.find((item) => item.id === id);
-  if (!profile) return;
-  Object.assign(profile, metadata);
-  writeProviderStore(store);
-}
-
 function providerEnvironment(config) {
   if (!config?.apiKey) return {};
   return {
@@ -305,6 +335,7 @@ function providerEnvironment(config) {
     FETCHCV_PROVIDER_BASE_URL: config.baseUrl,
     FETCHCV_PROVIDER_API_KEY: config.apiKey,
     FETCHCV_PROVIDER_MODEL: config.model,
+    FETCHCV_PROVIDER_REQUEST_OPTIONS: JSON.stringify({authMode:config.authMode,userAgent:config.userAgent,requestHeaders:config.requestHeaders,requestBody:config.requestBody}),
   };
 }
 
@@ -313,7 +344,8 @@ async function applyProviderToSidecar(config) {
   const response = await fetch(`${sidecar.apiBase}/api/runtime/configure`, {
     method: "POST",
     headers: { "content-type": "application/json", "x-fetchcv-control-token": controlToken },
-    body: JSON.stringify({ provider_name: config.providerName, protocol: config.protocol, base_url: config.baseUrl, api_key: config.apiKey, model: config.model }),
+    body: JSON.stringify({ provider_name: config.providerName, protocol: config.protocol, base_url: config.baseUrl, api_key: config.apiKey, model: config.model,
+      request_options: {authMode:config.authMode,userAgent:config.userAgent,requestHeaders:config.requestHeaders,requestBody:config.requestBody} }),
   });
   if (!response.ok) throw new Error(`本地 Agent 切换模型失败 (${response.status})`);
   return response.json();
@@ -332,8 +364,10 @@ async function disconnectProviderFromSidecar() {
 
 function registerIpc() {
   const trusted = event => isTrustedFrame(event, renderer.url);
+  const writes = new Set(["dialog:import-workspace-files", "provider:test", "provider:save", "provider:activate", "provider:delete", "resume:render-pdf", "xiaohongshu:begin-login", "xiaohongshu:finish-login"]);
   const handle = (channel, callback) => ipcMain.handle(channel, (event, ...args) => {
     if (!trusted(event)) throw new Error("sender_denied");
+    if (writes.has(channel) && !startupState.snapshot().agentReady) throw new Error("Agent 正在准备，请稍后重试");
     return callback(event, ...args);
   });
   const on = (channel, callback) => ipcMain.on(channel, (event, ...args) => {
@@ -346,10 +380,19 @@ function registerIpc() {
     if (window.isMaximized()) window.unmaximize(); else window.maximize();
   });
   on("window:close", (event) => BrowserWindow.fromWebContents(event.sender)?.close());
-  handle("backend:get-status", () => ({ state: backendState, apiBase: backendApiBase, message: backendError || "" }));
+  handle("backend:get-status", () => ({ ...startupState.snapshot(), apiBase: backendApiBase }));
+  on("startup:milestone", (_event, name) => {
+    if (name === "renderer-first-paint") startupState.painted();
+    if (name === "renderer-interactive") startupState.interactive();
+  });
   handle("runtime:request", (event, request) => {
     const allowed = renderer.url;
     if (!isTrustedFrame(event, allowed)) return { ok: false, error: { code: "sender_denied", message: "运行请求来源不受信任", retryable: false } };
+    if (["agent.turn", "agent.task", "agent.steer"].includes(request?.method)) {
+      if (!startupState.snapshot().agentReady) return { ok: false, error: { code: "agent_not_ready", message: "Agent 正在准备，请稍后重试", retryable: true } };
+      // Runs and paint-triggered warmup share the same SDK initialization.
+      void startupState.warmNow().catch(() => {});
+    }
     return runtimeRpc.dispatch(request, event.sender, item => {
       if (!event.sender.isDestroyed()) event.sender.send(`runtime:event:${request.id}`, item);
     });
@@ -450,7 +493,7 @@ function registerIpc() {
     });
     return result.canceled ? null : result.filePaths[0];
   });
-  const fetchResumeSnapshot = async (resumeId) => {
+  const fetchResumeSnapshot = async (resumeId, { withVersion = false } = {}) => {
     if (!/^[a-z0-9_-]{8,128}$/i.test(String(resumeId || ""))) throw new Error("简历版本 ID 无效");
     if (!sidecar?.apiBase) throw new Error("本地简历服务尚未启动");
     const response = await fetch(`${sidecar.apiBase}/api/resumes/${encodeURIComponent(String(resumeId))}`, {
@@ -460,11 +503,13 @@ function registerIpc() {
     if (!response.ok) throw new Error(payload?.error?.message || payload?.detail || `读取简历失败 (${response.status})`);
     const snapshot = payload?.content_json?.editor_snapshot;
     if (!snapshot?.profile || !Array.isArray(snapshot?.sections)) throw new Error("当前简历缺少可编辑快照");
-    return snapshot;
+    return withVersion ? { snapshot, contentHash: payload.content_hash || "" } : snapshot;
   };
   handle("resume:get-snapshot", (_event, resumeId) => fetchResumeSnapshot(resumeId));
-  handle("resume:render-pdf", async (_event, resumeId) => {
-    const snapshot = await fetchResumeSnapshot(resumeId);
+  handle("resume:render-pdf", async (_event, resumeId, expectedHash) => {
+    const { snapshot, contentHash } = await fetchResumeSnapshot(resumeId, { withVersion: true });
+    if (!contentHash) throw new Error("当前简历缺少导出版本标识，请重新保存后重试");
+    if (expectedHash && expectedHash !== contentHash) throw new Error("简历正文版本已变化，请重新核验并导出");
     const renderWindow = new BrowserWindow({
       width: 980,
       height: 1320,
@@ -516,7 +561,7 @@ function registerIpc() {
       const pdf = await renderWindow.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true, pageSize: "A4", margins: { top: 0, bottom: 0, left: 0, right: 0 } });
       const response = await fetch(`${sidecar.apiBase}/api/resumes/${encodeURIComponent(String(resumeId))}/pdf`, {
         method: "PUT",
-        headers: { "content-type": "application/pdf", "x-fetchcv-page-count": String(pageCount), "x-fetchcv-control-token": controlToken },
+        headers: { "content-type": "application/pdf", "x-fetchcv-page-count": String(pageCount), "x-fetchcv-resume-hash": contentHash, "x-fetchcv-control-token": controlToken },
         body: pdf,
       });
       const payload = await response.json().catch(() => ({}));
@@ -529,32 +574,30 @@ function registerIpc() {
   handle("provider:get", async () => readProviderConfig() || { providerName: "", protocol: "openai", baseUrl: "", model: "", hasApiKey: false });
   handle("provider:list", async () => listProviderConfigs());
   handle("provider:test", async (_event, input) => {
-    try {
-      const result = await testProviderConnection(input || {});
-      updateProviderMetadata(input?.id, { health: result.capabilities.tools === "verified" ? "healthy" : "tools_unverified", latencyMs: result.latencyMs, lastTestedAt: new Date().toISOString() });
-      return { ok: result.ok, latencyMs: result.latencyMs, providerName: result.providerName, protocol: result.protocol, model: result.model, capabilities:result.capabilities, message:result.message };
-    } catch (error) {
-      updateProviderMetadata(input?.id, { health: "error", lastTestedAt: new Date().toISOString() });
-      throw error;
-    }
+    // A probe tests the editor draft; it must not change saved connection state.
+    const result = await testProviderConnection(input || {});
+    return { ok: result.ok, latencyMs: result.latencyMs, providerName: result.providerName, protocol: result.protocol, model: result.model, capabilities:result.capabilities, message:result.message };
   });
   handle("provider:fetch-models", async (_event, input) => fetchProviderModels(input || {}));
   handle("provider:save", async (_event, input) => {
     const result = await testProviderConnection(input || {});
-    const runtime = await applyProviderToSidecar(result.config);
+    const activate = input?.activate !== false || input?.id === readProviderStore().activeId;
+    const runtime = activate ? await applyProviderToSidecar(result.config) : null;
     let id;
     try {
       id = saveProviderConfig(
         { ...result.config, id: input?.id },
         { health: result.capabilities.tools === "verified" ? "healthy" : "tools_unverified", latencyMs: result.latencyMs, modelsEndpoint: input?.modelsEndpoint, lastTestedAt: new Date().toISOString() },
+        {activate},
       );
     } catch (error) {
       const previous = readProviderConfig({ includeSecret: true });
-      if (previous?.apiKey) await applyProviderToSidecar(previous).catch(() => {});
-      else await disconnectProviderFromSidecar().catch(() => {});
+      if (activate && previous?.apiKey) await applyProviderToSidecar(previous).catch(() => {});
+      else if (activate) await disconnectProviderFromSidecar().catch(() => {});
       throw error;
     }
-    return { ok: true, latencyMs: result.latencyMs, runtime, provider: readProviderConfig(), activeId: id, store: listProviderConfigs() };
+    const store = listProviderConfigs();
+    return { ok: true, latencyMs: result.latencyMs, runtime, provider: store.profiles.find(item => item.id === id), savedId:id, activeId: store.activeId, store };
   });
   handle("provider:activate", async (_event, id, model) => {
     const store = readProviderStore();
@@ -562,9 +605,13 @@ function registerIpc() {
     if (!raw) throw new Error("模型连接不存在");
     raw.modelProfiles = modelProfilesFor(raw);
     delete raw.contextWindow; delete raw.maxOutputTokens;
-    if (String(model || "").trim()) raw.model = String(model).trim();
-    const config = decodeProvider(raw, { includeSecret: true });
-    if (!config.apiKey) throw new Error("这个连接的密钥无法在当前 Mac 解密，请重新填写 API Key");
+    if (String(model || "").trim()) {
+      if (raw.model !== String(model).trim()) raw.displayName = "";
+      raw.model = String(model).trim();
+    }
+    const config = validateProviderConfig(decodeProvider(raw, { includeSecret: true }));
+    resolveModelProfile(config);
+    if (!config.apiKey) throw new Error("这个连接的密钥无法在当前设备解密，请重新填写 API Key");
     const runtime = await applyProviderToSidecar(config);
     store.activeId = id;
     writeProviderStore(store);
@@ -599,6 +646,7 @@ function revealWindow(window) {
 }
 
 function createWindow(preferredApiBase = "") {
+  startupTrace.mark("window.create");
   const apiBase = preferredApiBase || sidecar?.apiBase || backendApiBase || "http://127.0.0.1:8766";
   const isMac = process.platform === "darwin";
   const window = new BrowserWindow({
@@ -620,7 +668,7 @@ function createWindow(preferredApiBase = "") {
       nodeIntegrationInSubFrames: false,
       sandbox: true,
       plugins: true,
-      additionalArguments: [`--fetchcv-api-url=${apiBase}`, `--fetchcv-api-token=${controlToken}`, `--fetchcv-api-error=${encodeURIComponent(backendError || "")}`],
+      additionalArguments: [`--fetchcv-api-url=${apiBase}`, `--fetchcv-api-token=${controlToken}`, `--fetchcv-api-error=${encodeURIComponent(startupState.snapshot().message)}`],
     },
   });
 
@@ -672,7 +720,10 @@ function createWindow(preferredApiBase = "") {
     revealWindow(window);
   };
   window.once("ready-to-show", revealLoadedWindow);
+  window.once("ready-to-show", () => startupTrace.mark("window.ready_to_show"));
+  window.once("show", () => startupTrace.mark("window.visible"));
   window.webContents.once("did-finish-load", revealLoadedWindow);
+  window.webContents.once("did-finish-load", () => startupTrace.mark("window.loaded"));
   window.once("closed", () => clearTimeout(revealTimer));
   const owner = window.webContents;
   owner.once("destroyed", () => runtimeRpc.disposeOwner(owner));
@@ -693,6 +744,7 @@ function createWindow(preferredApiBase = "") {
 Menu.setApplicationMenu(null);
 
 const hasLock = app.requestSingleInstanceLock();
+startupTrace.mark("main.instance_lock");
 if (!hasLock) {
   app.quit();
 } else if (!app.isPackaged && process.env.FETCHCV_V2_STORAGE_ROOT) {
@@ -722,6 +774,7 @@ if (!hasLock) {
   let earlyProvider = null;
   try { earlyProvider = readProviderConfig({ includeSecret: true }); } catch { /* safeStorage may not be ready yet */ }
   const sidecarStartup = Promise.all([portChoicePromise, browserOptionsPromise]).then(([portChoice, browserOptions]) => {
+    if (quitting) throw new Error("startup_cancelled");
     backendApiBase = `http://127.0.0.1:${portChoice.port}`;
     return startSidecar({
       isPackaged: app.isPackaged,
@@ -729,11 +782,13 @@ if (!hasLock) {
       resourcesPath: process.resourcesPath,
       userDataPath: app.getPath("userData"),
       port: portChoice.port,
-      onSpawn: (launched) => { sidecar = launched; },
+      onSpawn: (launched) => { sidecar = launched; if (quitting) stopSidecar(launched); },
+      startupTrace,
       env: {
         ...process.env,
         FETCHCV_CONTROL_TOKEN: controlToken,
         FETCHCV_APPROVAL_KEY: approvalKey,
+        FETCHCV_DESKTOP_STARTUP_GATE: "1",
         ...(renderer.development ? { FETCHCV_ALLOWED_ORIGINS: new URL(renderer.url).origin } : {}),
         ...(browserOptions ? { FETCHCV_BROWSER_BRIDGE_URL: browserOptions.url, FETCHCV_BROWSER_BRIDGE_TOKEN: browserOptions.token } : {}),
         ...providerEnvironment(earlyProvider),
@@ -742,46 +797,62 @@ if (!hasLock) {
   }).then((value) => ({ value }), (error) => ({ error }));
 
   app.whenReady().then(async () => {
+    startupTrace.mark("main.ready");
     registerIpc();
     fs.mkdirSync(path.join(app.getPath("userData"), "data"), { recursive: true });
     const [portChoice, browserOptions] = await Promise.all([portChoicePromise, browserOptionsPromise]);
+    if (quitting) return;
     backendApiBase = `http://127.0.0.1:${portChoice.port}`;
     createWindow(backendApiBase);
 
     // The desktop shell is visible before the Python runtime imports, opens
     // the database and completes its health check. Browser and API bootstrap
     // continue in the background while the renderer shows a quiet ready state.
-    const browserPromise = browserOptions
-      ? startBrowserBridge({
+    // Only bind the local command listener here; browser/session initialization
+    // happens on first use and never holds the data/Agent readiness gates.
+    if (browserOptions) void startBrowserBridge({
         ...browserOptions,
         accessCacheFile: path.join(app.getPath("userData"), "settings", "xiaohongshu-public-links.bin"),
+        onStartupEvent: startupTrace.mark,
+      }).then(started => {
+        if (quitting) { started.stop(); return; }
+        browserBridge = started;
+        startupTrace.mark("browser.listener_ready");
       }).catch((error) => {
+        startupTrace.mark("browser.listener_failed");
         console.error("Controlled browser bridge failed to start:", error instanceof Error ? error.message : String(error));
-        return null;
-      })
-      : Promise.resolve(null);
+      });
     try {
-      const [startedBrowser, sidecarResult] = await Promise.all([browserPromise, sidecarStartup]);
+      const sidecarResult = await sidecarStartup;
       if (sidecarResult.error) throw sidecarResult.error;
-      browserBridge = startedBrowser;
       sidecar = sidecarResult.value;
+      if (quitting) { stopSidecar(sidecar); return; }
+      startupState.dataReady();
+      startupTrace.mark("provider.configure_start");
       const savedProvider = readProviderConfig({ includeSecret: true });
       if (savedProvider?.apiKey && !earlyProvider?.apiKey) await applyProviderToSidecar(savedProvider);
+      startupTrace.mark("provider.configured");
+      startupTrace.mark("agent.reconcile_start");
       await piAgentRuntime.reconcileTasks();
-      backendState = "ready";
-      // Load Pi after the window and local API are ready. This keeps click-to-
-      // window latency low while avoiding a first-message module import pause.
-      setTimeout(() => void piAgentRuntime.warm().catch(() => {}), 1200);
+      startupTrace.mark("agent.reconciled");
+      const response = await fetch(`${sidecar.apiBase}/api/runtime/startup-ready`, {
+        method: "POST", headers: { "content-type": "application/json", "x-fetchcv-control-token": controlToken },
+        body: JSON.stringify({ instance_nonce: sidecar.instanceNonce }), signal: AbortSignal.timeout(10000),
+      });
+      if (!response.ok) throw new Error(`Agent 启动确认失败 (${response.status})`);
+      if (!quitting) startupState.agentReady();
     } catch (error) {
-      backendState = "error";
-      backendError = error instanceof Error ? error.message : String(error);
-      console.error("Local API startup failed:", backendError);
+      startupState.fail(error);
+      console.error("Local API startup failed:", error instanceof Error ? error.message : String(error));
     }
     app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
   });
 }
 
 app.on("before-quit", () => {
+  quitting = true;
+  startupTrace.mark("main.quit");
+  void startupTrace.flush();
   browserBridge?.stop();
   stopSidecar(sidecar);
 });

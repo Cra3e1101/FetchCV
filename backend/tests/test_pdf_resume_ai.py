@@ -14,9 +14,11 @@ class ScriptedRuntime:
         self.data = data or {"sections": [], "warnings": []}
         self.error = error
         self.prompts: list[str] = []
+        self.system_prompts: list[str] = []
 
-    def generate(self, *, prompt, output_model, **_):
+    def generate(self, *, prompt, system_prompt, output_model, **_):
         self.prompts.append(prompt)
+        self.system_prompts.append(system_prompt)
         if self.error:
             raise self.error
         output = output_model.model_validate(self.data)
@@ -91,6 +93,10 @@ def test_model_receives_only_redacted_text_and_returns_evidence_backed_fields():
     assert "<PERSON_1>" in sent
     assert "<PHONE_1>" in sent
     assert "<EMAIL_1>" in sent
+    assert sent.startswith("Parse the following resume text")
+    assert "2024.09 - 至今 中南财经政法大学 统计学 硕士 GPA 3.8/4.0" in sent
+    assert "without rewriting, polishing, translating, or inferring facts" in runtime.system_prompts[0]
+    assert "write explanatory warnings in Simplified Chinese" in runtime.system_prompts[0]
 
 
 def test_hallucinated_model_items_are_rejected_and_provider_errors_fall_back():
@@ -141,8 +147,8 @@ def test_skill_subheadings_stay_in_one_editor_item():
     assert result.items[0]["confidence"] == 0.8
 
 
-def test_real_resume_redaction_and_ai_preview_do_not_send_pdf_or_identity(database):
-    source = Path(__file__).resolve().parents[2] / "test use" / "高子强的简历.pdf"
+def test_real_resume_redaction_and_ai_preview_do_not_send_pdf_or_identity(database, legacy_resume_pdf):
+    source = legacy_resume_pdf
     text = "\n".join(page.extract_text(extraction_mode="layout") or "" for page in PdfReader(source).pages)
     education_quote = next(line.strip() for line in text.splitlines() if "中南财经政法大学" in line and "2024" in line)
     runtime = ScriptedRuntime({

@@ -1,6 +1,8 @@
 import {useEffect,useRef,useState} from "react";
 import {Hand,ShieldCheck,ChevronDown,Check} from "lucide-react";
 import {api} from "../lib/api";
+import {AnimatePresence,motion,useIsPresent} from "framer-motion";
+import {useAgentMotion} from "./motion";
 const modes=[
  {id:"request",label:"请求批准",description:"联网前请求批准，保留文件权限策略",icon:Hand},
  {id:"assist",label:"帮我批准",description:"允许联网，保留文件权限策略",icon:ShieldCheck},
@@ -10,6 +12,11 @@ function selectedMode(value){
  if(value.web_access==="ask"&&value.browser_bridge==="ask")return "request";
  if(value.web_access==="allow"&&value.browser_bridge==="allow")return "assist";
  return "custom";
+}
+function ApprovalMenuPanel({menuRef,busy,onKeyDown,children}){
+ const {transition,enter,exit}=useAgentMotion();
+ const present=useIsPresent();
+ return <motion.div ref={menuRef} className="approval-menu rp-permmenu" role="menu" aria-label="审批模式" aria-busy={busy} aria-hidden={!present||undefined} inert={!present?"":undefined} onKeyDown={onKeyDown} style={{pointerEvents:present?undefined:"none"}} initial={enter()} animate={{opacity:1,y:0}} exit={{...exit(),transition:transition("exit")}} transition={transition("enter")}>{children}</motion.div>;
 }
 export function ApprovalModeMenu({disabled=false}){
  const [settings,setSettings]=useState(null),[open,setOpen]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState("");
@@ -37,9 +44,9 @@ export function ApprovalModeMenu({disabled=false}){
   if(alive.current&&ticket===generation.current){setSettings(saved);setOpen(false);window.dispatchEvent(new CustomEvent("fetchcv:permissions",{detail:saved}))}
  }catch(err){if(alive.current&&ticket===generation.current)setError(err.message||"审批设置保存失败")}finally{if(alive.current&&ticket===generation.current)setBusy(false)}};
  return <div ref={container} className="approval-mode-control rp-perm-wrap"><button type="button" ref={anchor} className="composer-mode" aria-label="审批模式" aria-haspopup="menu" aria-expanded={open} disabled={disabled} onClick={show} onKeyDown={event=>{if(open)menuKeys(event)}}><Icon size={13}/><span>{current?.label||(settings?"自定义审批":"审批模式")}</span><ChevronDown size={11}/></button>
- {open&&<div ref={menu} className="approval-menu rp-permmenu" role="menu" aria-label="审批模式" aria-busy={busy} onKeyDown={menuKeys}>
+ <AnimatePresence>{open&&<ApprovalMenuPanel menuRef={menu} busy={busy} onKeyDown={menuKeys}>
   <div className="h">应如何批准操作？</div>
   {modes.map(item=><button key={item.id} type="button" className="rp-permrow" role="menuitemradio" aria-checked={item.id===mode} disabled={busy||!settings} onClick={()=>choose(item.id)}><item.icon size={16}/><span className="txt"><span className="t">{item.label}</span><span className="d">{item.description}</span></span><Check className="check" size={16}/></button>)}
- </div>}
+ </ApprovalMenuPanel>}</AnimatePresence>
  {error&&<p role="alert" className="composer-error">{error}</p>}</div>;
 }

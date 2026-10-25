@@ -8,12 +8,13 @@ const read = (file) => fs.readFileSync(path.join(root, file), "utf8");
 const workspace = read("src/components/AgentWorkspace.jsx");
 const interview = read("src/components/InterviewIntelligence.jsx");
 const interviewReader = read("src/components/InterviewSourceReader.jsx");
-const library = read("src/components/LibraryView.jsx");
+const knowledge = read("src/components/InterviewKnowledgeView.jsx");
 const app = read("src/App.jsx");
 const styles = read("src/styles.css");
 const skill = read("backend/applyos_agent/builtin_skills/interview-research/SKILL.md");
 const browserBridge = read("electron/browser-bridge.mjs");
 const researchState = await import("../src/lib/interview-research.js");
+const { independentQuestionCount, matchingQuestionEvidence } = await import("../src/lib/interview-evidence.js");
 
 test("completed job workspaces expose interview intelligence as a third surface", () => {
   assert.match(workspace, /tab === "interview"/);
@@ -40,7 +41,7 @@ test("interview research keeps Xiaohongshu access read-only and renders local sn
   assert.match(interview, /原帖优先，快照备用/);
   assert.match(interview, /失效页不会进入简报/);
   assert.match(interviewReader, /api\.interviewSource/);
-  assert.match(interviewReader, /本地证据快照/);
+  assert.match(interviewReader, /本地备份/);
   assert.doesNotMatch(api, /xiaohongshuStatus/);
   assert.doesNotMatch(api, /startXiaohongshuLogin/);
   assert.doesNotMatch(backend, /\/api\/xiaohongshu\/login/);
@@ -50,13 +51,33 @@ test("interview research keeps Xiaohongshu access read-only and renders local sn
 });
 
 test("brief UI distinguishes recurring evidence from a single experience", () => {
-  assert.match(interview, /confidence === "recurring"/);
+  assert.match(interview, /independentQuestionCount/);
   assert.match(interview, /单一经验/);
-  assert.match(interview, /source_ids/);
+  assert.match(interview, /currentSupportingSourceIds/);
   assert.match(interview, /来源证据库/);
-  assert.match(interview, /小红书主来源/);
+  assert.match(interview, /当前岗位累计/);
   assert.match(interview, /牛客等补充来源/);
   assert.match(interview, /证据有限/);
+});
+
+test("legacy and partially verified source counts never become independent frequency", () => {
+  assert.equal(independentQuestionCount({ frequency: 9, confidence: "recurring" }), null);
+  const question = {frequency: 2, question_evidence: {independence_status: "partial", confirmed_independent_count: 2}};
+  assert.equal(independentQuestionCount(question), null);
+  question.question_evidence.independence_status = "confirmed";
+  assert.equal(independentQuestionCount(question), 2);
+  question.frequency = 9;
+  assert.equal(independentQuestionCount(question), null);
+  question.frequency = 1;
+  question.question_evidence.confirmed_independent_count = 1;
+  assert.equal(independentQuestionCount(question), 1);
+});
+
+test("question preview does not borrow a quotation from a substring or empty question", () => {
+  const source = {extracted_questions: [{question:"SQL 优化", evidence_quote:"实际原句"}]};
+  assert.equal(matchingQuestionEvidence(source, {question:"SQL"}), null);
+  assert.equal(matchingQuestionEvidence(source, {question:""}), null);
+  assert.equal(matchingQuestionEvidence(source, {question:"sql优化"}).evidence_quote, "实际原句");
 });
 
 test("interview evidence is assigned to a dedicated right rail", () => {
@@ -76,12 +97,21 @@ test("interview evidence uses a readable desktop typography floor", () => {
   assert.match(styles, /\.agent-message\.assistant\s*\{\s*font-size:\s*var\(--ui-type-body\)/);
 });
 
-test("personal library persists searchable interview sources and briefs", () => {
-  assert.match(library, /面试知识/);
-  assert.match(library, /搜索公司、业务线或岗位/);
-  assert.match(library, /interview_sources/);
-  assert.match(library, /interview_briefs/);
-  assert.match(library, /onDeleteInterviewSource/);
+test("dedicated knowledge view keeps a complete graph while searching and retains source actions", () => {
+  assert.match(app, /InterviewKnowledgeView/);
+  assert.match(knowledge, /面试知识/);
+  assert.match(knowledge, /搜索公司、岗位或面经正文/);
+  assert.match(knowledge, /allInterviewKnowledge\(""\)/);
+  assert.match(knowledge, /allInterviewKnowledge\(knowledgeQuery\)/);
+  assert.match(knowledge, /buildKnowledgeGraph/);
+  assert.match(knowledge, /InterviewKnowledgeGraph/);
+  assert.match(knowledge, /interview_sources/);
+  assert.match(knowledge, /interview_briefs/);
+  assert.match(knowledge, /onDeleteInterviewSource/);
+  assert.match(knowledge, /onDeleteInterviewBrief/);
+  assert.match(knowledge, /openOriginalInterviewSource/);
+  assert.match(knowledge, /InterviewSourceReader/);
+  assert.doesNotMatch(knowledge, /knowledge\.(sources|briefs)\.map/);
 });
 
 test("completed interview research remains visible even when no brief was produced", () => {

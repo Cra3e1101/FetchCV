@@ -90,24 +90,39 @@ def test_unknown_effect_blocks_revision_alias_stage_and_replacement_run(database
         assert response.json()["code"] == "tool_outcome_unknown"
 
 
-def test_pdf_pages_are_parsed_and_editor_invalidates_old_report(database):
+def test_pdf_pages_are_parsed_and_editor_invalidates_old_report(database, tmp_path, monkeypatch):
     from io import BytesIO
-    from pypdf import PdfWriter
-    from applyos_domain.models import Candidate, ResumeVersion, QualityReport
+    from reportlab.pdfgen.canvas import Canvas
+    from applyos_domain.models import Candidate, Fact, ResumeVersion, QualityReport
+    from applyos_harness.validation import grounded_claim
+    from applyos_harness.versioning import canonical_hash
+    monkeypatch.setenv("FETCHCV_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    source = "I organized order data."
     with database.session() as session:
         candidate = Candidate(name="synthetic")
         session.add(candidate); session.flush()
-        resume = ResumeVersion(candidate_id=candidate.id, name="synthetic", content_json={})
+        fact = Fact(candidate_id=candidate.id, category="synthetic", content=source,
+                    verified=True, version=1, allowed_outputs=["resume"])
+        session.add(fact); session.flush()
+        content = {"claims": [grounded_claim(fact).model_dump(mode="json")],
+                   "verification_status": "verified",
+                   "editor_snapshot": {"profile": {}, "sections": [{"id": "experience", "title": "",
+                       "visible": True, "items": [{"body": source, "fields": {}}]}]}}
+        resume = ResumeVersion(candidate_id=candidate.id, name="synthetic", source_fact_ids=[fact.id],
+                               content_json=content, content_hash=canonical_hash(content))
         session.add(resume); session.flush()
-        ident = resume.id
-    writer = PdfWriter()
+        ident, content_hash = resume.id, resume.content_hash
+    buffer = BytesIO()
+    writer = Canvas(buffer, pagesize=(595, 842))
     for _ in range(3):
-        writer.add_blank_page(width=595, height=842)
-    buffer = BytesIO(); writer.write(buffer)
+        writer.drawString(40, 800, source)
+        writer.showPage()
+    writer.save()
+    headers = {"x-fetchcv-page-count": "1", "X-FetchCV-Resume-Hash": content_hash}
     with TestClient(create_app(database)) as client:
-        assert client.put(f"/api/resumes/{ident}/pdf", content=b"%PDF-not-a-pdf").status_code == 422
+        assert client.put(f"/api/resumes/{ident}/pdf", content=b"%PDF-not-a-pdf", headers=headers).status_code == 422
         response = client.put(f"/api/resumes/{ident}/pdf", content=buffer.getvalue(),
-                              headers={"x-fetchcv-page-count": "1"})
+                              headers=headers)
         assert response.status_code == 200, response.text
         data = response.json()
         assert data["page_count"] == 3
@@ -141,7 +156,11 @@ def test_control_token_cannot_sign_web_approval(monkeypatch):
 def test_four_verified_secondary_sources_are_ready_but_limited():
     from types import SimpleNamespace
     from applyos_agent.interview_evidence import ready_for_brief, evidence_status
-    sources = [SimpleNamespace(status="analyzed", extracted_questions=[{"question": "synthetic"}], platform="nowcoder") for _ in range(4)]
+    sources = [SimpleNamespace(id=str(i), source_url=f"https://example.com/{i}", status="analyzed", extracted_questions=[{"question": "synthetic"}], platform="nowcoder") for i in range(4)]
+    assert not ready_for_brief(sources)
+    for source in sources:
+        source.raw_text = f"Synthetic interview {source.id}: describe the project."
+        source.extracted_questions = [{"question": "synthetic", "evidence_quote": source.raw_text}]
     assert ready_for_brief(sources)
     assert evidence_status(sources) == "limited"
 

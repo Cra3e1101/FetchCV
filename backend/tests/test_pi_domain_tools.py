@@ -4,9 +4,10 @@ from sqlalchemy import select
 
 from applyos_agent.config import AgentSettings, RuntimeMode
 from applyos_agent.pi_domain_tools import build_pi_task_gateway
-from applyos_domain.models import AgentRun, Approval, Candidate, Fact, Job, RewriteProposal
+from applyos_domain.models import AgentRun, Approval, Candidate, Fact, Job, ResumeVersion, RewriteProposal
 from applyos_harness.approval import ApprovalService
 from applyos_harness.permissions import ToolPermission
+from applyos_harness.validation import FactValidator, grounded_claim
 
 
 def _execute(gateway, run, name, arguments, sequence):
@@ -42,6 +43,10 @@ def test_pi_native_domain_flow_uses_four_business_tools_without_nested_agent(dat
             jd_raw="负责使用 SQL 分析业务数据，并搭建转化漏斗指标体系。",
         )
         session.add_all([fact, job])
+        session.flush()
+        session.add(ResumeVersion(candidate_id=candidate.id, name="Synthetic base", content_json={"editor_snapshot": {
+            "profile": {"name": candidate.name}, "sections": [{"title": "经历", "items": [{"body": fact.content}]}],
+        }}))
         session.flush()
         run = AgentRun(candidate_id=candidate.id, job_id=job.id, run_type="pi_agent", current_stage="created")
         session.add(run)
@@ -93,6 +98,11 @@ def test_pi_native_domain_flow_uses_four_business_tools_without_nested_agent(dat
             payload={"fact_ids": [fact.id]},
         )
 
+        # The former happy path added an unsupported achievement. It must
+        # remain a counterexample rather than become a new confirmed fact.
+        unsupported = grounded_claim(fact, "在产品实习中使用 SQL 分析转化漏斗，形成业务指标结论")
+        assert not FactValidator(session).validate(candidate_id=candidate.id, asset_type="resume", claims=[unsupported]).passed
+
         review_result = _execute(
             gateway,
             run,
@@ -113,10 +123,13 @@ def test_pi_native_domain_flow_uses_four_business_tools_without_nested_agent(dat
                 "patches": [{
                     "section": "experience",
                     "before": fact.content,
-                    "after": "在产品实习中使用 SQL 分析转化漏斗，形成业务指标结论",
+                    "after": fact.content + "。",
                     "reason": "将原有数据分析工作前置，保持事实范围不变",
                     "jd_evidence": ["使用 SQL 分析业务数据", "搭建转化漏斗指标体系"],
                     "fact_ids": [fact.id],
+                    "evidence": [{"evidence_type": "candidate_fact", "candidate_id": candidate.id, "fact_id": fact.id, "fact_version": fact.version, "source_quote": fact.content}],
+                    "action": "分析",
+                    "object": "转化漏斗",
                     "risk_level": "low",
                 }],
                 "summary": "已基于原简历形成一条可审阅的岗位化改写。",
@@ -125,9 +138,12 @@ def test_pi_native_domain_flow_uses_four_business_tools_without_nested_agent(dat
         )
         assert review_result["stage"] == "awaiting_user_review"
         proposals = list(session.scalars(select(RewriteProposal).where(RewriteProposal.run_id == run.id)).all())
+        review_approval = _approval(session, run.id, "apply_resume_changes")
         ApprovalService(session).review_proposals(
-            approval_id=_approval(session, run.id, "apply_resume_changes").id,
+            approval_id=review_approval.id,
             approved_by="tester",
+            expected_revision=int((review_approval.decision_payload.get("draft") or {}).get("revision") or 0),
+            expected_target_content_hash=review_approval.decision_payload["target_content_hash"],
             decisions=[{"proposal_id": item.id, "decision": "accepted"} for item in proposals],
         )
 

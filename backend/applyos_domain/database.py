@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import os
 import shutil
+import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 
 from sqlalchemy import Engine, create_engine, event, inspect, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from .base import Base
+from .knowledge_search import register_search_functions, install_search_index, drop_search_index
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -28,6 +30,7 @@ def default_database_url() -> str:
 
 
 def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
+    register_search_functions(dbapi_connection)
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA foreign_keys=ON")
     cursor.close()
@@ -48,9 +51,17 @@ class Database:
             future=True,
         )
 
-    def create_schema(self) -> None:
+    def create_schema(self, on_stage: Callable[[str, float], None] | None = None) -> None:
+        started = time.perf_counter()
         Base.metadata.create_all(self.engine)
         self._ensure_additive_columns()
+        if on_stage is not None:
+            on_stage("python.schema_ready", (time.perf_counter() - started) * 1000)
+        started = time.perf_counter()
+        with self.engine.begin() as connection:
+            install_search_index(connection)
+        if on_stage is not None:
+            on_stage("python.index_ready", (time.perf_counter() - started) * 1000)
 
     def _ensure_additive_columns(self) -> None:
         """Apply tiny idempotent upgrades needed by packaged desktop installs.
@@ -60,14 +71,25 @@ class Database:
         cannot add newly introduced columns.
         """
         inspector = inspect(self.engine)
-        if "mcp_server_configs" not in inspector.get_table_names():
-            return
-        columns = {item["name"] for item in inspector.get_columns("mcp_server_configs")}
-        if "tool_policies" not in columns:
+        tables = set(inspector.get_table_names())
+        if "mcp_server_configs" in tables and "tool_policies" not in {item["name"] for item in inspector.get_columns("mcp_server_configs")}:
             with self.engine.begin() as connection:
                 connection.execute(text("ALTER TABLE mcp_server_configs ADD COLUMN tool_policies JSON NOT NULL DEFAULT '{}'"))
+        if "rewrite_proposals" in tables and "claim_contract" not in {item["name"] for item in inspector.get_columns("rewrite_proposals")}:
+            with self.engine.begin() as connection:
+                connection.execute(text("ALTER TABLE rewrite_proposals ADD COLUMN claim_contract JSON NOT NULL DEFAULT '{}'"))
+        if "jobs" in tables:
+            columns = {item["name"] for item in inspector.get_columns("jobs")}
+            additions = {"context_json": "JSON NOT NULL DEFAULT '{}'", "jd_provenance": "JSON NOT NULL DEFAULT '{}'",
+                         "input_revision": "INTEGER NOT NULL DEFAULT 1"}
+            with self.engine.begin() as connection:
+                for name, definition in additions.items():
+                    if name not in columns:
+                        connection.execute(text(f"ALTER TABLE jobs ADD COLUMN {name} {definition}"))
 
     def drop_schema(self) -> None:
+        with self.engine.begin() as connection:
+            drop_search_index(connection)
         Base.metadata.drop_all(self.engine)
 
     @contextmanager

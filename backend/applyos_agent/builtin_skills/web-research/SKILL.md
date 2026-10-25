@@ -9,6 +9,10 @@ Use this Skill when the user asks for current facts, a public webpage, a job
 posting, company research, market information, or another answer that depends
 on the live web.
 
+Write user-facing answers in Simplified Chinese unless the user requests another
+language. Preserve original source quotations, titles, names and URLs without
+translating them.
+
 ## Workflow
 
 1. Choose tools from the user's meaning, not keyword rules.

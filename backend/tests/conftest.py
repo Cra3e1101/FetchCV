@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import os
 from pathlib import Path
 
 import pytest
@@ -25,3 +26,25 @@ def database(tmp_path: Path) -> Database:
 @pytest.fixture(autouse=True)
 def allow_test_mock_runtime(monkeypatch):
     monkeypatch.setenv("FETCHCV_ALLOW_MOCK_RUNTIME", "1")
+
+
+def _private_fixture_path(env_key, filename):
+    """Legacy personal fixtures are not distributed with the source tree."""
+    configured = os.environ.get(env_key)
+    path = Path(configured) if configured else BACKEND_ROOT.parent / "test use" / filename
+    if not path.is_file():
+        reason = f"Private legacy fixture unavailable: {path}; supply {env_key} with the original fixture"
+        if configured or os.environ.get("FETCHCV_REQUIRE_PRIVATE_FIXTURES") == "1":
+            pytest.fail(reason)
+        pytest.skip(reason)
+    return path
+
+
+@pytest.fixture
+def legacy_resume_pdf():
+    return _private_fixture_path("FETCHCV_TEST_LEGACY_RESUME", "高子强的简历.pdf")
+
+
+@pytest.fixture
+def legacy_job_descriptions():
+    return _private_fixture_path("FETCHCV_TEST_LEGACY_JDS", "JD.txt")

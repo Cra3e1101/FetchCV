@@ -8120,7 +8120,7 @@ async function renderResumePagesToCanvas() {
 }
 
 async function confirmExportReadiness() {
-  ensureExportLibraries();
+  if (!FETCHCV_EMBEDDED) ensureExportLibraries();
   await waitForStableResumeLayout();
   const warnings = [];
   if (!String(state.profile?.name || "").trim()) warnings.push("姓名为空");
@@ -8137,6 +8137,28 @@ async function confirmExportReadiness() {
   );
 }
 
+async function renderVerifiedFetchCVPdf(resumeHash) {
+  if (window.parent === window) {
+    if (typeof window.appRuntime?.renderResumePdf === "function") return window.appRuntime.renderResumePdf(FETCHCV_RESUME_ID, resumeHash);
+    throw new Error("桌面 PDF 渲染器不可用，请返回 FetchCV 使用顶部导出按钮");
+  }
+  return new Promise((resolve, reject) => {
+    const requestId = `verified-pdf-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const receive = (event) => {
+      if (event.source !== window.parent || event.data?.type !== "fetchcv:verified-pdf-result" || event.data.requestId !== requestId) return;
+      window.clearTimeout(timer);
+      window.removeEventListener("message", receive);
+      resolve(event.data);
+    };
+    const timer = window.setTimeout(() => {
+      window.removeEventListener("message", receive);
+      reject(new Error("桌面 PDF 渲染未完成，请返回 FetchCV 使用顶部导出按钮"));
+    }, 45000);
+    window.addEventListener("message", receive);
+    window.parent.postMessage({ type: "fetchcv:request-verified-pdf", resumeId: FETCHCV_RESUME_ID, resumeHash, requestId }, "*");
+  });
+}
+
 async function exportResumePdf(options = {}) {
   const shouldDownload = options.download !== false;
   refs.saveStatus.textContent = "正在导出 PDF";
@@ -8150,6 +8172,40 @@ async function exportResumePdf(options = {}) {
       downloadButton.disabled = true;
       downloadButton.setAttribute("aria-busy", "true");
     }
+    let exportSnapshot = "";
+    let resumeHash = "";
+    if (FETCHCV_EMBEDDED) {
+      if (!FETCHCV_RESUME_ID || !FETCHCV_API_BASE || !fetchCVSnapshotLoaded) throw new Error("当前简历尚未载入，无法核验导出");
+      exportSnapshot = JSON.stringify(cloneEditorState(state));
+      // Persist the exact visible text before asking the server to authorize
+      // this PDF. A delayed parent autosave must not validate an older body.
+      const saved = await fetch(`${FETCHCV_API_BASE}/api/resumes/${encodeURIComponent(FETCHCV_RESUME_ID)}/editor`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...FETCHCV_API_HEADERS },
+        body: JSON.stringify({ editor_snapshot: JSON.parse(exportSnapshot) })
+      });
+      const savedResume = await saved.json().catch(() => ({}));
+      if (!saved.ok) throw new Error(savedResume?.error?.message || savedResume?.detail || `正文保存失败（${saved.status}）`);
+      resumeHash = savedResume.content_hash || "";
+      if (!resumeHash) throw new Error("当前简历缺少导出版本标识，请重新载入后重试");
+      // Canvas PDFs contain no extractable text. Use the desktop text renderer
+      // and the guarded backend GET instead of uploading/downloading those bytes.
+      const rendered = await renderVerifiedFetchCVPdf(resumeHash);
+      if (!rendered?.ok) throw new Error(rendered?.message || "PDF 事实核验失败");
+      if (JSON.stringify(cloneEditorState(state)) !== exportSnapshot) throw new Error("导出期间简历内容发生变化，请重新核验并导出");
+      const verifiedPdf = await fetch(`${FETCHCV_API_BASE}/api/resumes/${encodeURIComponent(FETCHCV_RESUME_ID)}/pdf`, { headers: FETCHCV_API_HEADERS });
+      if (!verifiedPdf.ok) {
+        const error = await verifiedPdf.json().catch(() => ({}));
+        throw new Error(error?.error?.message || error?.detail || `PDF 核验失败（${verifiedPdf.status}）`);
+      }
+      const verifiedBlob = await verifiedPdf.blob();
+      if (JSON.stringify(cloneEditorState(state)) !== exportSnapshot) throw new Error("导出期间简历内容发生变化，请重新核验并导出");
+      const fileName = exportFileName("pdf");
+      if (shouldDownload) downloadBlob(verifiedBlob, fileName);
+      refs.saveStatus.textContent = "PDF 已核验并保存";
+      window.parent.postMessage({ type: "fetchcv:pdf-saved", resumeId: FETCHCV_RESUME_ID, pageCount: rendered.pageCount, pdfUrl: rendered.pdfUrl }, "*");
+      return { ok: true, pageCount: rendered.pageCount, fileName };
+    }
     const canvases = await renderResumePagesToCanvas();
     const { jsPDF } = window.jspdf;
     const pdf = new jsPDF({ orientation: "p", unit: "pt", format: "a4", compress: true });
@@ -8162,25 +8218,14 @@ async function exportResumePdf(options = {}) {
     });
     const exportName = exportFileName("pdf");
     const pdfBlob = pdf.output("blob");
-    if (shouldDownload) downloadBlob(pdfBlob, exportName);
     let archiveError = "";
     try {
-      if (FETCHCV_EMBEDDED && FETCHCV_RESUME_ID && FETCHCV_API_BASE) {
-        const response = await fetch(`${FETCHCV_API_BASE}/api/resumes/${encodeURIComponent(FETCHCV_RESUME_ID)}/pdf`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/pdf", "X-FetchCV-Page-Count": String(canvases.length), ...FETCHCV_API_HEADERS },
-          body: pdfBlob
-        });
-        const result = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(result?.error?.message || result?.detail || `保存失败（${response.status}）`);
-        window.parent.postMessage({ type: "fetchcv:pdf-saved", resumeId: FETCHCV_RESUME_ID, pageCount: canvases.length, pdfUrl: result.pdf_url }, "*");
-      } else {
-        await archiveExportedPdf(pdfBlob, exportName);
-      }
+      await archiveExportedPdf(pdfBlob, exportName);
     } catch (error) {
       archiveError = error instanceof Error ? error.message : String(error || "归档失败");
       console.warn("PDF archive failed:", archiveError);
     }
+    if (shouldDownload) downloadBlob(pdfBlob, exportName);
     refs.saveStatus.textContent = archiveError ? "PDF 已导出（保存失败）" : FETCHCV_EMBEDDED ? "PDF 已导出并保存" : "PDF 已导出并归档";
     if (archiveError) return { ok: false, message: archiveError };
     return { ok: true, pageCount: canvases.length, fileName: exportName };
@@ -8194,7 +8239,7 @@ async function exportResumePdf(options = {}) {
       downloadButton.disabled = false;
       downloadButton.removeAttribute("aria-busy");
     }
-    window.setTimeout(() => {
+    if (!FETCHCV_EMBEDDED) window.setTimeout(() => {
       refs.saveStatus.textContent = "已自动保存";
     }, 1400);
   }

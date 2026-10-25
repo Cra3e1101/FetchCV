@@ -23,7 +23,7 @@ def build_conversation_request(
     context_prompt = (
         "<active_workspace>\n"
         f"job_id: {job.id}\ncompany: {job.company}\nrole: {job.role}\n"
-        "这里只标识当前桌面工作区，不包含 JD 或候选人事实。\n"
+        "This identifies the active desktop workspace only; it contains no JD or candidate facts.\n"
         "</active_workspace>\n"
         "<conversation_history>\n"
         f"{context}\n"

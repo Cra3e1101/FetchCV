@@ -35,7 +35,7 @@ test("skills and approved read-only MCP servers are manageable in settings", () 
   assert.match(settings, /权限与浏览器/);
   assert.match(settings, /MCP Servers/);
   assert.match(settings, /添加参数/);
-  assert.match(settings, /环境变量传递/);
+  assert.match(settings, /env_keys: \[\.\.\.new Set\(mcpForm\.envKeys/);
   assert.match(settings, /api\.reloadSkills/);
   assert.match(settings, /api\.approveMcpServer/);
   assert.match(settings, /filter\(\(tool\) => tool\.read_only\)/);

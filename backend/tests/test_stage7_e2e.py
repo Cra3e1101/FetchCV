@@ -45,6 +45,8 @@ def _seed_ready_run(client: TestClient):
         f"/api/agent-runs/{run['id']}/proposals/review",
         json={
             "approval_id": review["id"],
+            "expected_revision": int((review["decision_payload"].get("draft") or {}).get("revision") or 0),
+            "expected_target_content_hash": review["decision_payload"]["target_content_hash"],
             "decisions": [{"proposal_id": item["id"], "decision": "rejected" if item["risk_level"] == "high" else "accepted"} for item in proposals],
         },
     )
@@ -68,7 +70,8 @@ def test_runtime_uses_structured_mock_without_external_credentials():
 def test_ready_resume_flow_builds_pdf_and_submitted_snapshot_without_forced_portfolio(database, tmp_path, monkeypatch):
     import integrations.resume.renderer as renderer_module
 
-    monkeypatch.setattr(renderer_module, "ARTIFACT_ROOT", tmp_path / "resumes")
+    monkeypatch.setenv("FETCHCV_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
+    monkeypatch.setattr(renderer_module, "ARTIFACT_ROOT", tmp_path / "artifacts" / "resumes")
     with TestClient(create_app(database)) as client:
         _, job, run, workspace = _seed_ready_run(client)
         assert workspace["run"]["current_stage"] == "ready_to_publish"
@@ -87,14 +90,22 @@ def test_ready_resume_flow_builds_pdf_and_submitted_snapshot_without_forced_port
         writer.add_blank_page(width=595, height=842)
         writer.add_blank_page(width=595, height=842)
         writer.write(pdf_buffer)
-        canonical_pdf = pdf_buffer.getvalue()
+        # A blank/image-only document cannot become verified merely by
+        # presenting the current snapshot hash.
+        blank_pdf = pdf_buffer.getvalue()
+        blank = client.put(f"/api/resumes/{resume['id']}/pdf", content=blank_pdf, headers={
+            "content-type": "application/pdf", "X-FetchCV-Resume-Hash": rendered.json()["resume"]["content_hash"],
+        })
+        assert blank.status_code == 422
+        assert blank.json()["code"] == "resume_pdf_text_unverified"
+        canonical_pdf = pdf_path.read_bytes()
         uploaded = client.put(
             f"/api/resumes/{resume['id']}/pdf",
             content=canonical_pdf,
-            headers={"content-type": "application/pdf", "x-fetchcv-page-count": "2"},
+            headers={"content-type": "application/pdf", "X-FetchCV-Resume-Hash": rendered.json()["resume"]["content_hash"]},
         )
-        assert uploaded.status_code == 200
-        assert uploaded.json()["page_count"] == 2
+        assert uploaded.status_code == 200, uploaded.text
+        assert uploaded.json()["page_count"] == 1
         assert Path(uploaded.json()["resume"]["pdf_path"]).read_bytes() == canonical_pdf
         assert uploaded.json()["resume"]["content_json"]["pdf_renderer"] == "resume-editor-prototype"
         assert uploaded.json()["resume"]["content_json"]["pdf_renderer_version"] == 2

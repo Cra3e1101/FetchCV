@@ -41,6 +41,7 @@ class ToolContext:
     candidate_id: str | None = None
     job_id: str | None = None
     version_id: str | None = None
+    repair_state: dict[str, Any] = field(default_factory=dict)
 
     def require(self, permission: ToolPermission) -> None:
         if permission not in self.granted_permissions:
@@ -49,6 +50,7 @@ class ToolContext:
 
 ToolHandler = Callable[[ToolContext, BaseModel], BaseModel | dict[str, Any]]
 ApprovalTargetBuilder = Callable[[BaseModel], str]
+RepairScopeBuilder = Callable[[ToolContext, BaseModel], dict[str, str] | None]
 
 
 def assert_no_unresolved_operations(session: Session, run: AgentRun) -> None:
@@ -86,8 +88,15 @@ class ToolSpec:
     target_id_field: str | None = None
     input_schema_override: dict[str, Any] | None = None
     revision: str = "1"
-    # Opt in only for handlers confined to this SQLAlchemy transaction.
+    # local_transactional: all business mutations use this SQLAlchemy session.
+    # local_with_read_cache additionally permits idempotent GET/OCR read caches;
+    # those artifacts remain after failure, but no external write is dispatched.
+    # MCP/remote mutations must retain external outcome-unknown protection.
     effect_scope: str = "external"
+    repair_scope_builder: RepairScopeBuilder | None = None
+    operation_scope_builder: RepairScopeBuilder | None = None
+    repair_arguments_builder: Callable[[BaseModel], str] | None = None
+    repair_attempt_limit: int = 2
 
 
 class ToolGateway:
@@ -100,7 +109,7 @@ class ToolGateway:
         self.versions = VersionService(session)
 
     def register(self, spec: ToolSpec) -> None:
-        if spec.effect_scope not in {"external", "local_transactional"}:
+        if spec.effect_scope not in {"external", "local_transactional", "local_with_read_cache"}:
             raise ValueError("invalid tool effect_scope")
         if spec.name in self.registry:
             raise ValueError(f"duplicate tool: {spec.name}")
@@ -152,12 +161,6 @@ class ToolGateway:
             normalized_arguments = payload.model_dump(mode="json", exclude_none=True)
             if spec.input_schema_override is not None:
                 self._validate_schema(spec.input_schema_override, normalized_arguments)
-            operation_id, arguments_hash = self._operation_identity(
-                run=run,
-                stage=stage,
-                tool_name=tool_name,
-                arguments=normalized_arguments,
-            )
             context = ToolContext(
                 session=self.session,
                 run=run,
@@ -175,6 +178,9 @@ class ToolGateway:
                 raise HarnessError("target_revision_mismatch", "目标版本已改变，需要重新审阅", run_id=run.id)
             if spec.side_effect:
                 assert_no_unresolved_operations(self.session, run)
+            operation_id, arguments_hash = self._operation_identity(
+                run=run, stage=stage, tool_name=tool_name, arguments=normalized_arguments, context=context,
+            )
             if spec.approval_action:
                 approval_target_id = (
                     spec.approval_target_builder(payload)
@@ -238,15 +244,49 @@ class ToolGateway:
                 # _prepare_invocation commits its outbox row; reacquire the
                 # recovery-scope lock before the final claim.
                 assert_no_unresolved_operations(self.session, run)
+                try:
+                    if spec.operation_scope_builder is not None:
+                        current_operation, _ = self._operation_identity(
+                            run=run, stage=stage, tool_name=tool_name, arguments=normalized_arguments, context=context,
+                        )
+                        if current_operation != operation_id:
+                            raise HarnessError("source_revision_changed", "来源正文或分析状态已变化，请重新读取后再提交。", retryable=True,
+                                               details={"next_action": "reread_source"})
+                    repair_state = self._repair_state(spec, context, payload, arguments_hash)
+                except HarnessError as exc:
+                    # No handler has run. Do not leave a prepared budget
+                    # rejection looking like an unsettled operation.
+                    if invocation.status == "prepared":
+                        invocation.status = "failed"
+                        invocation.error_json = {"code": exc.code, "pre_execution_rejection": True}
+                        self.session.commit()
+                    raise
                 claimed = self.session.execute(update(ToolInvocation).where(
                     ToolInvocation.id == invocation.id, ToolInvocation.status.in_(["prepared", "awaiting_user_action", "retry_authorized", "failed"])
                 ).values(status="running"))
                 if claimed.rowcount != 1:
                     raise HarnessError("tool_outcome_unknown", "执行记录已被其他调用领取，禁止重复派发", run_id=run.id)
-                invocation.error_json = {**(invocation.error_json or {}), "attempt": int((invocation.error_json or {}).get("attempt", 0)) + 1}
+                invocation.error_json = {**(invocation.error_json or {}), "attempt": int((invocation.error_json or {}).get("attempt", 0)) + 1,
+                                         "effect_scope": spec.effect_scope, **repair_state}
+                context.repair_state = repair_state
                 self.session.commit()
                 claimed_invocation_id = invocation.id
-                if spec.effect_scope == "local_transactional":
+                if spec.operation_scope_builder is not None:
+                    # Claim persistence also releases locks. Reacquire them
+                    # before entering the handler; a changed source has caused
+                    # no business effect and must not consume a repair attempt.
+                    self.session.execute(update(Candidate).where(Candidate.id == run.candidate_id).values(name=Candidate.name))
+                    current_operation, _ = self._operation_identity(
+                        run=run, stage=stage, tool_name=tool_name, arguments=normalized_arguments, context=context,
+                    )
+                    if current_operation != operation_id:
+                        invocation.status = "failed"
+                        invocation.error_json = {"code": "source_revision_changed", "pre_execution_rejection": True}
+                        self.session.commit()
+                        claimed_invocation_id = None
+                        raise HarnessError("source_revision_changed", "来源在派发前已变化，请重新读取后再提交。", retryable=True,
+                                           details={"next_action": "reread_source"})
+                if spec.effect_scope in {"local_transactional", "local_with_read_cache"}:
                     transactional_guard = self.session.begin_nested()
             before_snapshot = None
             if target is not None and spec.side_effect:
@@ -333,9 +373,50 @@ class ToolGateway:
             return
         invocation.status = "failed" if rollback_proven else "outcome_unknown"
         invocation.error_json = {**(invocation.error_json or {}), "code": error.code,
-                                 "rollback_proven": rollback_proven}
-        error.retryable = rollback_proven
+                                 "rollback_proven": rollback_proven,
+                                 "read_cache_may_remain": (invocation.error_json or {}).get("effect_scope") == "local_with_read_cache"}
+        error.retryable = rollback_proven and error.retryable
+        repair = invocation.error_json
+        if repair.get("repair_scope"):
+            remaining = max(0, repair["repair_attempt_limit"] - repair["repair_attempts_used"])
+            error.details = {**error.details, **repair["repair_scope"],
+                             "repair_attempts_used": repair["repair_attempts_used"],
+                             "repair_attempt_limit": repair["repair_attempt_limit"],
+                             "repair_attempts_remaining": remaining,
+                             "next_action": "adjust_analysis_arguments" if error.retryable and remaining else "continue_other_sources"}
+            error.retryable = error.retryable and remaining > 0
         self.session.commit()
+
+    def _repair_state(self, spec: ToolSpec, context: ToolContext, payload: BaseModel, arguments_hash: str) -> dict[str, Any]:
+        """Bound actual attempts across call IDs and changed argument sets.
+
+        Called under the existing candidate write lock, after approval and
+        unknown-outcome checks. A rejected call never claims an invocation.
+        """
+        if spec.repair_scope_builder is None:
+            return {}
+        scope = spec.repair_scope_builder(context, payload)
+        if scope is None:
+            return {}
+        if spec.repair_arguments_builder is not None:
+            arguments_hash = spec.repair_arguments_builder(payload)
+        records = self.session.scalars(select(ToolInvocation).where(
+            ToolInvocation.run_id == context.run.id, ToolInvocation.tool_name == spec.name,
+        )).all()
+        attempts = [item for item in records if (item.error_json or {}).get("repair_scope") == scope
+                    and (item.error_json or {}).get("repair_argument_hash")]
+        used = len(attempts)
+        limit = spec.repair_attempt_limit
+        details = {**scope, "repair_attempts_used": used, "repair_attempt_limit": limit,
+                   "repair_attempts_remaining": max(0, limit - used)}
+        if used >= limit:
+            raise HarnessError("interview_analysis_repair_exhausted", "该来源已用完本轮分析修复次数；保留已有有效问题并继续其他来源。",
+                               details={**details, "next_action": "continue_other_sources"})
+        if any((item.error_json or {}).get("repair_argument_hash") == arguments_hash for item in attempts):
+            raise HarnessError("interview_analysis_parameters_unchanged", "相同参数已分析失败；请按错误定位实际修改参数，不要重复派发。",
+                               retryable=True, details={**details, "next_action": "adjust_analysis_arguments"})
+        return {"repair_scope": scope, "repair_argument_hash": arguments_hash,
+                "repair_attempts_used": used + 1, "repair_attempt_limit": limit}
 
     @staticmethod
     def _validate_schema(schema: dict[str, Any], arguments: dict[str, Any]) -> None:
@@ -361,11 +442,18 @@ class ToolGateway:
 
     @staticmethod
     def _spec_revision(spec: ToolSpec) -> str:
-        return canonical_hash({"revision": spec.revision, "schema": spec.input_schema_override or spec.input_model.model_json_schema(),
-                               "permission": spec.permission.value, "approval": spec.approval_action,
-                               "target_type": spec.target_type, "target_field": spec.target_id_field,
-                               "side_effect": spec.side_effect, "auto_request_approval": spec.auto_request_approval,
-                               "effect_scope": spec.effect_scope})
+        policy = {"revision": spec.revision, "schema": spec.input_schema_override or spec.input_model.model_json_schema(),
+                  "permission": spec.permission.value, "approval": spec.approval_action,
+                  "target_type": spec.target_type, "target_field": spec.target_id_field,
+                  "side_effect": spec.side_effect, "auto_request_approval": spec.auto_request_approval,
+                  "effect_scope": spec.effect_scope}
+        if spec.repair_scope_builder is not None:
+            policy["repair_attempt_limit"] = spec.repair_attempt_limit
+        if spec.operation_scope_builder is not None:
+            policy["scoped_operation"] = True
+        if spec.repair_arguments_builder is not None:
+            policy["normalized_repair_arguments"] = True
+        return canonical_hash(policy)
 
     def _operation_identity(
         self,
@@ -374,12 +462,16 @@ class ToolGateway:
         stage: PipelineStage,
         tool_name: str,
         arguments: dict[str, Any],
+        context: ToolContext | None = None,
     ) -> tuple[str, str]:
         encoded = json.dumps(arguments, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         arguments_hash = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
         spec = self.registry[tool_name]
         target = self._target(spec, spec.input_model.model_validate(arguments), run)
         revision = canonical_hash(model_payload(target)) if target is not None else "none"
+        if spec.operation_scope_builder is not None and context is not None:
+            scope = spec.operation_scope_builder(context, spec.input_model.model_validate(arguments))
+            revision = canonical_hash(scope) if scope is not None else revision
         seed = f"{run.id}\n{stage.value}\n{tool_name}\n{arguments_hash}\n{self._spec_revision(spec)}\n{revision}"
         return f"op_{hashlib.sha256(seed.encode('utf-8')).hexdigest()[:40]}", arguments_hash
 

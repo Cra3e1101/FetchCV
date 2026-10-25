@@ -182,7 +182,7 @@ def test_web_gateway_keeps_realtime_questions_provider_independent(database, tmp
         definitions = {item["name"]: item for item in gateway.definitions(run)}
         assert "get_weather" not in definitions
         assert {"search_web", "read_web_page"}.issubset(definitions)
-        assert "天气" in definitions["search_web"]["description"]
+        assert "weather" in definitions["search_web"]["description"]
 
 
 def test_job_posting_import_uses_json_ld_and_never_silently_overwrites(database):

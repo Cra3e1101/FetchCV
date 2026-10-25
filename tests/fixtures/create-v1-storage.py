@@ -1,4 +1,4 @@
-"""Synthetic legacy DB from the ACTUAL 25 SQLAlchemy models, never user data."""
+"""Synthetic legacy DB from the frozen 25-table V1 schema, never user data."""
 import json
 import os
 from pathlib import Path
@@ -23,9 +23,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "backend"))
 from applyos_domain.database import Database
 from applyos_domain import models as m
 from applyos_domain.enums import RunStatus
+from sqlalchemy import inspect
+
+# Keep this historical fixture aligned with packages/storage/legacy-tables.mjs.
+# New runtime models and search indexes are not part of the V1 migration input.
+LEGACY_TABLE_NAMES = (
+    "candidates", "material_assets", "experiences", "facts", "jobs",
+    "job_profiles", "interview_sources", "interview_briefs", "resume_versions",
+    "portfolio_versions", "applications", "agent_runs", "agent_messages",
+    "agent_run_steps", "agent_tasks", "queued_agent_messages", "agent_context_snapshots",
+    "agent_skills", "mcp_server_configs", "workspace_settings", "rewrite_proposals",
+    "approvals", "tool_invocations", "version_snapshots", "quality_reports",
+)
 
 db = Database(f"sqlite:///{output.as_posix()}")
-db.create_schema()
+m.Base.metadata.create_all(db.engine, tables=[m.Base.metadata.tables[name] for name in LEGACY_TABLE_NAMES])
 stamp = datetime(2026, 9, 21, tzinfo=timezone.utc)
 with db.session() as session:
     def add(cls, **values):
@@ -61,8 +73,9 @@ with db.session() as session:
     add(m.ToolInvocation, id="invocation_a", operation_id="synthetic-operation", run_id=run.id, tool_name="synthetic", stage="created", arguments_hash="synthetic-hash", status="unknown")
     add(m.VersionSnapshot, id="snapshot_a", target_type="resume", target_id=resume.id, run_id=run.id, sequence=1, payload={"old": "version"}, content_hash="synthetic-hash")
     add(m.QualityReport, id="quality_a", target_type="resume", target_id=resume.id, run_id=run.id)
+table_count = len(inspect(db.engine).get_table_names())
 db.engine.dispose()
 Path(str(output) + ".audit.json").write_text(json.dumps({"python_delete_move_attempts": attempts, "synthetic": True, "native_coverage": "not exhaustive"}), encoding="utf-8")
 if attempts:
     raise SystemExit(86)
-print(json.dumps({"database": str(output), "tables": len(m.Base.metadata.tables), "synthetic": True}))
+print(json.dumps({"database": str(output), "tables": table_count, "synthetic": True}))

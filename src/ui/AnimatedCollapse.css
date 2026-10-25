@@ -1,0 +1,37 @@
+/* Keep the grid rendered while it closes; hidden/aria-hidden/inert expose the
+   collapsed state immediately without measuring or fixing a content height. */
+.ui-collapse.animated-collapse,
+.ui-collapse.animated-collapse[hidden] {
+  display: grid !important;
+  height: auto !important;
+  min-width: 0;
+  grid-template-rows: 0fr;
+  overflow: hidden;
+  transition: grid-template-rows var(--motion-duration-exit) var(--motion-ease-exit);
+}
+
+.ui-collapse.animated-collapse[data-open="true"] {
+  grid-template-rows: 1fr;
+  transition-duration: var(--motion-duration-expand);
+  transition-timing-function: var(--motion-ease-enter);
+}
+
+.animated-collapse > .animated-collapse-content {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--motion-duration-exit) var(--motion-ease-exit), visibility 0s var(--motion-duration-exit);
+}
+
+.animated-collapse[data-open="true"] > .animated-collapse-content {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity var(--motion-duration-enter) var(--motion-ease-enter), visibility 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-collapse.animated-collapse { transition: none !important; }
+  .animated-collapse > .animated-collapse-content { transition: opacity var(--motion-duration-micro) linear !important; }
+}

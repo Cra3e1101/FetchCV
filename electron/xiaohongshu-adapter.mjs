@@ -10,12 +10,19 @@ export function extractXiaohongshuNote(state, noteId) {
     visited.add(value);
     const note = value.note || value;
     const id = note.noteId || note.note_id || note.id || key;
-    if (id === noteId && typeof note.desc === "string") {
-      return { title: typeof note.title === "string" ? note.title : "", description: note.desc,
+    const rawImages = note.imageList || note.image_list;
+    if (id === noteId && (typeof note.desc === "string" || Array.isArray(rawImages))) {
+      const images = Array.isArray(rawImages) ? rawImages : [];
+      const imageGroups = images.map(image => {
+        if (!image || typeof image !== "object") return [];
+        const info = image.infoList || image.info_list;
+        return [...new Set([image.urlDefault, image.url_default, image.urlPre, image.url_pre, image.url,
+          ...(Array.isArray(info) ? info.map(item => item?.url) : [])]
+          .filter(url => typeof url === "string" && url.startsWith("https://")))];
+      });
+      return { title: typeof note.title === "string" ? note.title : "", description: typeof note.desc === "string" ? note.desc : "",
         publishedAt: note.time || note.publishTime || note.publish_time || "",
-        imageCount: Array.isArray(note.imageList) ? note.imageList.length : 0,
-        imageGroups: (note.imageList || []).map(image => [image.urlDefault, image.urlPre, image.url, ...(image.infoList || []).map(info => info.url)].filter(url => typeof url === "string" && url.startsWith("https://"))),
-        imageUrls: (note.imageList || []).flatMap(image => [image.urlDefault, image.urlPre, image.url, ...(image.infoList || []).map(info => info.url)]).filter(url => typeof url === "string" && url.startsWith("https://")) };
+        imageCount: images.length, imageGroups, imageUrls: imageGroups.flat() };
     }
     for (const [childKey, child] of Object.entries(value)) {
       if (/comment|recommend/i.test(childKey)) continue;
@@ -85,6 +92,7 @@ export function createXiaohongshuAccessCache({
   maxEntries = 240,
   initialEntries = [],
   onChange = null,
+  clock = () => Date.now(),
 } = {}) {
   const entries = new Map();
   const usable = (value) => {
@@ -92,16 +100,35 @@ export function createXiaohongshuAccessCache({
     catch { return false; }
   };
   const priority = (value) => { try { return new URL(value).searchParams.get("xsec_source") === "pc_search" ? 1 : 0; } catch { return 0; } };
+  // Share links and search results use different paths/hosts for the same
+  // note. Keep the caller's canonical URL, but share its grant by note ID.
+  const cacheKey = (value) => {
+    const canonical = canonicalXiaohongshuUrl(value);
+    try {
+      const url = new URL(canonical);
+      const noteId = /^\/(?:explore|discovery\/item)\/([^/]+)\/?$/.exec(url.pathname)?.[1];
+      if (/(^|\.)xiaohongshu\.com$/i.test(url.hostname) && noteId) return `note:${noteId}`;
+    } catch { /* Invalid URLs retain their original key. */ }
+    return canonical;
+  };
+  const hasGrant = (value) => { try { return Boolean(new URL(value).searchParams.get("xsec_token")); } catch { return false; } };
 
   for (const item of initialEntries) {
     if (!item || !usable(item.url)) continue;
-    const canonical = canonicalXiaohongshuUrl(item.canonical || item.url);
+    const canonical = canonicalXiaohongshuUrl(cacheKey(item.canonical) === cacheKey(item.url) ? item.canonical : item.url);
     const expiresAt = Number(item.expiresAt || 0);
-    if (expiresAt > Date.now()) entries.set(canonical, { url: String(item.url), expiresAt });
+    if (!Number.isFinite(expiresAt) || expiresAt <= clock()) continue;
+    const key = cacheKey(canonical);
+    const existing = entries.get(key);
+    // Legacy snapshots can contain both share and search aliases. A bare
+    // canonical entry must not overwrite a still-valid access grant.
+    if (!existing || !hasGrant(existing.url) || (hasGrant(item.url) && expiresAt >= existing.expiresAt)) {
+      entries.set(key, { canonical, url: String(item.url), expiresAt });
+    }
   }
 
   function snapshot() {
-    return [...entries].map(([canonical, item]) => ({ canonical, ...item }));
+    return [...entries.values()].map((item) => ({ ...item }));
   }
 
   function notify() {
@@ -109,7 +136,7 @@ export function createXiaohongshuAccessCache({
   }
 
   function prune({ emit = false } = {}) {
-    const now = Date.now();
+    const now = clock();
     const sizeBefore = entries.size;
     for (const [key, item] of entries) {
       if (item.expiresAt <= now) entries.delete(key);
@@ -126,23 +153,17 @@ export function createXiaohongshuAccessCache({
       if (!isXiaohongshuUrl(value)) return String(value || "");
       const canonical = canonicalXiaohongshuUrl(value);
       if (!usable(value)) return canonical;
+      // Expired grants cannot be revived by opening a tokenless source URL.
+      prune();
+      const key = cacheKey(canonical);
       const incoming = String(value);
-      const existing = entries.get(canonical);
-      let incomingHasAccessGrant = false;
-      let existingHasAccessGrant = false;
-      try {
-        incomingHasAccessGrant = Boolean(new URL(incoming).searchParams.get("xsec_token"));
-        existingHasAccessGrant = Boolean(existing?.url && new URL(existing.url).searchParams.get("xsec_token"));
-      } catch {
-        // Invalid values are rejected by isXiaohongshuUrl above.
-      }
-      if (!existingHasAccessGrant || incomingHasAccessGrant) {
-        entries.delete(canonical);
-        entries.set(canonical, { url: incoming, expiresAt: Date.now() + ttlMs });
+      const existing = entries.get(key);
+      if (!hasGrant(existing?.url) || hasGrant(incoming)) {
+        entries.delete(key);
+        entries.set(key, { canonical, url: incoming, expiresAt: clock() + ttlMs });
       } else {
-        existing.expiresAt = Date.now() + ttlMs;
-        entries.delete(canonical);
-        entries.set(canonical, existing);
+        entries.delete(key);
+        entries.set(key, { ...existing, canonical });
       }
       prune();
       notify();
@@ -150,8 +171,7 @@ export function createXiaohongshuAccessCache({
     },
     resolve(value) {
       prune();
-      const canonical = canonicalXiaohongshuUrl(value);
-      return entries.get(canonical)?.url || String(value || "");
+      return entries.get(cacheKey(value))?.url || String(value || "");
     },
     entries() {
       prune();

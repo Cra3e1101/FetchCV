@@ -1,0 +1,19 @@
+.interview-round-accounting,
+.interview-stale-note { margin: 0 18px 14px 64px; color: var(--muted); font-size: var(--text-xs); line-height: 1.65; }
+.interview-research-reasons { display: grid; gap: 9px; margin: 0 18px 16px 64px; }
+.interview-research-reasons > p { display: grid; gap: 3px; margin: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--cream-soft); font-size: var(--text-xs); line-height: 1.65; }
+.interview-research-reasons strong { color: var(--ink); font-weight: 550; }
+.interview-research-reasons span { color: var(--muted); }
+.interview-jd-preparation { scroll-margin-top: 20px; }
+.interview-jd-preparation blockquote { margin: 12px 0 0; padding: 8px 12px; border-left: 2px solid var(--coral-muted); color: var(--muted); background: var(--cream-soft); }
+.interview-jd-preparation blockquote small { color: var(--coral-dark); font-size: var(--text-xs); }
+.interview-jd-preparation blockquote p { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.interview-outcome > footer { flex-wrap: wrap; }
+.interview-rail-accounting { margin-top: 8px; }
+.interview-rail-accounting small { white-space: normal; line-height: 1.5; }
+.interview-rail-source .interview-source-hint-preview { white-space: normal; line-height: 1.5; }
+@media (max-width: 680px) {
+  .interview-research-reasons { margin-left: 18px; }
+  .interview-round-accounting,
+  .interview-stale-note { margin-left: 18px; }
+}

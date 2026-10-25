@@ -15,6 +15,14 @@ def html(state):
     return '<html><meta charset="utf-8"><body><aside>推荐：无关面试题</aside><script>window.__INITIAL_STATE__=' + json.dumps(state, ensure_ascii=False) + ';</script></body></html>'
 
 
+def test_search_shell_is_not_an_empty_success():
+    value = extract_nowcoder('<html><title>搜索结果-牛客网</title></html>',
+                            'https://www.nowcoder.com/search/all?query=test')
+    assert value['failure_reason'] == 'missing_search_state'
+    assert value['requires_rendering_or_parser_update']
+    assert value['extraction'] == 'unrecognized'
+
+
 def post_state(post_id="123"):
     return {"prefetchData": {"2": {"contentId": post_id, "ssrCommonData": {
         "contentData": {"title": "远山科技产品经理面经", "content": "<p>一面：请说明需求分析的方法。</p>" + "<p>追问：如何评估需求优先级，并向团队解释产品决策？</p>" * 8, "createTime": 1631352859000},

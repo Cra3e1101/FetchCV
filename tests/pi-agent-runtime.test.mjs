@@ -126,6 +126,7 @@ for (const standalone of [false, true]) test(`Pi runtime owns tool execution and
       return;
     }
     if (request.url.endsWith("/read_job_workspace_context")) {
+      assert.ok(events.some((item) => item.name === "tool_receipt" && item.payload.receipt.status === "running"), "show the tool before its response arrives");
       assert.equal(request.url, standalone ? "/api/pi/chat-tools/msg-user/read_job_workspace_context" : "/api/pi/runs/run-1/tools/read_job_workspace_context");
       assert.equal(request.headers["x-fetchcv-control-token"], "token");
       assert.match(body.idempotency_key, /^pi:msg-user:call-1$/);
@@ -174,9 +175,89 @@ for (const standalone of [false, true]) test(`Pi runtime owns tool execution and
     { tool_name: "read_job_workspace_context", summary: "job loaded" },
   ]);
   assert.ok(events.some((item) => item.name === "user"));
+  const liveReceipts = events.filter((item) => item.name === "tool_receipt").map((item) => item.payload.receipt);
+  assert.deepEqual(liveReceipts.map((item) => item.status), ["running", "completed"]);
+  assert.equal(liveReceipts[0].tool_call_id, "call-1");
+  assert.equal(liveReceipts[0].tool_name, "read_job_workspace_context");
+  assert.deepEqual(liveReceipts.at(-1), completedPayload.tool_receipts[0]);
   assert.ok(events.some((item) => item.name === "delta" && item.payload.text === "已读取真实岗位信息。"));
   assert.ok(!events.some((item) => item.name === "delta" && item.payload.text.includes("检查参数")));
   assert.ok(events.some((item) => item.name === "done"));
+});
+
+for (const approved of [true, false]) test(`live tool receipts track web approval and final outcome (approved=${approved})`, async () => {
+  const events = [];
+  let completedPayload;
+  let attempts = 0;
+  class ApprovalHarness extends FakeHarness {
+    async prompt() {
+      const tool = this.options.tools[0];
+      const event = { toolCallId: "web-1", toolName: tool.name, args: { query: "fixture weather" } };
+      await this.emit({ type: "turn_start" });
+      await this.emit({ type: "tool_execution_start", ...event });
+      let result;
+      let isError = false;
+      try {
+        result = await tool.execute(event.toolCallId, event.args, undefined, (partialResult) => {
+          void this.emit({ type: "tool_execution_update", ...event, partialResult });
+        });
+      } catch (error) {
+        isError = true;
+        result = { content: [{ type: "text", text: error.message }] };
+      }
+      await this.emit({ type: "tool_execution_end", ...event, result, isError });
+      await this.emit({ type: "turn_end", message: { role: "assistant", usage } });
+      await this.emit({ type: "turn_start" });
+      const message = { role: "assistant", content: [{ type: "text", text: "Finished fixture" }], usage };
+      await this.emit({ type: "turn_end", message });
+      return message;
+    }
+  }
+  const runtime = new PiAgentRuntime({
+    getApprovalKey: () => "synthetic-approval-key",
+    getProviderConfig: () => ({ baseUrl: "https://synthetic.invalid", model: "test", contextWindow: 8192, apiKey: "fake" }),
+    confirmWebTool: async () => {
+      const receipt = events.filter((item) => item.name === "tool_receipt").at(-1).payload.receipt;
+      assert.equal(receipt.status, "awaiting_approval");
+      assert.deepEqual(receipt.activity, {kind: "search", text: "fixture weather"});
+      assert.equal(receipt.requires_user_action, true);
+      assert.equal(events.some((item) => item.name === "done"), false);
+      return approved;
+    },
+    request: async (_base, _token, path, options) => {
+      const body = JSON.parse(options.body);
+      if (path.endsWith("/search_web")) {
+        attempts++;
+        if (!body.approval_token) throw Object.assign(new Error("approval required"), { code: "web_approval_required" });
+        const receipt = events.filter((item) => item.name === "tool_receipt").at(-1).payload.receipt;
+        assert.equal(receipt.status, "running", "approval resumes tool progress before the retry resolves");
+        assert.equal(receipt.requires_user_action, false);
+        return { result: { summary: "Found fixture forecast", artifacts: ["fixture-source"] } };
+      }
+      if (path.endsWith("/complete")) completedPayload = body;
+      return {};
+    },
+    loadModules: async () => [{ AgentHarness: ApprovalHarness, InMemorySessionRepo: FakeSessionRepo }, { NodeExecutionEnv: class {} },
+      { Type: { Unsafe: x => x }, createModels: () => ({ setProvider() {} }), createProvider: x => x },
+      { openAICompletionsApi: () => ({}) }, { anthropicMessagesApi: () => ({}) }],
+  });
+  await runtime.run({ requestId: "approval-test", bootstrap: {
+    standalone: true, user: { id: "u" }, session_id: "s", prompt: "hello", system_prompt: "test",
+    tools: [{ name: "search_web", input_schema: {} }],
+  } }, (name, payload) => events.push({ name, payload }));
+  const receipts = events.filter((item) => item.name === "tool_receipt").map((item) => item.payload.receipt);
+  assert.deepEqual(receipts.map((item) => item.status), approved
+    ? ["running", "running", "awaiting_approval", "running", "completed"]
+    : ["running", "running", "awaiting_approval", "failed"]);
+  assert.equal(attempts, approved ? 2 : 1);
+  assert.equal(completedPayload.tool_receipts.length, 1, "persist only the latest state of each tool call");
+  assert.deepEqual(receipts.at(-1), completedPayload.tool_receipts[0]);
+  assert.deepEqual(completedPayload.tool_receipts[0].activity, {kind: "search", text: "fixture weather"});
+  assert.equal(receipts.at(-1).requires_user_action, false);
+  if (approved) {
+    assert.equal(receipts.at(-1).summary, "Found fixture forecast");
+    assert.deepEqual(receipts.at(-1).artifacts, ["fixture-source"]);
+  }
 });
 
 test("cancelling while prompt resolves never commits completion or reuses a queued harness", async (t) => {

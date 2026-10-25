@@ -5,6 +5,28 @@ import { EventJournal, isTrustedFrame, RuntimeRpc } from "../packages/app/runtim
 
 const request = (overrides = {}) => ({ v: 1, id: "synthetic-1", method: "agent.turn", workspaceId: "local", deadlineMs: Date.now() + 60000,
   payload: { jobId: "job-1", content: "hello", quote: { text: "quote", messageId: "msg-1" } }, ...overrides });
+test("tool receipts cross desktop RPC without cancelling the model turn", async () => {
+  const cancelled = [], observed = [];
+  const host = {
+    cancel: id => cancelled.push(id),
+    run: async (_input, emit) => {
+      for (const status of ["running", "completed"]) emit("tool_receipt", { receipt: { tool_call_id: "search-1", tool_name: "search_web", status } });
+      emit("done", { content: "source-grounded answer" });
+      return "complete";
+    },
+  };
+  const rpc = new RuntimeRpc(host);
+  assert.deepEqual(await rpc.dispatch(request(), 1, event => observed.push(event)), { ok: true, result: "complete" });
+  assert.deepEqual(cancelled, []);
+  assert.deepEqual(observed.slice(0, 2).map(event => [event.entityId, event.revision]), [["tool:search-1", 1], ["tool:search-1", 2]]);
+  const replay = rpc.owned("synthetic-1", 1).journal.replay(0);
+  assert.equal(replay.gap, false);
+  assert.deepEqual(replay.events, observed);
+  const journal = new EventJournal("bounded", { maxEvents: 1 });
+  journal.append("tool_receipt", { receipt: { tool_call_id: "search-1", status: "completed" } });
+  assert.throws(() => journal.append("delta", { text: "later" }), { code: "event_backpressure" });
+  assert.throws(() => journal.append("unknown_event", {}), { code: "event_type_invalid" });
+});
 test("RPC validates and copies the application request, rejecting SDK and host-only fields", () => {
   const raw = request();
   const parsed = validateRequest(raw, "local");

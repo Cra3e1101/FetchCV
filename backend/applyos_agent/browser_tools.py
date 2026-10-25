@@ -79,6 +79,8 @@ class BrowserBridgeClient:
                 body = json.loads(raw)
         except HarnessError:
             raise
+        except httpx.ConnectError as exc:
+            raise HarnessError("browser_runtime_unavailable", "本机浏览器运行环境不可用，请先运行浏览器预检", retryable=False) from exc
         except (httpx.HTTPError, ValueError, TypeError) as exc:
             raise HarnessError("browser_bridge_failed", "桌面受控浏览器命令失败", retryable=True, details={"error_type": type(exc).__name__}) from exc
         if not body.get("ok") or not isinstance(body.get("result"), dict):
@@ -159,7 +161,7 @@ def register_browser_tools(gateway: ToolGateway, *, bridge: BrowserBridgeClient 
 
     gateway.register(ToolSpec(
         name="open_browser_page",
-        description="在隔离的可见桌面浏览器中打开公开 HTTPS 页面。适合需要登录态或验证码的招聘网站；验证码只能由用户完成。",
+        description="Open a public HTTPS page in an isolated, visible desktop browser. Use for recruitment sites that require a login session or CAPTCHA; only the user may complete a CAPTCHA.",
         input_model=BrowserOpenInput,
         output_model=PipelineToolResult,
         permission=ToolPermission.NETWORK_READ,
@@ -169,7 +171,7 @@ def register_browser_tools(gateway: ToolGateway, *, bridge: BrowserBridgeClient 
     ))
     gateway.register(ToolSpec(
         name="read_browser_page",
-        description="读取受控桌面浏览器当前页面的可见文本。若页面仍要求登录或验证码，会暂停并等待用户。",
+        description="Read visible text from the current page in the controlled desktop browser. If login or CAPTCHA is still required, the run pauses for the user.",
         input_model=BrowserToolInput,
         output_model=PipelineToolResult,
         permission=ToolPermission.NETWORK_READ,

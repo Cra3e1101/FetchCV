@@ -140,4 +140,6 @@ def extract_nowcoder(html: str, final_url: str) -> dict:
             next_url = "https://www.nowcoder.com/search/all?" + urlencode(params)
         return {"kind": "search", "links": links, "next_url": next_url,
                 "page": current, "total": total, "extraction": "nowcoder-public-ssr"}
-    return {"kind": "search", "extraction": "unrecognized"}
+    return {"kind": "search", "extraction": "unrecognized",
+            "failure_reason": "missing_search_state" if not state else "unsupported_search_state",
+            "requires_rendering_or_parser_update": True}

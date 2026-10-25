@@ -253,7 +253,7 @@ def register_mcp_tools(gateway: ToolGateway, manager: McpManager, *, include_wri
 
             gateway.register(ToolSpec(
                 name=registered_name,
-                description=f"{'只读（依据服务器声明）' if is_read_only else '需逐次审批的写入'} MCP 工具（{server.name}）：{tool.get('description') or original_name}",
+                description=f"{'Read-only (as declared by the server)' if is_read_only else 'Write requiring approval for each call'} MCP tool ({server.name}): {tool.get('description') or original_name}",
                 input_model=McpArguments,
                 output_model=McpToolResult,
                 input_schema_override=tool.get("input_schema") or {"type": "object", "properties": {}},
@@ -280,7 +280,7 @@ def register_mcp_tools(gateway: ToolGateway, manager: McpManager, *, include_wri
 
     gateway.register(ToolSpec(
         name="rollback_version_snapshot",
-        description="将简历或作品集恢复到指定工具调用前快照。该操作本身也需要用户确认并产生新快照。",
+        description="Restore a resume or portfolio to the specified snapshot from before a tool call. This restore also requires user approval and creates a new snapshot.",
         input_model=McpRollbackInput,
         output_model=McpToolResult,
         permission=ToolPermission.CONFIRMED_WRITE,

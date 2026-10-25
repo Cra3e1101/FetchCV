@@ -13,6 +13,7 @@ from .application_tools import register_application_tools
 from .config import AgentSettings
 from .context_tools import register_context_tools
 from .interview_tools import register_interview_tools
+from .recovery_state import register_recovery_tools
 from .skills import SkillLoader, register_skill_tools
 from .tools import register_pipeline_tools
 from .web_tools import register_web_tools
@@ -55,6 +56,7 @@ def build_capability_gateway(
     register_browser_tools(gateway)
     register_workspace_tools(gateway)
     register_context_tools(gateway)
+    register_recovery_tools(gateway)
     register_application_tools(gateway)
 
     loader = SkillLoader(session, project_root=settings.workspace_root)

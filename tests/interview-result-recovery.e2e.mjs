@@ -1,3 +1,4 @@
+import { resolveElectronRuntime } from "../scripts/electron-runtime.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -18,7 +19,7 @@ fs.mkdirSync(dataDirectory, { recursive: true });
 fs.copyFileSync(sourceDatabase, path.join(dataDirectory, "fetchcv.db"));
 
 const application = await electron.launch({
-  ...(packaged ? { executablePath: path.join(projectRoot, "release", "win-unpacked", "FetchCV.exe") } : { args: [projectRoot] }),
+  ...(packaged ? { executablePath: path.join(projectRoot, "release", "win-unpacked", "FetchCV.exe") } : { executablePath: (await resolveElectronRuntime({ projectRoot })).executable, args: [projectRoot] }),
   cwd: projectRoot,
   env: {
     ...process.env,

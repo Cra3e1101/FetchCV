@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 from enum import StrEnum
 from pathlib import Path
 
@@ -24,6 +25,7 @@ class AgentSettings(BaseModel):
     provider_protocol: str = "openai"
     provider_base_url: str = ""
     provider_api_key: str = ""
+    provider_request_options: dict = Field(default_factory=dict, repr=False)
     allow_mock_runtime: bool = False
 
     @classmethod
@@ -43,6 +45,7 @@ class AgentSettings(BaseModel):
             provider_protocol=os.getenv("FETCHCV_PROVIDER_PROTOCOL", "openai").strip().lower(),
             provider_base_url=os.getenv("FETCHCV_PROVIDER_BASE_URL", "").strip().rstrip("/"),
             provider_api_key=provider_api_key,
+            provider_request_options=json.loads(os.getenv("FETCHCV_PROVIDER_REQUEST_OPTIONS", "{}")),
             allow_mock_runtime=os.getenv("FETCHCV_ALLOW_MOCK_RUNTIME", "").strip() == "1",
         )
 

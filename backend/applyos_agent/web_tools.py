@@ -154,8 +154,14 @@ def register_web_tools(
         if job is None or job.candidate_id != context.run.candidate_id:
             raise HarnessError("job_scope_mismatch", "运行绑定的岗位无效", run_id=context.run.id, stage=context.run.current_stage)
         replace_approved = gateway.approvals.is_approved(run_id=context.run.id, action_type="replace_job_description", target_id=job.id)
-        imported = JobPostingImporter(context.session, web_client=web).import_into_job(job, url=payload.url, overwrite=replace_approved)
+        imported = JobPostingImporter(context.session, web_client=web, firecrawl_client=firecrawl,
+                                      browser_client=browser).import_into_job(job, url=payload.url, overwrite=replace_approved)
         posting = imported["posting"]
+        if not imported["imported"] and not imported["conflict"]:
+            needs_login = posting["status"] == "requires_user_action"
+            return _result(context, "页面需要登录或验证码，岗位正文尚未导入。" if needs_login else "没有取得可用岗位正文，岗位保持原样。",
+                           requires_user_action=needs_login, approval_action="complete_browser_login" if needs_login else None,
+                           data=imported)
         if imported["conflict"]:
             approval = gateway.approvals.request(
                 run_id=context.run.id,
@@ -188,7 +194,7 @@ def register_web_tools(
 
     gateway.register(ToolSpec(
         name="search_web",
-        description="搜索当前公开网页，返回标题和来源 URL。适用于天气、新闻、市场、公司、岗位及其他需要实时外部信息的问题；搜索结果仅用于发现候选来源，不能替代读取原文。",
+        description="Search current public web pages and return titles and source URLs. Use for weather, news, markets, companies, jobs, and other questions requiring live external information. Results identify candidate sources; read the original pages before treating them as evidence.",
         input_model=SearchWebInput,
         output_model=PipelineToolResult,
         permission=ToolPermission.NETWORK_READ,
@@ -199,7 +205,7 @@ def register_web_tools(
     ))
     gateway.register(ToolSpec(
         name="read_web_page",
-        description="读取公开 HTTPS 网页正文。静态读取失败或遇到 JavaScript 页面壳时，会自动在 Agent 内使用受控浏览器渲染；若配置了 Firecrawl，也可作为增强读取器。禁止访问本机、内网、非标准端口和超大响应。",
+        description="Read the body of a public HTTPS page. When static reading fails or returns a JavaScript shell, configured Firecrawl and controlled-browser readers provide automatic fallback. Local hosts, private networks, nonstandard ports, and oversized responses are blocked.",
         input_model=ReadWebPageInput,
         output_model=PipelineToolResult,
         permission=ToolPermission.NETWORK_READ,
@@ -210,7 +216,7 @@ def register_web_tools(
     ))
     gateway.register(ToolSpec(
         name="import_job_posting",
-        description="从当前岗位的 source_url 或指定招聘页导入 JD。只填充空 JD；已有 JD 时返回冲突并等待用户，不自动覆盖。",
+        description="Import the JD from the current job's source_url or a specified recruitment page. Fill an empty JD; if one already exists, return a conflict and wait for user approval before replacing it.",
         input_model=ImportJobPostingInput,
         output_model=PipelineToolResult,
         permission=ToolPermission.DRAFT_WRITE,

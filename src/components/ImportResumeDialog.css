@@ -1,0 +1,11 @@
+.app-shell .import-dialog.import-dialog { background:var(--ui-surface); }
+.import-dialog.import-dialog .pdf-drop { border-color:var(--ui-line-strong); background:var(--ui-under); color:var(--ui-ink); }
+.import-dialog.import-dialog .pdf-drop:hover { background:var(--ui-selection); }
+.import-dialog.import-dialog .pdf-drop > span { background:var(--ui-selection); color:var(--ui-secondary); }
+.import-dialog.import-dialog .pdf-drop small { color:var(--ui-secondary); }
+.import-dialog.import-dialog .ai-recognition-option { background:var(--ui-under); border-color:var(--ui-line); }
+.import-dialog.import-dialog .ai-recognition-option strong { color:var(--ui-ink); }
+.import-dialog.import-dialog .ai-recognition-option small { color:var(--ui-secondary); }
+.import-dialog.import-dialog .legacy-import { color:var(--ui-secondary); border-color:var(--ui-line); }
+.import-dialog.import-dialog .legacy-import strong { font-size:13px; font-weight:400; }
+.import-dialog.import-dialog .legacy-import button { color:var(--ui-ink); }

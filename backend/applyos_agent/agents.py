@@ -10,6 +10,7 @@ from applyos_harness.validation import role_strength_risk
 
 from .config import AgentSettings
 from .conversation_prompt import build_conversation_request
+from .prompt_contract import OUTPUT_LANGUAGE
 from .runtime import AgentRuntime, build_runtime
 from .schemas import (
     AssetGeneration,
@@ -47,8 +48,11 @@ class AgentSuite:
         )
         return self.runtime.generate(
             agent_name="jd_analyst",
-            prompt=f"分析以下岗位 JD，只依据原文，不根据公司名称推断：\n\n{job.jd_raw or ''}",
-            system_prompt="你是 FetchCV JD Analyst。输出必须逐项保留 JD 原文证据，不预测录用概率，不虚构要求。",
+            prompt=f"Analyze the following job description using only the original text. Do not infer requirements from the company name:\n\n{job.jd_raw or ''}",
+            system_prompt=(
+                "You are the FetchCV JD Analyst. Preserve verbatim JD evidence for every item. "
+                "Do not predict hiring probabilities or invent requirements. " + OUTPUT_LANGUAGE
+            ),
             output_model=JDAnalysis,
             mock_data=mock.model_dump(mode="json"),
             session_id=session_id,
@@ -71,12 +75,18 @@ class AgentSuite:
         return self.runtime.generate(
             agent_name="job_posting_extractor",
             prompt=(
-                "请从下面的招聘网页可见文本中提取一个干净、可用于岗位项目的 JD。"
-                "删除导航、登录提示、页脚、招聘网站宣传语和重复内容；只保留当前职位的职责、任职要求、加分项、工作地点和公司/岗位名称。"
-                "不要根据常识补写，不确定的字段留空并写入 warnings。description 要按职责、要求、加分项组织成可读正文。\n\n"
-                f"页面标题：{page_title}\n网页文本：\n{raw_text[:30000]}"
+                "Extract a clean job description suitable for a job workspace from the visible recruitment-page text below. "
+                "Remove navigation, login prompts, footers, recruitment-site slogans and duplicates. "
+                "Keep only this job's responsibilities, requirements, preferred qualifications, location, company and role names. "
+                "Do not fill gaps from general knowledge. Leave uncertain fields empty and explain them in warnings. "
+                "Organize description into readable responsibilities, requirements and preferred qualifications.\n\n"
+                f"Page title: {page_title}\nPage text:\n{raw_text[:30000]}"
             ),
-            system_prompt="你是 FetchCV 的招聘网页结构化 Agent。只依据网页正文，不把页面壳、导航或网站品牌宣传当成岗位要求。输出严格符合 JSON Schema。",
+            system_prompt=(
+                "You are the FetchCV Job Posting Extraction Agent. Use only the page body. "
+                "Do not treat page chrome, navigation or site branding as job requirements. "
+                "Return output that strictly conforms to the JSON Schema. " + OUTPUT_LANGUAGE
+            ),
             output_model=JobPostingExtraction,
             mock_data=mock.model_dump(mode="json"),
             session_id=session_id,
@@ -95,8 +105,11 @@ class AgentSuite:
         fact_text = "\n".join(f"[{fact.id}] {fact.content}" for fact in selected)
         return self.runtime.generate(
             agent_name="resume_strategy",
-            prompt=f"根据 JD 与已确认事实制定简历策略。JD：\n{job.jd_raw or ''}\n事实：\n{fact_text}",
-            system_prompt="你是 FetchCV Resume Strategy Agent。只能选择给定 fact_id，不得增加事实强度。你需要明确主定位、辅助能力、模块顺序和内容取舍。",
+            prompt=f"Create a resume strategy from the JD and verified facts. JD:\n{job.jd_raw or ''}\nFacts:\n{fact_text}",
+            system_prompt=(
+                "You are the FetchCV Resume Strategy Agent. Select only supplied fact_id values and do not strengthen factual claims. "
+                "Specify the primary positioning, supporting capabilities, section order and content selection. " + OUTPUT_LANGUAGE
+            ),
             output_model=ResumeStrategy,
             mock_data=mock.model_dump(mode="json"),
             session_id=session_id,
@@ -122,10 +135,14 @@ class AgentSuite:
         return self.runtime.generate(
             agent_name="fact_matcher",
             prompt=(
-                f"岗位：{job.company} · {job.role}\nJD：\n{job.jd_raw or ''}\n\n候选事实：\n{fact_text}\n\n"
-                "逐条判断事实对该岗位是否有实际支持。必须返回所有输入 fact_id，不得编造 ID；推荐应克制，并引用具体 JD 要求。"
+                f"Role: {job.company} · {job.role}\nJD:\n{job.jd_raw or ''}\n\nCandidate facts:\n{fact_text}\n\n"
+                "Assess whether each fact substantively supports this role. Return every input fact_id and never invent IDs. "
+                "Recommend selectively and cite specific JD requirements."
             ),
-            system_prompt="你是求职材料事实匹配 Agent。你只判断相关性，不修改事实、不夸大角色、不推测候选人没有提供的能力。",
+            system_prompt=(
+                "You are the FetchCV Fact Matching Agent for application materials. Assess relevance only. "
+                "Do not modify facts, exaggerate roles or infer capabilities the candidate has not supplied. " + OUTPUT_LANGUAGE
+            ),
             output_model=FactRanking,
             mock_data=mock.model_dump(mode="json"),
             session_id=session_id,
@@ -142,18 +159,33 @@ class AgentSuite:
         return self.runtime.generate(
             agent_name="asset_generation",
             prompt=(
-                f"目标岗位：{job.company} · {job.role}\nJD：\n{job.jd_raw or ''}\n\n"
-                + "基础简历（必须保留原有模块、顺序、时间、公司、岗位、教育与身份信息，只对有必要的岗位化表述提出 diff）：\n"
+                f"Target role: {job.company} · {job.role}\nJD:\n{job.jd_raw or ''}\n\n"
+                + "Base resume (preserve its sections, order, dates, companies, roles, education and identity details; propose diffs only where tailoring is necessary):\n"
                 + json.dumps(resume_context or {}, ensure_ascii=False)
                 + "\n\n"
-                + "候选事实（括号内为稳定事实 ID；同一 experience_id 属于同一段完整经历）：\n"
+                + "Candidate facts (brackets contain stable fact IDs; facts sharing an experience_id belong to the same complete experience):\n"
                 + "\n".join(
                     f"[{fact.id}] experience_id={((fact.normalized_value or {}).get('experience_id') or fact.subject_id or 'unknown')} ({fact.category}) {fact.content}"
                     for fact in facts if fact.verified
                 )
-                + "\n\n请以基础简历为底稿生成逐条 Diff 建议，而不是重新罗列经历。每条建议必须只改一个已有事实块：before 必须是输入事实中的原文，after 是同一事实块的完整替代表述；如果该事实不需要岗位化，不要返回建议。只有当 JD 明确需要时才改写对应实习或项目中的职责表述；同一段经历可以保留原有工作背景，同时把其中与岗位相关的工作换一种更清楚的表达。教育背景、身份信息、公司、岗位、日期、模块顺序默认不变，原简历中未被建议覆盖的 bullet 也必须保留。数据岗位突出数据分析主线并保留必要产品能力；产品岗位突出产品与项目落地，并将数据能力作为辅助优势。每条必须绑定一个或多个输入 fact_id，并引用具体 JD 证据。不得增加原事实没有的数字、工具、职责或成果，不得把参与写成负责，不得把内部原型写成上线产品。"
+                + "\n\nUse the base resume to produce individual diff proposals instead of listing experiences again. "
+                "Each proposal must change exactly one existing fact block: before must reproduce the input fact verbatim, "
+                "and after must be a complete replacement for that same block. Omit proposals for facts that need no tailoring. "
+                "Rewrite internship or project responsibilities only when the JD explicitly calls for it. "
+                "Preserve the experience's work context while expressing relevant work more clearly. "
+                "Keep education, identity details, companies, roles, dates and section order unchanged by default. "
+                "Retain every original resume bullet not covered by a proposal. "
+                "For data roles, foreground data analysis while retaining necessary product capabilities. "
+                "For product roles, foreground product work and project delivery, using data skills as a supporting strength. "
+                "Bind each proposal to one or more input fact_id values and cite specific JD evidence. "
+                "Do not add numbers, tools, responsibilities or outcomes absent from the original facts. "
+                "Do not turn participation into ownership or an internal prototype into a launched product."
             ),
-            system_prompt="你是 FetchCV Resume Writer。你的任务是形成岗位定位清晰的完整简历，而不是罗列选中句子。所有结果先进入草稿，禁止直接覆盖和发布。",
+            system_prompt=(
+                "You are the FetchCV Resume Writer. Produce a complete resume with clear role positioning, "
+                "not a collection of selected sentences. All results must first enter a draft; never directly overwrite or publish. "
+                + OUTPUT_LANGUAGE
+            ),
             output_model=AssetGeneration,
             mock_data=mock.model_dump(mode="json"),
             session_id=session_id,
@@ -170,8 +202,10 @@ class AgentSuite:
         mock = QualityAudit(passed=not issues, issues=issues, summary="通过" if not issues else "需要人工确认")
         return self.runtime.generate(
             agent_name="quality_auditor",
-            prompt="检查提案的事实来源、角色强度和夸大风险。",
-            system_prompt="你是 FetchCV Quality Auditor。发现风险只报告，不直接修改材料。",
+            prompt="Check proposals for factual provenance, role-strength changes and exaggeration risks.",
+            system_prompt=(
+                "You are the FetchCV Quality Auditor. Report risks without directly modifying materials. " + OUTPUT_LANGUAGE
+            ),
             output_model=QualityAudit,
             mock_data=mock.model_dump(mode="json"),
             session_id=session_id,

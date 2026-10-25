@@ -1,6 +1,6 @@
 from applyos_domain.enums import FactSourceType
 from applyos_domain.models import Candidate, Fact
-from applyos_harness.validation import Claim, FactValidator, role_strength_risk
+from applyos_harness.validation import Claim, FactValidator, grounded_claim, role_strength_risk
 
 
 def test_fact_validator_checks_numbers_dates_names_and_output_ownership(database):
@@ -26,7 +26,7 @@ def test_fact_validator_checks_numbers_dates_names_and_output_ownership(database
         passed = validator.validate(
             candidate_id=first.id,
             asset_type="resume",
-            claims=[Claim(text="2025年在甲公司使用 Python 复核3000条结果", fact_ids=[fact.id], expected_names=["甲公司"], expected_skills=["Python"])],
+            claims=[grounded_claim(fact)],
         )
         assert passed.passed is True
 

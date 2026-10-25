@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
+import {providerPrivateLiterals} from '../shared/provider-settings.mjs';
 import {assertProviderCompletion,emptyProviderResponse,providerFailure} from './pi/provider-failure.mjs';
 
 import { createAgentEvent, updateAgentEvent } from "../shared/agent-events.mjs";
+import { toolActivity } from "../shared/tool-activity.mjs";
 import { sanitizeOutboundValue, trimToolResult } from "./pi/context-policy.mjs";
 import { createFetchCVHarness } from "./pi/fetchcv-harness.mjs";
 import { requestConversationTool } from "./pi/conversation-tools.mjs";
@@ -16,6 +18,7 @@ const TOOL_LABELS = {
   search_workspace_text: "搜索工作区",
   read_job_workspace_context: "读取岗位与简历上下文",
   search_interview_knowledge: "检索面试知识库",
+  read_interview_source: "读取面经原文",
   discover_interview_sources: "发现面经来源",
   capture_interview_source: "读取面经原文",
   analyze_interview_source: "提取面试问题",
@@ -92,7 +95,7 @@ function mergeUsage(total, next) {
 
 function toolOutcomeDetail(event) {
   const toolName = event?.toolName || event?.details?.tool_name || event?.result?.details?.tool_name;
-  if (toolName === "capture_interview_source") return event?.isError ? "该来源未能读取，已跳过并保留失败记录。" : "已保存一篇可核查面经；原文不在过程区展开。";
+  if (toolName === "capture_interview_source") return event?.isError ? "该来源未能读取，失败已记录；后续处理以实际工具结果为准。" : "已保存一篇可核查面经；原文不在过程区展开。";
   if (toolName === "discover_interview_sources") return event?.isError ? "本轮来源发现未完成。" : "候选来源已返回，正在去重和核验。";
   if (toolName === "analyze_interview_source") return event?.isError ? "该来源的问题提取未完成。" : "已提取有原文依据的问题。";
   if (toolName === "build_interview_brief") return event?.isError ? "面试简报尚未生成。" : "共性问题、准备建议和来源链接已形成简报。";
@@ -103,6 +106,53 @@ function toolOutcomeDetail(event) {
   if (event?.isError) return "工具执行失败，模型会根据错误调整下一步。";
   const artifacts = Array.isArray(result?.artifacts) ? result.artifacts.length : 0;
   return artifacts ? `工具已返回真实结果，并登记 ${artifacts} 项可追溯记录。` : "工具已返回真实结果。";
+}
+
+const TOOL_ERROR_DETAIL_FIELDS = new Set([
+  "source_id", "source_ids", "content_hash", "invalid_source_ids", "ready_source_ids", "partial_source_ids",
+  "rejected_questions", "question_index", "field", "reason", "preserved_question_count", "missing_coverage",
+  "repair_attempts_used", "repair_attempt_limit", "repair_attempts_remaining", "next_action", "recovery_hint",
+  "patch_index", "patch_indices", "proposal_id", "proposal_ids", "fact_id", "fact_ids", "claim_index",
+  "issues", "fact_issues", "errors", "code", "message", "loc", "type", "msg", "details",
+  "unsupported", "missing_qualifiers", "follow_up", "value", "role_escalations", "matches",
+  "match_count", "request_id", "current_revision", "expected_revision", "operation_id", "source_run_id",
+  "status", "retry_after_ms", "cooldown_until", "rollback_proven", "read_cache_may_remain",
+]);
+const TOOL_STOP_CODES = new Set(["tool_outcome_unknown", "tool_refresh_failed", "task_not_running", "task_scope_mismatch", "runtime_record_inactive"]);
+
+function errorDetails(value, depth = 0, budget = {remaining: 12000}) {
+  if (depth > 6 || budget.remaining <= 0) return undefined;
+  if (typeof value === "string") { const text = value.slice(0, Math.min(1200, budget.remaining)); budget.remaining -= text.length; return text; }
+  if (typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value)) || value === null) { budget.remaining -= 16; return value; }
+  if (Array.isArray(value)) return value.slice(0, 80).map(item => errorDetails(item, depth + 1, budget)).filter(item => item !== undefined);
+  if (!value || typeof value !== "object") return undefined;
+  return Object.fromEntries(Object.entries(value).filter(([key]) => TOOL_ERROR_DETAIL_FIELDS.has(key))
+    .map(([key, item]) => { budget.remaining -= key.length; return [key, errorDetails(item, depth + 1, budget)]; }).filter(([, item]) => item !== undefined));
+}
+
+// The SDK turns a thrown Error.message into an isError tool result. A normal
+// return would incorrectly mark a rejected operation as successful.
+export function modelToolFailure(error, toolName, args = {}, privacy = {}) {
+  const schemaErrors = Array.isArray(error?.payload?.detail) ? error.payload.detail : null;
+  const payload = schemaErrors ? {code: "tool_input_invalid", message: "工具参数不符合 Schema，请按 loc 修改对应字段。",
+    retryable: true, details: {errors: schemaErrors}} : error?.payload?.error || error?.payload?.detail || error?.payload || {};
+  const code = String(payload?.code || error?.code || "tool_request_failed").slice(0, 120);
+  const details = errorDetails(payload?.details) || {};
+  if (toolName === "analyze_interview_source" && typeof args.source_id === "string" && !details.source_id) details.source_id = args.source_id.slice(0, 80);
+  let nextAction = details.next_action;
+  if (!nextAction && code === "tool_permission_denied") nextAction = "await_user_permission";
+  if (!nextAction && /approval_required|approval_denied|approval_revision_conflict/.test(code)) nextAction = "await_user_review";
+  if (!nextAction && /ocr/.test(code)) nextAction = "await_user_ocr_review";
+  if (!nextAction && /public_access|cooldown|captcha|login|rate_limit/.test(code)) nextAction = "continue_other_sources_after_access_stop";
+  if (!nextAction && /source_not_found|source_unreadable/.test(code)) nextAction = "continue_other_sources";
+  if (TOOL_STOP_CODES.has(code)) nextAction = "stop_and_reconcile";
+  const nonRetryable = TOOL_STOP_CODES.has(code) || /permission_denied|approval|verified_fact_required|ocr|public_access|cooldown|captcha|login|rate_limit|source_not_found/.test(code);
+  const safe = sanitizeOutboundValue({
+    code, message: String(payload?.message || error?.message || "工具请求失败").slice(0, 1600),
+    retryable: payload?.retryable === true && !nonRetryable, tool_name: toolName,
+    details: {...details, ...(nextAction ? {next_action: nextAction} : {})},
+  }, {...privacy, mode: "redacted_remote"});
+  return Object.assign(new Error(JSON.stringify(safe)), {code, payload: safe});
 }
 
 async function apiRequest(apiBase, controlToken, path, options = {}) {
@@ -253,7 +303,11 @@ export class FetchCVAgentHost {
       }),
     });
     let harness;
+    let setRecoveryState = () => {};
+    let recoveryRequestsInFlight = 0;
+    let recoveryRefreshFailed = false;
     let capabilityRefreshError = null;
+    let fatalToolError = null;
     let checkpointTimer = null;
     let taskControlTimer = null;
     let taskControlSignal = null;
@@ -264,7 +318,7 @@ export class FetchCVAgentHost {
     try {
       bootstrap.outbound_privacy = {
         ...(bootstrap.outbound_privacy || {}),
-        literals: [...new Set([...(bootstrap.outbound_privacy?.literals || []), provider.apiKey].filter(Boolean))],
+        literals: [...new Set([...(bootstrap.outbound_privacy?.literals || []), ...providerPrivateLiterals(provider,{sensitiveOnly:true})].filter(Boolean))],
       };
       if (!taskMode) emit("user", { message: bootstrap.user });
 
@@ -339,16 +393,39 @@ export class FetchCVAgentHost {
         const current = processing.get(id);
         if (current?.status === "active") updateTrace(id, { status: "completed", detail: detail || current.detail });
       };
+      const updateToolReceipt = (toolCallId, patch) => {
+        const index = toolReceipts.findIndex((item) => item.tool_call_id === toolCallId);
+        const receipt = {
+          tool_call_id: toolCallId,
+          tool_name: toolNames.get(toolCallId) || "tool",
+          status: "running",
+          summary: "",
+          artifacts: [],
+          requires_user_action: false,
+          ...(index < 0 ? {} : toolReceipts[index]),
+          ...patch,
+        };
+        if (index < 0) toolReceipts.push(receipt);
+        else toolReceipts[index] = receipt;
+        emit("tool_receipt", { receipt });
+        return receipt;
+      };
       const recordToolReceipt = (event) => {
-        if (toolReceipts.some((item) => item.tool_call_id === event.toolCallId)) return;
+        // A backend operation may have succeeded before the tool-list refresh
+        // failed. The SDK's subsequent error must not erase that real outcome.
+        if (toolReceipts.some((item) => item.tool_call_id === event.toolCallId && item.status === "completed_refresh_failed")) return;
         const result = event?.result?.details?.result || event?.details?.result || event?.result?.details || event?.details || {};
-        toolReceipts.push({
-          tool_call_id: event.toolCallId,
+        const reference = event?.result?.details?.result_reference || event?.details?.result_reference;
+        const recordedActivity = toolReceipts.find(item => item.tool_call_id === event.toolCallId)?.activity;
+        const activity = recordedActivity || toolActivity(event.toolName || toolNames.get(event.toolCallId), {}, sanitizeOutboundValue(result, bootstrap.outbound_privacy));
+        updateToolReceipt(event.toolCallId, {
+          ...(activity ? {activity} : {}),
           tool_name: event.toolName || toolNames.get(event.toolCallId) || event?.details?.tool_name || "tool",
           status: event.isError ? "failed" : "completed",
-          summary: String(result?.summary || result?.message || "").slice(0, 500),
+          summary: String(result?.summary || result?.message || toolOutcomeDetail(event)).slice(0, 500),
           artifacts: Array.isArray(result?.artifacts) ? result.artifacts.slice(0, 24) : [],
           requires_user_action: Boolean(result?.requires_user_action),
+          ...(reference ? { result_reference: reference } : {}),
         });
       };
 
@@ -361,49 +438,82 @@ export class FetchCVAgentHost {
         parameters: typeof Type.Unsafe === "function" ? Type.Unsafe(outboundDefinition.input_schema || { type: "object" }) : outboundDefinition.input_schema,
         executionMode: definition.side_effect ? "sequential" : "parallel",
         execute: async (toolCallId, args, signal, onUpdate) => {
+          if (capabilityRefreshError) throw capabilityRefreshError;
+          if (fatalToolError) throw fatalToolError;
+          signal?.throwIfAborted();
+          let recoveryRefreshed = false;
+          if (taskMode) {
+            if (!recoveryRequestsInFlight) recoveryRefreshFailed = false;
+            recoveryRequestsInFlight += 1;
+            setRecoveryState(undefined, { stale: true });
+          }
+          try {
           onUpdate?.({ content: [{ type: "text", text: "工具已通过参数校验，正在执行。" }], details: { phase: "executing" } });
           const toolScope = taskMode ? "task-tools" : "tools";
-          const requestTool = (payload) => this.request(apiBase, controlToken, (bootstrap.standalone ? `/api/pi/chat-tools/${encodeURIComponent(bootstrap.user.id)}/${encodeURIComponent(definition.name)}` : `/api/pi/runs/${encodeURIComponent(bootstrap.run_id)}/${toolScope}/${encodeURIComponent(definition.name)}`), {
-            method: "POST",
-            body: JSON.stringify(payload),
-            signal,
-          });
+          const requestTool = (payload) => {
+            if (payload.approval_token) {
+              emit("status", { label: toolLabel(definition.name) });
+              onUpdate?.({ content: [{ type: "text", text: "已获批准，正在执行工具。" }], details: { phase: "executing" } });
+            }
+            return this.request(apiBase, controlToken, (bootstrap.standalone ? `/api/pi/chat-tools/${encodeURIComponent(bootstrap.user.id)}/${encodeURIComponent(definition.name)}` : `/api/pi/runs/${encodeURIComponent(bootstrap.run_id)}/${toolScope}/${encodeURIComponent(definition.name)}`), {
+              method: "POST",
+              body: JSON.stringify(payload),
+              signal,
+            });
+          };
           const payload = {
               arguments: args,
               idempotency_key: `pi:${taskMode ? bootstrap.task_id : bootstrap.user.id}:${toolCallId}`,
               tool_revision: definition.revision,
               ...(taskMode ? { task_id: bootstrap.task_id } : { task_kind: effectiveTaskKind }),
           };
-          const response = bootstrap.standalone
-            ? await requestConversationTool({ request: requestTool, toolName: definition.name, payload, signal, confirm: this.confirmWebTool,
+          let response;
+          try {
+            response = bootstrap.standalone
+              ? await requestConversationTool({ request: requestTool, toolName: definition.name, payload, signal, confirm: this.confirmWebTool,
               approvalKey: this.getApprovalKey(), messageId: bootstrap.user.id,
               onWaiting: () => {
                 emit("status", { label: "等待联网批准" });
                 onUpdate?.({ content: [{ type: "text", text: "等待用户批准本次联网。" }], details: { phase: "awaiting_approval" } });
               } })
-            : await requestTool(payload);
+              : await requestTool(payload);
+          } catch (error) {
+            if (error?.name === "AbortError" || signal?.aborted) throw error;
+            const failure = modelToolFailure(error, definition.name, args, bootstrap.outbound_privacy);
+            if (TOOL_STOP_CODES.has(failure.code)) {
+              fatalToolError = failure;
+              void harness?.abort();
+            }
+            throw failure;
+          }
           if (taskMode || (response.task_kind && Array.isArray(response.tools))) {
             try {
               // tool_result is a Harness hook, not a subscribe event. Refresh
               // here, before the next turn is prepared; preserve current-batch semantics.
-              const definitions = Array.isArray(response.tools) ? response.tools :
-                (await this.request(apiBase, controlToken, `/api/pi/runs/${encodeURIComponent(bootstrap.run_id)}/task-tools`, {signal})).tools;
+              const refreshed = Array.isArray(response.tools) ? response :
+                await this.request(apiBase, controlToken, `/api/pi/runs/${encodeURIComponent(bootstrap.run_id)}/task-tools`, {signal});
+              const definitions = refreshed.tools;
               if (!Array.isArray(definitions)) throw new Error("工具清单响应无效");
               if (!taskMode) effectiveTaskKind = response.task_kind;
               const nextTools = makeTools(definitions);
               await harness.setTools(nextTools, nextTools.map((tool) => tool.name));
+              if (taskMode && refreshed.recovery_state && typeof refreshed.recovery_state === "object" && !Array.isArray(refreshed.recovery_state)) {
+                recoveryRefreshed = setRecoveryState(refreshed.recovery_state, { stale: true });
+              }
             } catch (error) {
               // A completed side effect must never be hidden by continuing
               // with stale tools. Stop the loop; backend receipts remain authoritative.
               capabilityRefreshError = Object.assign(new Error("工具已返回，但能力清单刷新失败；请核对执行记录后继续", {cause:error}),
                 {code:"tool_refresh_failed"});
-              toolReceipts.push({
-                tool_call_id: toolCallId, tool_name: definition.name,
+              updateToolReceipt(toolCallId, {
+                tool_name: definition.name,
                 status: "completed_refresh_failed",
                 summary: String(response.result?.summary || "后端工具已完成，后续能力刷新失败").slice(0, 500),
                 artifacts: response.result?.artifacts || [],
                 requires_user_action: Boolean(response.result?.requires_user_action),
+                ...(response.result_reference ? { result_reference: response.result_reference } : {}),
               });
+              void harness?.abort();
               throw capabilityRefreshError;
             }
           }
@@ -414,8 +524,16 @@ export class FetchCVAgentHost {
               result: response.result,
               next_tools: response.tools,
               task_kind: response.task_kind,
+              result_reference: response.result_reference,
             },
           };
+          } finally {
+            if (taskMode) {
+              recoveryRequestsInFlight -= 1;
+              if (!recoveryRefreshed) recoveryRefreshFailed = true;
+              setRecoveryState(undefined, { stale: recoveryRequestsInFlight > 0 || recoveryRefreshFailed });
+            }
+          }
         },
       });
       });
@@ -429,7 +547,7 @@ export class FetchCVAgentHost {
         modules,
         taskMode,
         getInputReferences: () => [...inputReferences.values()],
-        assertCapabilities: () => { if (capabilityRefreshError) throw capabilityRefreshError; },
+        assertCapabilities: () => { if (capabilityRefreshError) throw capabilityRefreshError; if (fatalToolError) throw fatalToolError; },
         recordRequest: async record => {
           if (this.cancelledRequests.has(input.requestId) || taskControlSignal) throw Object.assign(new Error("已停止生成"), { name: "AbortError" });
           const kind = taskMode ? "task" : "turn";
@@ -449,6 +567,7 @@ export class FetchCVAgentHost {
         },
       });
       harness = created.harness;
+      setRecoveryState = created.setRecoveryState;
       const { protocol } = created;
       this.active.set(input.requestId, harness);
       if (taskMode) { this.activeTasks.set(bootstrap.run_id, harness); this.taskInputs.set(bootstrap.run_id, pendingInputs); this.taskInputReferences.set(bootstrap.run_id,inputReferences); }
@@ -507,10 +626,24 @@ export class FetchCVAgentHost {
             detail: conciseToolDetail(event.toolName, event.args),
             status: "active",
           });
+          updateToolReceipt(event.toolCallId, {
+            tool_name: event.toolName,
+            status: "running",
+            activity: toolActivity(event.toolName, sanitizeOutboundValue(event.args || {}, bootstrap.outbound_privacy)),
+            summary: conciseToolDetail(event.toolName, event.args),
+          });
           emit("status", { label: toolLabel(event.toolName) });
         }
         if (event.type === "tool_execution_update") {
-          updateTrace(`tool-${event.toolCallId}`, { kind: "tool", status: "active" });
+          const waiting = event.partialResult?.details?.phase === "awaiting_approval";
+          const detail = waiting ? "等待用户批准本次联网。" : conciseToolDetail(event.toolName, event.args);
+          updateTrace(`tool-${event.toolCallId}`, { kind: "tool", status: "active", detail });
+          updateToolReceipt(event.toolCallId, {
+            tool_name: event.toolName || toolNames.get(event.toolCallId) || "tool",
+            status: waiting ? "awaiting_approval" : "running",
+            summary: detail,
+            requires_user_action: waiting,
+          });
         }
         if (event.type === "tool_execution_end") {
           updateTrace(`tool-${event.toolCallId}`, {
@@ -551,8 +684,9 @@ export class FetchCVAgentHost {
       checkCancelled();
       let finalMessage;
       try { finalMessage = await harness.prompt(bootstrap.prompt); }
-      catch (error) { if (capabilityRefreshError) throw capabilityRefreshError; created.assertAssembly?.(); throw providerFailure(error); }
+      catch (error) { if (capabilityRefreshError) throw capabilityRefreshError; if (fatalToolError) throw fatalToolError; created.assertAssembly?.(); throw providerFailure(error); }
       if (capabilityRefreshError) throw capabilityRefreshError;
+      if (fatalToolError) throw fatalToolError;
       created.assertAssembly?.();
       // Harness.abort() can settle normally. A resolved prompt is not proof
       // of completion, and short tasks may finish before the control timer.
@@ -593,12 +727,12 @@ export class FetchCVAgentHost {
         if (persistCheckpoint) await persistCheckpoint(cancelled ? "interrupted" : "failed", true).catch(() => {});
         await this.request(apiBase, controlToken, `/api/pi/tasks/${encodeURIComponent(bootstrap.task_id)}/fail`, {
           method: "POST",
-          body: JSON.stringify({ status: taskControlSignal === "pause" ? "paused" : taskControlSignal === "cancel" || cancelled ? "cancelled" : "failed", message: sanitizeOutboundValue(String(error?.message || error), { mode: "redacted_remote", literals: [provider.apiKey] }) }),
+          body: JSON.stringify({ status: taskControlSignal === "pause" ? "paused" : taskControlSignal === "cancel" || cancelled ? "cancelled" : "failed", message: sanitizeOutboundValue(String(error?.message || error), { mode: "redacted_remote", literals: providerPrivateLiterals(provider) }) }),
         }).catch(() => {});
       } else {
         await this.request(apiBase, controlToken, `/api/pi/${bootstrap.standalone ? "chat-turns" : "turns"}/${encodeURIComponent(bootstrap.user.id)}/fail`, {
           method: "POST",
-          body: JSON.stringify({ delivery_status: cancelled ? "cancelled" : "failed", message: sanitizeOutboundValue(String(error?.message || error), { mode: "redacted_remote", literals: [provider.apiKey] }) }),
+          body: JSON.stringify({ delivery_status: cancelled ? "cancelled" : "failed", message: sanitizeOutboundValue(String(error?.message || error), { mode: "redacted_remote", literals: providerPrivateLiterals(provider) }) }),
         }).catch(() => {});
       }
       if (cancelled) {

@@ -30,8 +30,8 @@ def register_context_tools(gateway: ToolGateway) -> ToolGateway:
         job = context.session.get(Job, context.run.job_id) if context.run.job_id else None
         if job is None:
             raise HarnessError("job_context_not_found", "当前 Agent 没有关联岗位工作区", run_id=context.run.id)
-        pinned = ContextManager(context.session).pinned(job)
         requested = list(dict.fromkeys(payload.sections))
+        pinned = ContextManager(context.session).pinned(job, sections=requested)
         data = {}
         if "job" in requested:
             profile = context.session.scalar(select(JobProfile).where(JobProfile.job_id == job.id))
@@ -64,9 +64,9 @@ def register_context_tools(gateway: ToolGateway) -> ToolGateway:
     gateway.register(ToolSpec(
         name="read_job_workspace_context",
         description=(
-            "按需读取当前岗位工作区的真实上下文。仅当用户语义涉及当前/这个岗位、JD、简历、候选人经历、事实或资料时调用；"
-            "通用知识、闲聊、API/UI 问题不要调用。sections 可选择 job、resume、facts、materials、decisions；"
-            "用户要求沿用、撤销或核对已确认选择时读取 decisions。"
+            "Read actual context from the current job workspace on demand. Call only when the request concerns the current job, JD, resume, candidate experience, facts, or materials. "
+            "Do not call for general knowledge, casual conversation, or API/UI questions. Choose sections from job, resume, facts, materials, and decisions. "
+            "Read decisions when the user asks to reuse, undo, or verify previously confirmed choices."
         ),
         input_model=ReadWorkspaceContextInput,
         output_model=PipelineToolResult,

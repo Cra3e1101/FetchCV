@@ -44,10 +44,16 @@ test('real Pi SDK uses APP storage and local synthetic provider; cancel does not
     const overflowing=request('agent.turn',{conversationId:conversation.id,content:'中'.repeat(4000)});
     const overflow=await service.dispatch(overflowing,'synthetic-window',{...provider,contextWindow:8192},()=>{});
     assert.equal(overflow.error.code,'context_overflow',JSON.stringify(overflow));assert.equal(count,0,'overlarge current input never reaches the provider');
-    const turn=request('agent.turn',{conversationId:conversation.id,content:'Read the existing resume and propose a draft.'});
+    const userText='读取现有简历并生成待审阅草稿，保留“参与项目”的原始表述。';
+    const turn=request('agent.turn',{conversationId:conversation.id,content:userText});
     const result=await service.dispatch(turn,'synthetic-window',provider,event=>events.push(event));
     assert.equal(result.ok,true,JSON.stringify(result));assert.equal(result.result.assistant.content,'Synthetic answer from the real Pi SDK.');
     assert.equal(count,3);assert.ok(events.some(e=>e.name==='done'));
+    const instructions=requests[0].messages.find(message=>message.role==='system').content;
+    assert.match(instructions,/Simplified Chinese unless the user requests another language/);
+    assert.doesNotMatch(instructions,/\p{Script=Han}/u);
+    assert(requests[0].messages.some(message=>message.role==='user'&&JSON.stringify(message.content).includes(userText)));
+    for(const tool of requests[0].tools)assert.doesNotMatch(tool.function.description,/\p{Script=Han}/u);
     assert.equal(service.providers.size,0,'secret discarded when invocation settles');
     assert.equal(requests.some(body=>JSON.stringify(body).includes(provider.apiKey)),false);
     await assert.rejects(service.dispatch(turn,'synthetic-window',provider,()=>{}),{code:'duplicate_request'});

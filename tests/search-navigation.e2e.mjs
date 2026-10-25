@@ -4,6 +4,7 @@ import {mkdir,cp,writeFile} from 'node:fs/promises';
 import {build} from 'esbuild';
 import {_electron as electron} from 'playwright';
 import {scaleFixture} from '../scripts/m5-m8/scale-fixture.mjs';
+import {resolveElectronRuntime} from '../scripts/electron-runtime.mjs';
 
 const root=process.env.M1_ALLOWED_DELETE_ROOT;assert.ok(root&&path.isAbsolute(root));
 const f=await scaleFixture('skewed');f.store.close();
@@ -14,7 +15,7 @@ await cp(path.resolve('electron/storage-preload.cjs'),path.join(root,'runtime','
 await build({entryPoints:[path.resolve('electron/storage-worker.mjs')],outfile:path.join(root,'runtime','storage-worker.mjs'),bundle:true,platform:'node',format:'esm',target:'node22',
   banner:{js:`import {createRequire as guardRequire} from 'node:module'; guardRequire(import.meta.url)(${JSON.stringify(path.resolve('scripts/m1/guard-node-deletions.cjs'))});`}});
 const env=Object.fromEntries(Object.entries(process.env).filter(([key])=>!['NODE_OPTIONS','ELECTRON_RUN_AS_NODE'].includes(key)));
-const app=await electron.launch({args:[path.resolve('tests/fixtures/electron-workspace-ui.cjs')],env,cwd:process.cwd(),timeout:40000});
+const app=await electron.launch({executablePath:(await resolveElectronRuntime({projectRoot:path.resolve(import.meta.dirname,'..')})).executable,args:[path.resolve('tests/fixtures/electron-workspace-ui.cjs')],env,cwd:process.cwd(),timeout:40000});
 try{
   const page=await app.firstWindow(),errors=[];page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(15000);
   await page.getByText('本地工作区已打开',{exact:true}).waitFor({timeout:20000});

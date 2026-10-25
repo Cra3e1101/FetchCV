@@ -177,6 +177,65 @@ def _replace_fact_text(body: str, before: str, after: str) -> str:
     return source
 
 
+def resume_patch_anchors(content: dict[str, Any], patches: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Locate each patch once in editable visible text, without guessing a fact slot."""
+    from applyos_harness.errors import HarnessError
+
+    snapshot = content.get("editor_snapshot") or {}
+    fields: list[tuple[list[Any], str]] = []
+    for si, section in enumerate(snapshot.get("sections") or []):
+        if not isinstance(section, dict) or section.get("visible") is False:
+            continue
+        for ii, item in enumerate(section.get("items") or []):
+            if isinstance(item, dict):
+                for key in ("body", "description", "summary"):
+                    if isinstance(item.get(key), str):
+                        fields.append((["editor_snapshot", "sections", si, "items", ii, key], item[key]))
+    if not snapshot:
+        for key in ("text", "raw_text", "original_text"):
+            if isinstance(content.get(key), str):
+                fields.append(([key], content[key]))
+    anchors: list[dict[str, Any]] = []
+    for index, patch in enumerate(patches):
+        before = str(patch.get("before") or "").strip()
+        tokens = re.split(r"\s+", before) if before else []
+        pattern = r"\s+".join(re.escape(token) for token in tokens)
+        matches = [(path, match) for path, value in fields for match in re.finditer(pattern, value)
+                   if not any(max(tag.start(), match.start()) < min(tag.end(), match.end())
+                              for tag in re.finditer(r"<[^>]*>|&(?:#[0-9]+|#x[0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]*);", value))
+                   and not (match.start() and value[match.start() - 1].isascii() and value[match.start() - 1].isalnum()
+                            and match.group(0)[0].isascii() and match.group(0)[0].isalnum())
+                   and not (match.end() < len(value) and value[match.end()].isascii() and value[match.end()].isalnum()
+                            and match.group(0)[-1].isascii() and match.group(0)[-1].isalnum())] if pattern else []
+        if len(matches) != 1:
+            code = "resume_before_not_found" if not matches else "resume_patch_anchor_conflict"
+            raise HarnessError(code, "改写原文必须在一个可编辑正文位置唯一定位；请缩小或补全原文后重试", details={"patch_index": index, "patch_indices": [index], "match_count": len(matches)}, retryable=True)
+        path, match = matches[0]
+        anchor = {"path": path, "start": match.start(), "end": match.end(), "source_text": match.group(0)}
+        for previous in anchors:
+            if previous["path"] == path and max(previous["start"], anchor["start"]) < min(previous["end"], anchor["end"]):
+                raise HarnessError("resume_patch_overlap_conflict", "多条建议覆盖了同一段正文，请拆分为互不重叠的修改", details={"patch_index": index}, retryable=True)
+        anchors.append(anchor)
+    return anchors
+
+
+def apply_resume_patches(content: dict[str, Any], patches: list[dict[str, Any]]) -> dict[str, Any]:
+    """Apply independent patches to one immutable baseline, preserving its layout."""
+    anchors = resume_patch_anchors(content, patches)
+    result = deepcopy(content)
+    for anchor, patch in sorted(zip(anchors, patches), key=lambda pair: pair[0]["start"], reverse=True):
+        parent = result
+        for part in anchor["path"][:-1]:
+            parent = parent[part]
+        key = anchor["path"][-1]
+        value = parent[key]
+        after = str(patch.get("after") or "")
+        if re.search(r"</?[A-Za-z][^>]*>", value):
+            after = html.escape(after).replace("\n", "<br>")
+        parent[key] = value[:anchor["start"]] + after + value[anchor["end"]:]
+    return result
+
+
 def build_editor_snapshot(
     session: Session,
     *,

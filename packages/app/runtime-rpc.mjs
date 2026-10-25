@@ -6,8 +6,10 @@ export class EventJournal {
     this.seq = 0; this.rows = []; this.bytes = 0; this.revisions = new Map();
   }
   append(name, payload) {
-    if (!["user", "reasoning", "status", "delta", "queue", "done"].includes(name)) throw new ContractError("event_type_invalid");
-    const entityId = String(payload?.event?.id || payload?.message?.id || this.streamId);
+    if (!["user", "reasoning", "status", "delta", "queue", "done", "tool_receipt"].includes(name)) throw new ContractError("event_type_invalid");
+    const entityId = name === "tool_receipt" && payload?.receipt?.tool_call_id
+      ? `tool:${payload.receipt.tool_call_id}`
+      : String(payload?.event?.id || payload?.message?.id || this.streamId);
     const revision = (this.revisions.get(entityId) || 0) + 1;
     const event = { v: 1, streamId: this.streamId, seq: this.seq + 1, entityId, revision, name, payload: structuredClone(payload) };
     const bytes = Buffer.byteLength(JSON.stringify(event));

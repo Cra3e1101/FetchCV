@@ -24,6 +24,7 @@ backend/.pytest-tmp/
 backend/.pytest-real-tmp/
 backend/.pytest-*/
 backend/**/__pycache__/
+scripts/__pycache__/
 backend/*.egg-info/
 backend/data/
 *.egg-info/
@@ -61,3 +62,16 @@ backend/data/
 
 # Internal architecture audits and remediation reports (local only).
 /docs/audits/
+
+# Local review notes, validation reports, and generated test attachments.
+/docs/reviews/
+/docs/retrieval/
+/docs/AGENT_MOTION_REVIEW.md
+/docs/BROWSER_RUNTIME_PREFLIGHT.md
+/docs/FETCHCV_STARTUP_PERFORMANCE.md
+/docs/PROVIDER_PRESETS.md
+/docs/XIAOHONGSHU_EXTRACTION_VALIDATION.md
+/other-chat.txt
+/synthetic-chat.txt
+__pycache__/
+*.py[cod]

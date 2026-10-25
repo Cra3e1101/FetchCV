@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from pathlib import Path
 
 from sqlalchemy import select
 
@@ -16,9 +15,6 @@ from applyos_harness.versioning import VersionService
 from integrations.resume_pdf.importer import PdfResumeImporter
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-REAL_RESUME = PROJECT_ROOT / "test use" / "高子强的简历.pdf"
-REAL_JDS = PROJECT_ROOT / "test use" / "JD.txt"
 
 
 
@@ -31,10 +27,10 @@ def _bodies(snapshot):
     return [str(item.get("body") or "") for section in snapshot.get("sections", []) for item in section.get("items", [])]
 
 
-def test_real_pdf_and_jd_domain_flow_preserves_original_resume(database, tmp_path, monkeypatch):
+def test_real_pdf_and_jd_domain_flow_preserves_original_resume(database, tmp_path, monkeypatch, legacy_resume_pdf, legacy_job_descriptions):
     monkeypatch.setenv("FETCHCV_ARTIFACT_ROOT", str(tmp_path / "artifacts"))
-    imported = PdfResumeImporter(database).import_file(REAL_RESUME)
-    first_jd = REAL_JDS.read_text(encoding="utf-8").split("\n\n字节跳动", 1)[0].strip()
+    imported = PdfResumeImporter(database).import_file(legacy_resume_pdf)
+    first_jd = legacy_job_descriptions.read_text(encoding="utf-8").split("\n\n字节跳动", 1)[0].strip()
     assert "策略运营实习生-TikTok Shop" in first_jd
 
     with database.session() as session:
@@ -116,9 +112,12 @@ def test_real_pdf_and_jd_domain_flow_preserves_original_resume(database, tmp_pat
             else {"proposal_id": proposal.id, "decision": "rejected"}
             for proposal in proposals
         ]
+        review_approval = _approval(session, run.id, "apply_resume_changes")
         ApprovalService(session).review_proposals(
-            approval_id=_approval(session, run.id, "apply_resume_changes").id,
+            approval_id=review_approval.id,
             approved_by="acceptance-test",
+            expected_revision=int((review_approval.decision_payload.get("draft") or {}).get("revision") or 0),
+            expected_target_content_hash=review_approval.decision_payload["target_content_hash"],
             decisions=decisions,
         )
 

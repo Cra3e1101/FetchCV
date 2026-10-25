@@ -27,7 +27,7 @@ test("desktop shell is shown before the packaged Agent sidecar becomes healthy",
   assert.ok(legacyIndex >= 0);
   const legacy = startup.slice(legacyIndex);
   const windowIndex = legacy.indexOf("createWindow(backendApiBase)");
-  const readyIndex = legacy.indexOf("await Promise.all([browserPromise, sidecarStartup])");
+  const readyIndex = legacy.indexOf("await sidecarStartup");
   const startupIndex = legacy.indexOf("const sidecarStartup =");
   const electronReadyIndex = legacy.indexOf("app.whenReady().then");
   assert.ok(windowIndex >= 0 && readyIndex >= 0 && windowIndex < readyIndex);

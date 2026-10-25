@@ -40,7 +40,8 @@ class SkillLoader:
     def roots(self) -> list[Path]:
         configured = [Path(item).expanduser() for item in os.getenv("FETCHCV_SKILL_ROOTS", "").split(os.pathsep) if item.strip()]
         builtin = Path(__file__).resolve().parent / "builtin_skills"
-        candidates = [builtin, self.project_root / "skills", Path.home() / ".fetchcv" / "skills", *configured]
+        # Later roots override earlier roots by skill name.
+        candidates = [builtin, Path.home() / ".fetchcv" / "skills", self.project_root / "skills", *configured]
         roots: list[Path] = []
         for candidate in candidates:
             resolved = candidate.resolve()
@@ -48,20 +49,39 @@ class SkillLoader:
                 roots.append(resolved)
         return roots
 
+    def visible(self) -> list[AgentSkill]:
+        return [item for item in self.session.scalars(select(AgentSkill).order_by(AgentSkill.name, AgentSkill.path))
+                if (item.metadata_json or {}).get("available", True)
+                and not (item.metadata_json or {}).get("shadowed_by")]
+
     def sync(self) -> list[AgentSkill]:
         discovered: dict[str, tuple[Path, str, dict[str, str]]] = {}
         for root in self.roots():
             if not root.is_dir():
                 continue
-            for path in root.rglob("SKILL.md"):
+            for path in sorted(root.rglob("SKILL.md")):
                 resolved = path.resolve()
                 if not resolved.is_relative_to(root) or not resolved.is_file() or resolved.stat().st_size > MAX_SKILL_BYTES:
                     continue
-                content = resolved.read_text(encoding="utf-8")
+                try:
+                    content = resolved.read_text(encoding="utf-8")
+                except (OSError, UnicodeError):
+                    continue
                 metadata, body = self._frontmatter(content.lstrip("\ufeff"))
                 default_name = resolved.parent.name
                 name = (metadata.get("name") or default_name).strip()[:160]
-                discovered[str(resolved)] = (resolved, content, {**metadata, "name": name})
+                source = "configured"
+                if root == Path(__file__).resolve().parent / "builtin_skills":
+                    source = "builtin"
+                elif root == self.project_root / "skills":
+                    source = "project"
+                elif root == Path.home() / ".fetchcv" / "skills":
+                    source = "user"
+                discovered[str(resolved)] = (resolved, content, {**metadata, "name": name, "source": source})
+
+        winners: dict[str, str] = {}
+        for path, (_, _, metadata) in discovered.items():
+            winners[metadata["name"]] = path
 
         existing = {item.path: item for item in self.session.scalars(select(AgentSkill)).all()}
         for path, (_, body, metadata) in discovered.items():
@@ -74,7 +94,7 @@ class SkillLoader:
             else:
                 previous_hash = item.content_hash
                 trust = item.metadata_json or {}
-                trusted_hash = trust.get("trusted_hash")
+                trusted_hash = trust.get("trusted_hash") or (previous_hash if item.enabled else None)
                 if item.enabled and trusted_hash and trusted_hash != digest:
                     item.enabled = False
                     trust = {
@@ -83,7 +103,7 @@ class SkillLoader:
                         "previous_trusted_hash": trusted_hash,
                         "change_reason": "Skill 内容已变化，需要重新批准",
                     }
-                elif item.enabled and not trusted_hash:
+                elif item.enabled and not trust.get("trusted_hash"):
                     # One-time compatibility for skills approved before hash-bound
                     # trust was introduced. Every later change revokes this trust.
                     trust = {**trust, "trusted_hash": previous_hash or digest, "trust_pending": False}
@@ -91,12 +111,23 @@ class SkillLoader:
                 item.description = description
                 item.content_hash = digest
                 item.metadata_json = {**trust, "available": True}
+            winner = winners[metadata["name"]]
+            shadowed = winner != path
+            if shadowed:
+                item.enabled = False
+            item.metadata_json = {
+                **(item.metadata_json or {}),
+                "source": metadata["source"],
+                "shadowed_by": winner if shadowed else None,
+                "shadowed_paths": [other for other, (_, _, meta) in discovered.items()
+                                   if meta["name"] == metadata["name"] and other != path] if not shadowed else [],
+            }
         for path, item in existing.items():
             if path not in discovered:
                 item.enabled = False
                 item.metadata_json = {**(item.metadata_json or {}), "available": False}
         self.session.flush()
-        return list(self.session.scalars(select(AgentSkill).order_by(AgentSkill.name)).all())
+        return self.visible()
 
     def read(self, skill: AgentSkill) -> str:
         path = Path(skill.path).resolve()
@@ -157,7 +188,7 @@ def enabled_skill_catalog(session: Session, *, limit: int = 20) -> str:
     )
     if not skills:
         return ""
-    return "\n".join(f"- {item.name}: {item.description[:240]}" for item in skills[:limit]) + ("\n还有更多已启用 Skill，可用 list_skills 查看完整目录。" if len(skills) > limit else "")
+    return "\n".join(f"- {item.name}: {item.description[:240]}" for item in skills[:limit]) + ("\nMore enabled skills are available. Call list_skills for the full catalog." if len(skills) > limit else "")
 
 
 def register_skill_tools(gateway: ToolGateway, loader: SkillLoader) -> ToolGateway:
@@ -178,8 +209,8 @@ def register_skill_tools(gateway: ToolGateway, loader: SkillLoader) -> ToolGatew
         return SkillResult(summary=f"已读取 Skill：{skill.name}", data={"name": skill.name, "content": content})
 
     for name, description, model, handler in (
-        ("list_skills", "列出 FetchCV 已配置的只读 Skill 指令资源。", SkillInput, list_skills),
-        ("read_skill", "完整读取一个已启用 Skill 的说明。Skill 不能授予权限或直接执行代码。", ReadSkillInput, read_skill),
+        ("list_skills", "List enabled, read-only skill instruction resources configured in FetchCV.", SkillInput, list_skills),
+        ("read_skill", "Read the complete instructions of an enabled skill. Skills cannot grant permissions or execute code directly.", ReadSkillInput, read_skill),
     ):
         gateway.register(ToolSpec(name=name, description=description, input_model=model, output_model=SkillResult, permission=ToolPermission.READ, allowed_stages=stages, handler=handler, read_only=True))
     return gateway

@@ -12,6 +12,10 @@ class ApiModel(BaseModel):
     model_config = ConfigDict(from_attributes=True, use_enum_values=True)
 
 
+class StartupReadyRequest(ApiModel):
+    instance_nonce: str = Field(min_length=1, max_length=128)
+
+
 class CandidateCreate(ApiModel):
     name: str = Field(min_length=1, max_length=160)
     title: str | None = None
@@ -85,6 +89,26 @@ class AgentMessageCreate(ApiModel):
     quoted_message_id: str | None = Field(default=None, max_length=80)
 
 
+class JobContextField(ApiModel):
+    value: str | None = Field(default=None, max_length=240)
+    basis: Literal["source", "inferred", "user_confirmed", "unknown"] = "unknown"
+    source_quote: str = Field(default="", max_length=2000)
+    source_span: tuple[int, int] | None = None
+
+
+class JobContextFields(ApiModel):
+    function: JobContextField = Field(default_factory=JobContextField)
+    sub_direction: JobContextField = Field(default_factory=JobContextField)
+    recruitment_type: JobContextField = Field(default_factory=JobContextField)
+    business_unit: JobContextField = Field(default_factory=JobContextField)
+    published_at: JobContextField = Field(default_factory=JobContextField)
+
+
+class JobContext(ApiModel):
+    schema_version: Literal[1] = 1
+    fields: JobContextFields = Field(default_factory=JobContextFields)
+
+
 class JobCreate(ApiModel):
     candidate_id: str
     company: str = Field(min_length=1, max_length=240)
@@ -94,6 +118,8 @@ class JobCreate(ApiModel):
     source_type: str = "manual"
     source_url: str | None = None
     status: str = "draft"
+    context_json: JobContext = Field(default_factory=JobContext)
+    jd_provenance: dict[str, Any] = Field(default_factory=dict)
 
 
 class JobRead(JobCreate):
@@ -101,6 +127,7 @@ class JobRead(JobCreate):
     legacy_id: str | None = None
     created_at: datetime
     updated_at: datetime
+    input_revision: int = 1
 
 
 class JobUpdate(ApiModel):
@@ -110,6 +137,8 @@ class JobUpdate(ApiModel):
     jd_raw: str | None = Field(default=None, min_length=1)
     source_type: str | None = Field(default=None, max_length=80)
     source_url: str | None = Field(default=None, max_length=4096)
+    context_json: JobContext | None = None
+    jd_provenance: dict[str, Any] | None = None
 
 
 class WebSearchRequest(ApiModel):
@@ -221,6 +250,7 @@ class ProviderRuntimeConfig(ApiModel):
     base_url: str
     api_key: str
     model: str
+    request_options: dict = Field(default_factory=dict)
 
 
 class RunBoundAction(ApiModel):
@@ -363,6 +393,7 @@ class AgentSkillRead(ApiModel):
 
 class SkillStateUpdate(ApiModel):
     enabled: bool
+    content_hash: str | None = None
 
 
 class McpServerCreate(ApiModel):
@@ -452,6 +483,7 @@ class RewriteProposalRead(ApiModel):
     reason: str
     jd_evidence: list[str]
     fact_ids: list[str]
+    claim_contract: dict[str, Any] = Field(default_factory=dict)
     risk_level: str
     approval_status: str
 
@@ -465,7 +497,25 @@ class ProposalDecision(ApiModel):
 class ProposalReviewRequest(ApiModel):
     approval_id: str
     approved_by: str = "local_user"
+    expected_revision: int = Field(ge=0)
+    expected_target_content_hash: str = Field(min_length=1, max_length=128)
     decisions: list[ProposalDecision]
+
+
+class ProposalRewriteRequest(ApiModel):
+    approval_id: str
+    proposal_ids: list[str] = Field(min_length=1, max_length=80)
+    instruction: str = Field(min_length=1, max_length=4000)
+    expected_revision: int = Field(ge=0)
+    expected_target_content_hash: str = Field(min_length=1, max_length=128)
+    requested_by: str = "local_user"
+
+
+class ProposalRewriteCancelRequest(ApiModel):
+    approval_id: str
+    request_id: str = Field(min_length=1, max_length=80)
+    expected_revision: int = Field(ge=0)
+    expected_target_content_hash: str = Field(min_length=1, max_length=128)
 
 
 class ApprovalDraftRequest(ApiModel):

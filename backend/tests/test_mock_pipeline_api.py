@@ -73,7 +73,9 @@ def test_pi_tools_reach_editable_draft_without_publish_approval(database):
 
         incomplete = client.post(
             f"/api/agent-runs/{run_id}/proposals/review",
-            json={"approval_id": review_approval["id"], "decisions": [{"proposal_id": proposals[0]["id"], "decision": "accepted"}]},
+            json={"approval_id": review_approval["id"], "expected_revision": 1,
+                  "expected_target_content_hash": review_approval["decision_payload"]["target_content_hash"],
+                  "decisions": [{"proposal_id": proposals[0]["id"], "decision": "accepted"}]},
         )
         assert incomplete.status_code == 422
         assert incomplete.json()["code"] == "proposal_decision_incomplete"
@@ -84,7 +86,8 @@ def test_pi_tools_reach_editable_draft_without_publish_approval(database):
         ]
         reviewed = client.post(
             f"/api/agent-runs/{run_id}/proposals/review",
-            json={"approval_id": review_approval["id"], "approved_by": "tester", "decisions": decisions},
+            json={"approval_id": review_approval["id"], "approved_by": "tester", "expected_revision": 1,
+                  "expected_target_content_hash": review_approval["decision_payload"]["target_content_hash"], "decisions": decisions},
         )
         assert reviewed.status_code == 200
         assert reviewed.json()["decision_payload"]["previous_draft_revision"] == 1

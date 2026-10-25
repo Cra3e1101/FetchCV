@@ -3,7 +3,8 @@ from __future__ import annotations
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import engine_from_config, pool, event
+from applyos_domain.knowledge_search import register_search_functions
 
 from applyos_domain import conversations  # noqa: F401
 from applyos_domain import models  # noqa: F401
@@ -27,6 +28,8 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     connectable = engine_from_config(config.get_section(config.config_ini_section, {}), prefix="sqlalchemy.", poolclass=pool.NullPool)
+    if connectable.dialect.name == "sqlite":
+        event.listen(connectable, "connect", register_search_functions)
     with connectable.connect() as connection:
         context.configure(connection=connection, target_metadata=target_metadata, compare_type=True, render_as_batch=True)
         with context.begin_transaction():

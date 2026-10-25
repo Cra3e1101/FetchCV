@@ -171,7 +171,7 @@ def test_gateway_never_replays_an_unsettled_side_effect(database, tmp_path: Path
         assert session.scalar(select(ToolInvocation).where(ToolInvocation.operation_id == operation_id)).status == "running"  # Only host reconciliation may declare an active claim orphaned.
 
 
-@pytest.mark.parametrize("scope,expected", [("local_transactional", "failed"), ("external", "outcome_unknown")])
+@pytest.mark.parametrize("scope,expected", [("local_transactional", "failed"), ("local_with_read_cache", "failed"), ("external", "outcome_unknown")])
 def test_failed_effect_is_settled_and_retry_requires_proof(database, tmp_path, scope, expected):
     with database.session() as session:
         candidate, job, run = _context(session)

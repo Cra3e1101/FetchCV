@@ -10,6 +10,9 @@ export function WorkspaceRail({activeView, onHome, onLibrary, onKnowledge, onSet
       aria-current={(activeView === id || (id === "home" && activeView === "job")) ? "page" : undefined}
       onClick={action}><Icon size={20}/></button>)}
     <button type="button" title="搜索聊天 (Ctrl+K)" aria-label="搜索聊天" onClick={onSearch}><Search size={20}/></button>
-    <button className="rail-settings" type="button" title="设置 (Ctrl+,)" aria-label="设置" onClick={onSettings}><Settings size={20}/></button>
+    <button className="rail-settings" type="button" title="设置 (Ctrl+,)" aria-label="设置"
+      aria-current={activeView === "settings" ? "page" : undefined}
+      aria-expanded={activeView === "settings"}
+      onClick={onSettings}><Settings size={20}/></button>
   </nav>;
 }

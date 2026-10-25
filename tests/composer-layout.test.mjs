@@ -7,7 +7,6 @@ const root = path.resolve(import.meta.dirname, "..");
 const source = fs.readFileSync(path.join(root, "src/components/AgentWorkspace.jsx"), "utf8");
 const effortSource = fs.readFileSync(path.join(root, "src/components/AgentEffortControl.jsx"), "utf8");
 const app = fs.readFileSync(path.join(root, "src/App.jsx"), "utf8");
-const css = fs.readFileSync(path.join(root, "src/styles.css"), "utf8");
 const sourceCss = fs.readFileSync(path.join(root, "src/ui/replica-components.css"), "utf8");
 const approvals = fs.readFileSync(path.join(root, "src/ui/ApprovalModeMenu.jsx"), "utf8");
 const electronMain = fs.readFileSync(path.join(root, "electron/main.mjs"), "utf8");
@@ -32,7 +31,7 @@ test("composer file picker accepts arbitrary files into the isolated workspace",
   assert.match(preload, /importWorkspaceFiles/);
   assert.match(electronMain, /dialog:import-workspace-files/);
   assert.match(electronMain, /properties:\s*\["openFile",\s*"multiSelections"\]/);
-  assert.doesNotMatch(electronMain.slice(electronMain.indexOf('dialog:import-workspace-files'), electronMain.indexOf('dialog:select-legacy-workspace')), /filters:/);
+  assert.doesNotMatch(electronMain.slice(electronMain.indexOf('handle("dialog:import-workspace-files"'), electronMain.indexOf('handle("dialog:select-legacy-workspace"')), /filters:/);
   assert.match(app, /api\.createMaterial/);
 });
 
@@ -51,8 +50,6 @@ test("composer uses three honest effort levels and preserves backend thinking le
   assert.doesNotMatch(source.slice(source.indexOf('role="dialog" aria-label="模型与推理设置"'), source.indexOf("<AgentEffortControl")), /<header>/);
 });
 
-test("composer occupies a bottom layout row instead of covering the transcript", () => {
-  assert.match(css, /\.agent-workspace-v2 \.conversation-scroll-v2\s*\{[\s\S]*?padding-bottom:\s*0/);
-  assert.match(css, /\.agent-workspace-v2 \.agent-composer-v2\s*\{[\s\S]*?position:\s*relative/);
-  assert.match(css, /\.agent-workspace-v2 \.agent-composer-v2\s*\{[\s\S]*?flex:\s*0 0 auto/);
-});
+// Floating composer geometry and message clearance (including multiline text
+// and attachments) are measured in conversation-replica.e2e.mjs. Searching the
+// legacy styles.css declarations cannot verify the final CSS cascade.

@@ -20,6 +20,11 @@ export default [
   },
   js.configs.recommended,
   {
+    files: ["shared/vendor/cc-switch/*.mjs"],
+    // Upstream header validation intentionally rejects control characters.
+    rules: { "no-control-regex": "off" },
+  },
+  {
     files: ["src/**/*.{js,jsx}", "public/workspace/*.js"],
     languageOptions: {
       ecmaVersion: "latest",

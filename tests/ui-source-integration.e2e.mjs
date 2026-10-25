@@ -1,4 +1,5 @@
 import {_electron as electron, chromium} from 'playwright';
+import {resolveElectronRuntime} from '../scripts/electron-runtime.mjs';
 import fs from 'node:fs';import path from 'node:path';import {pathToFileURL} from 'node:url';import assert from 'node:assert/strict';import crypto from 'node:crypto';
 const root=process.env.M1_ALLOWED_DELETE_ROOT;if(!root)throw Error('isolated root required');
 const project=path.resolve('.');const build=process.argv[2]||process.env.FETCHCV_UI_TEST_BUILD||'.m1-work/ui-integration-20261011-final';
@@ -7,7 +8,7 @@ const env={...process.env};delete env.NODE_OPTIONS;delete env.ELECTRON_RUN_AS_NO
 const browserMode=process.env.FETCHCV_UI_TEST_BROWSER==='1';
 const application=browserMode
   ? await chromium.launch({channel:'msedge',headless:true})
-  : await electron.launch({args:[path.join(project,'tests/helpers/ui-renderer-host.cjs')],env});
+  : await electron.launch({executablePath:(await resolveElectronRuntime({projectRoot:project})).executable,args:[path.join(project,'tests/helpers/ui-renderer-host.cjs')],env});
 const candidate={id:'c1',name:'合成验收用户',title:'产品经理'};
 const job={id:'j1',candidate_id:'c1',company:'星云科技',role:'AI 产品经理',jd_raw:'梳理知识库需求，完成产品设计与验证。'};
 const detail={candidate,job,run:null,tasks:[],facts:[],experiences:[],steps:[],approvals:[],resumes:[],portfolios:[],materials:[],proposals:[],interview_sources:[],interview_briefs:[],messages:[{id:'m1',role:'user',content:'帮我准备这个岗位的申请，先看看哪些经历值得展开。'},{id:'m2',role:'assistant',content:'建议从 **企业知识库项目** 开始。它与岗位中的需求分析、AI 产品设计最相关。\n\n1. **为什么做：** 团队资料分散，查找与核对信息耗时。\n2. **做了什么：** 梳理检索场景，设计问答与来源查看流程。\n3. **如何验证：** 用典型问题核对回答与引用，记录失败案例。'}]};
@@ -143,7 +144,7 @@ assert.equal(savedProfiles['test-model'].maxOutputTokens,'4096');
 assert.equal(savedProfiles['other-model'].maxOutputTokens,'8192');
 await page.screenshot({path:path.join(root,'model-parameters.png')});
 await page.getByRole('button',{name:'常规',exact:true}).click();
-for(const [value,label]of [['light','暖色浅色'],['dark','暖色深色'],['white','简约白']]){await page.getByRole('combobox',{name:'主题',exact:true}).selectOption(value);assert.equal(await page.locator('html').getAttribute('data-interface-theme'),value);await page.screenshot({path:path.join(root,`settings-theme-${value}.png`),animations:'disabled'});}
+for(const value of ['light','dark','white']){await page.getByRole('combobox',{name:'主题',exact:true}).selectOption(value);assert.equal(await page.locator('html').getAttribute('data-interface-theme'),value);await page.screenshot({path:path.join(root,`settings-theme-${value}.png`),animations:'disabled'});}
 const settingsGeometry=[];
 for(const width of [1440,768,390]){
   await page.setViewportSize({width,height:900});

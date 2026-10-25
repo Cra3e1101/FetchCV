@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from applyos_harness.errors import HarnessError
 
 from .config import AgentSettings
+from .provider_options import request_headers, request_body as apply_request_body, redact_provider_message
 from .cancellation import ProviderRequestCancelled, cancellable_handle, raise_if_cancelled
 from .hooks import SDKHookRecorder
 from .model_protocol import contains_dsml, parse_dsml_tool_calls, strip_model_protocol
@@ -266,10 +267,11 @@ class ClaudeAgentRuntime:
     @staticmethod
     def _decision_prompt(messages: list[dict], tools: list[RuntimeToolDefinition]) -> str:
         return (
-            "根据会话和当前可用工具决定下一步。需要执行任务时返回 tool_calls；只有已经完成或必须等待用户时才返回 message。"
-            "不要描述未执行的工具结果。\n\n会话：\n"
+            "Choose the next action from the conversation and currently available tools. Return tool_calls when work remains; "
+            "return message only when the task is complete or requires user input. "
+            "Do not claim results from tools that have not run.\n\nConversation:\n"
             + json.dumps(messages, ensure_ascii=False)
-            + "\n\n工具：\n"
+            + "\n\nTools:\n"
             + json.dumps([item.model_dump(mode="json") for item in tools], ensure_ascii=False)
         )
 
@@ -405,26 +407,26 @@ class CompatibleAgentRuntime:
                     if protocol == "anthropic":
                         response = client.post(
                             self._endpoint(self.settings.provider_base_url, "anthropic"),
-                            headers={"x-api-key": self.settings.provider_api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-                            json={
+                            headers=request_headers(self.settings),
+                            json=apply_request_body(self.settings, {
                                 "model": self.settings.model,
                                 "max_tokens": 4096,
                                 "system": system_prompt,
                                 "messages": self._anthropic_messages(messages),
                                 "tools": [{"name": item.name, "description": item.description, "input_schema": item.input_schema} for item in tools],
-                            },
+                            }),
                         )
                     else:
                         response = client.post(
                             self._endpoint(self.settings.provider_base_url, "openai"),
-                            headers={"Authorization": f"Bearer {self.settings.provider_api_key}", "content-type": "application/json"},
-                            json={
+                            headers=request_headers(self.settings),
+                            json=apply_request_body(self.settings, {
                                 "model": self.settings.model,
                                 "messages": self._openai_messages(system_prompt, messages),
                                 "tools": [{"type": "function", "function": {"name": item.name, "description": item.description, "parameters": item.input_schema}} for item in tools],
                                 "tool_choice": "auto",
                                 "stream": False,
-                            },
+                            }),
                         )
                     if response.status_code in {400, 404, 422}:
                         return self._structured_decision_turn(agent_name=agent_name, system_prompt=system_prompt, messages=messages, tools=tools, session_id=session_id)
@@ -441,10 +443,10 @@ class CompatibleAgentRuntime:
                 detail = str((error_payload.get("error") or {}).get("message") or error_payload.get("message") or "")
             except (ValueError, TypeError, AttributeError):
                 pass
-            detail = detail.replace(self.settings.provider_api_key, "[已隐藏]")[:280]
+            detail = redact_provider_message(self.settings, detail)[:280]
             raise HarnessError("provider_http_error", f"模型 API 返回 {exc.response.status_code}{f'：{detail}' if detail else ''}", retryable=exc.response.status_code >= 500) from exc
         except (httpx.HTTPError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-            message = str(exc).replace(self.settings.provider_api_key, "[已隐藏]")[:280]
+            message = redact_provider_message(self.settings, exc)[:280]
             raise HarnessError("provider_connection_error", f"模型工具调用失败：{message}", retryable=True) from exc
 
         calls: list[RuntimeToolCall] = []
@@ -504,7 +506,7 @@ class CompatibleAgentRuntime:
             raise HarnessError("provider_not_configured", "模型连接缺少 Base URL、API Key 或模型名", retryable=True)
         schema = output_model.model_json_schema()
         json_instruction = (
-            "\n\n只返回一个 JSON 对象，不要使用 Markdown。JSON 必须严格符合以下 Schema：\n"
+            "\n\nReturn a single JSON object without Markdown. It must strictly conform to this schema:\n"
             + json.dumps(schema, ensure_ascii=False)
         )
         provider_host = (urlparse(self.settings.provider_base_url).hostname or "").lower()
@@ -517,17 +519,13 @@ class CompatibleAgentRuntime:
                     if self.settings.provider_protocol == "anthropic":
                         response = client.post(
                             self._endpoint(self.settings.provider_base_url, "anthropic"),
-                            headers={
-                                "x-api-key": self.settings.provider_api_key,
-                                "anthropic-version": "2023-06-01",
-                                "content-type": "application/json",
-                            },
-                            json={
+                            headers=request_headers(self.settings),
+                            json=apply_request_body(self.settings, {
                                 "model": self.settings.model,
                                 "max_tokens": 4096,
                                 "system": system_prompt + json_instruction,
                                 "messages": [{"role": "user", "content": prompt}],
-                            },
+                            }),
                         )
                         response.raise_for_status()
                         payload = response.json()
@@ -546,15 +544,15 @@ class CompatibleAgentRuntime:
                         }
                         response = client.post(
                             endpoint,
-                            headers={"Authorization": f"Bearer {self.settings.provider_api_key}", "content-type": "application/json"},
-                            json=request_body,
+                            headers=request_headers(self.settings),
+                            json=apply_request_body(self.settings, request_body),
                         )
                         if response.status_code in {400, 422}:
                             request_body.pop("response_format", None)
                             response = client.post(
                                 endpoint,
-                                headers={"Authorization": f"Bearer {self.settings.provider_api_key}", "content-type": "application/json"},
-                                json=request_body,
+                                headers=request_headers(self.settings),
+                                json=apply_request_body(self.settings, request_body),
                             )
                         response.raise_for_status()
                         payload = response.json()
@@ -577,13 +575,13 @@ class CompatibleAgentRuntime:
                     detail = detail or payload.get("message", "") or payload.get("detail", "")
             except (ValueError, TypeError):
                 pass
-            detail = str(detail).replace(self.settings.provider_api_key, "[已隐藏]").strip()[:280]
+            detail = redact_provider_message(self.settings, detail).strip()[:280]
             message = f"模型 API 返回 {exc.response.status_code}{suffix}"
             if detail:
                 message += f"：{detail}"
             raise HarnessError("provider_http_error", message, retryable=exc.response.status_code >= 500) from exc
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
-            raise HarnessError("provider_connection_error", f"模型 API 调用失败：{exc}", retryable=True) from exc
+            raise HarnessError("provider_connection_error", f"模型 API 调用失败：{redact_provider_message(self.settings, exc)}", retryable=True) from exc
         fallback_reason = ""
         try:
             structured = json.loads(self._json_text(text))
@@ -642,11 +640,13 @@ class CompatibleAgentRuntime:
             }
         usage: dict = {}
         try:
+            headers = request_headers(self.settings)
+            body = apply_request_body(self.settings, body)
             async with httpx.AsyncClient(timeout=httpx.Timeout(90.0, connect=15.0), follow_redirects=False, trust_env=trust_environment) as client:
                 async with client.stream("POST", endpoint, headers=headers, json=body) as response:
                     if not response.is_success:
                         raw = (await response.aread()).decode(errors="replace")
-                        detail = raw.replace(self.settings.provider_api_key, "[已隐藏]").strip()[:280]
+                        detail = redact_provider_message(self.settings, raw).strip()[:280]
                         request_id = response.headers.get("x-request-id", "")
                         suffix = f"（request id: {request_id}）" if request_id else ""
                         raise HarnessError("provider_http_error", f"模型 API 返回 {response.status_code}{suffix}{f'：{detail}' if detail else ''}", retryable=response.status_code >= 500)
@@ -686,7 +686,7 @@ class CompatibleAgentRuntime:
         except HarnessError:
             raise
         except (httpx.HTTPError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-            message = str(exc).replace(self.settings.provider_api_key, "[已隐藏]")[:280]
+            message = redact_provider_message(self.settings, exc)[:280]
             raise HarnessError("provider_connection_error", f"模型 API 调用失败：{message}", retryable=True) from exc
         yield {
             "type": "done",

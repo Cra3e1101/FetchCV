@@ -19,11 +19,22 @@ def advance_pi(client, run_id, *, kind="resume"):
         arguments = {"analysis": {"responsibilities": [{"text": job["jd_raw"], "source_quote": job["jd_raw"]}], "summary": "依据原始 JD 完成岗位分析"},
                      "fact_ranking": [{"fact_id": f["id"], "recommended": True, "relevance": "high", "rationale": "与 JD 所述分析工作相关"} for f in facts]}
     elif run["current_stage"] == "awaiting_fact_review":
+        # Synthetic source resume is explicit; model-supplied before cannot
+        # bootstrap its own source or rely on shadow claims metadata.
+        if not workspace["resumes"] and not workspace.get("base_resumes"):
+            from applyos_domain.models import ResumeVersion
+            with client.app.state.database.session() as session:
+                session.add(ResumeVersion(candidate_id=run["candidate_id"], name="Synthetic source", content_json={"editor_snapshot": {
+                    "profile": {"name": workspace["candidate"]["name"]},
+                    "sections": [{"title": "经历", "items": [{"body": f["content"]} for f in facts]}],
+                }}))
         tool = "prepare_resume_review"
         arguments = {
             "strategy": {"positioning": "基于已确认事实呈现分析经历", "selected_fact_ids": [f["id"] for f in facts]},
             "patches": [{"section": "experience", "before": f["content"], "after": f["content"] + "。", "reason": "规范表述",
-                         "jd_evidence": [job["jd_raw"]], "fact_ids": [f["id"]], "risk_level": "low"} for f in facts],
+                         "jd_evidence": [job["jd_raw"]], "fact_ids": [f["id"]], "risk_level": "low",
+                         "evidence": [{"evidence_type": "candidate_fact", "candidate_id": run["candidate_id"], "fact_id": f["id"], "fact_version": f["version"], "source_quote": f["content"]}],
+                         "action": f["content"], "object": f["content"], "metrics": sorted(__import__("applyos_harness.validation", fromlist=["extract_numbers"]).extract_numbers(f["content"]))} for f in facts],
             "summary": "已形成可逐条审核的补丁",
         }
     else:

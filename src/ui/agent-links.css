@@ -1,0 +1,15 @@
+:root { --agent-link: #465363; --agent-link-hover: #283544; --agent-link-bg: #f0f2f4; --agent-link-bg-hover: #e3e7eb; }
+:root:is([data-interface-theme="dark"], [data-interface-theme="neutral-dark"]) { --agent-link: #d0d6df; --agent-link-hover: #edf0f5; --agent-link-bg: #30343a; --agent-link-bg-hover: #414750; }
+#root .source-grid :is(.agent-markdown a.agent-link, .agent-source-link) {
+  color: var(--agent-link); background: var(--agent-link-bg); text-decoration: none;
+  padding: 1px 4px; border: 0; border-radius: 4px; font-weight: 500;
+  box-decoration-break: clone; -webkit-box-decoration-break: clone; overflow-wrap: anywhere;
+}
+#root .source-grid :is(.agent-markdown a.agent-link, .agent-source-link):hover {
+  color: var(--agent-link-hover); background: var(--agent-link-bg-hover); text-decoration: none;
+}
+#root .source-grid .tool-activity-target.agent-link { color: var(--ui-secondary); text-decoration: none; border-radius: 3px; }
+#root .source-grid .tool-activity-target.agent-link:hover { color: var(--ui-ink); background: var(--ui-selection); }
+#root .source-grid :is(.agent-markdown a.agent-link, .tool-activity-target.agent-link, .agent-source-link):focus-visible {
+  outline: 2px solid var(--agent-link); outline-offset: 3px; border-radius: 2px;
+}

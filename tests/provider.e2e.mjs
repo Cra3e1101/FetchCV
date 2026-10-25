@@ -1,3 +1,4 @@
+import { resolveElectronRuntime } from "../scripts/electron-runtime.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import http from "node:http";
@@ -57,7 +58,7 @@ const packagedExecutable = process.platform === "darwin"
   ? path.join(projectRoot, "release", "mac-arm64", "FetchCV.app", "Contents", "MacOS", "FetchCV")
   : path.join(projectRoot, "release", "win-unpacked", "FetchCV.exe");
 const application = await electron.launch({
-  ...(packaged ? { executablePath: packagedExecutable } : { args: [projectRoot] }), cwd: projectRoot,
+  ...(packaged ? { executablePath: packagedExecutable } : { executablePath: (await resolveElectronRuntime({ projectRoot })).executable, args: [projectRoot] }), cwd: projectRoot,
   env: { ...process.env, FETCHCV_API_PORT: String(apiPort), FETCHCV_E2E_USER_DATA: userData },
   timeout: 45000,
 });

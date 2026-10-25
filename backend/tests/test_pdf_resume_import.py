@@ -111,11 +111,11 @@ def test_pdf_resume_import_uses_user_reviewed_fields_before_creating_facts(datab
         assert corrected["details_json"]["review_status"] == "uncertain"
 
 
-def test_legacy_job_snapshot_rebases_on_source_layout_without_losing_body_edit(database, tmp_path: Path, monkeypatch):
+def test_legacy_job_snapshot_rebases_on_source_layout_without_losing_body_edit(database, tmp_path: Path, monkeypatch, legacy_resume_pdf):
     import integrations.resume_pdf.importer as importer_module
 
     monkeypatch.setattr(importer_module, "artifact_root", lambda *parts: tmp_path.joinpath("artifacts", *parts))
-    source = Path(__file__).resolve().parents[2] / "test use" / "高子强的简历.pdf"
+    source = legacy_resume_pdf
     imported = PdfResumeImporter(database).import_file(source)
     with database.session() as session:
         base = session.get(ResumeVersion, imported["resume_id"])

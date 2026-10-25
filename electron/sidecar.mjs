@@ -73,7 +73,7 @@ function databaseUrl(userDataPath) {
   return `sqlite:///${file}`;
 }
 
-export async function startSidecar({ isPackaged, projectRoot, resourcesPath, userDataPath, port = null, env = process.env, onSpawn = null }) {
+export async function startSidecar({ isPackaged, projectRoot, resourcesPath, userDataPath, port = null, env = process.env, onSpawn = null, startupTrace = null }) {
   const requestedPort = Number(port);
   const selectedPort = Number.isInteger(requestedPort) && requestedPort > 0 && requestedPort <= 65535
     ? requestedPort
@@ -97,6 +97,7 @@ export async function startSidecar({ isPackaged, projectRoot, resourcesPath, use
     // would create a second, behaviorally different production loop.
     FETCHCV_DISABLE_TASK_WORKER: "1",
     FETCHCV_INSTANCE_NONCE: instanceNonce,
+    ...(startupTrace ? { FETCHCV_STARTUP_TRACE_ID: startupTrace.id } : {}),
     PYTHONUNBUFFERED: "1",
   };
   let command;
@@ -108,17 +109,19 @@ export async function startSidecar({ isPackaged, projectRoot, resourcesPath, use
     cwd = path.dirname(command);
   } else {
     command = env.FETCHCV_PYTHON || path.join(projectRoot, "backend", ".venv", process.platform === "win32" ? "Scripts" : "bin", process.platform === "win32" ? "python.exe" : "python");
-    args = ["-m", "uvicorn", "applyos_api.main:app", "--app-dir", "backend", "--host", HOST, "--port", String(selectedPort)];
+    args = [...(env.FETCHCV_PYTHON_IMPORTTIME === "1" ? ["-X", "importtime"] : []), path.join(projectRoot, "backend", "sidecar_entry.py"), "--host", HOST, "--port", String(selectedPort)];
     cwd = projectRoot;
   }
+  startupTrace?.mark("sidecar.spawn");
   const child = spawn(command, args, { cwd, env: childEnv, windowsHide: process.platform === "win32", stdio: ["ignore", "pipe", "pipe"] });
-  const launched = { apiBase, child, ownsProcess: true, port: selectedPort, ready: false };
+  const launched = { apiBase, child, ownsProcess: true, port: selectedPort, ready: false, instanceNonce };
   onSpawn?.(launched);
   const logDir=path.join(userDataPath,'logs');fs.mkdirSync(logDir,{recursive:true});
   const logFile=path.join(logDir,'sidecar.log');
   const secrets=Object.entries(childEnv).filter(([key,value])=>/TOKEN|SECRET|KEY|PASSWORD/i.test(key)&&String(value).length>=6).map(([,value])=>String(value));
   const buffers=new Map();
   const append=(line)=>{
+    if (startupTrace?.python(line)) return;
     let safe=line;for(const secret of secrets)safe=safe.split(secret).join('[REDACTED]');
     safe=safe.replace(/(authorization|cookie|set-cookie)\s*[:=]\s*[^\r\n]+/gi,'$1: [REDACTED]');
     safe=redactProviderError(safe,childEnv.FETCHCV_PROVIDER_API_KEY||'');
@@ -139,6 +142,7 @@ export async function startSidecar({ isPackaged, projectRoot, resourcesPath, use
   child.once('error',error=>append(`spawn failure: ${error.code||error.name}`));
   child.once('exit',()=>{for(const text of buffers.values())if(text)append(text);buffers.clear();});
   try{await waitForHealth(apiBase,child,25000,instanceNonce);}catch(error){stopSidecar(launched);throw new Error(`${error.message}; diagnostic: ${logFile}`);}
+  startupTrace?.mark("sidecar.healthy");
   return { ...launched, ready: true };
 }
 

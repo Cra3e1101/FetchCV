@@ -12,6 +12,7 @@ import {WorkspaceManifestWriter} from '../packages/storage/workspace-manifest.mj
 import {spawnSync} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import {ApplicationStore} from '../packages/storage/application-store.mjs';
+import {resolveElectronRuntime} from '../scripts/electron-runtime.mjs';
 
 const root=process.env.M1_ALLOWED_DELETE_ROOT;
 const {db:unused,source,dir}=await storageFixture('ui',db=>db.prepare('UPDATE jobs SET jd_raw=?').run('中'.repeat(99999)+'😀末页'));unused.close();
@@ -59,7 +60,7 @@ const env=Object.fromEntries(Object.entries(process.env).filter(([key])=>!['NODE
 env.FETCHCV_PARSER_RUNTIME=parserRuntime;
 const provider=await localAgentProvider({artifactId:exportBase.artifactId,basedOnVersionId:exportBase.versionId,basedOnHash:exportBase.contentHash});
 Object.assign(env,provider.env);
-const application=await electron.launch({args:[path.resolve('tests/fixtures/electron-workspace-ui.cjs')],env,cwd:process.cwd(),timeout:40000});
+const application=await electron.launch({executablePath:(await resolveElectronRuntime({projectRoot:path.resolve(import.meta.dirname,'..')})).executable,args:[path.resolve('tests/fixtures/electron-workspace-ui.cjs')],env,cwd:process.cwd(),timeout:40000});
 try {
   const window=await application.firstWindow();window.setDefaultTimeout(15000);const errors=[];window.on('pageerror',error=>errors.push(error.message));
   await window.getByText('本地工作区已打开',{exact:true}).waitFor({timeout:20000});

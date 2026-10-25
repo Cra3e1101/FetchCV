@@ -5,6 +5,8 @@ function latestActiveEvent(activity) {
 }
 
 export function resolveAgentRuntimeState({ activity, task, approvals = [], error = "" } = {}) {
+  if (activity?.stopping) return { id: "stopping", label: "正在停止生成", detail: "已请求停止，正在等待运行时结束本轮。", active: false, attention: true };
+  if (activity?.finished) return { id: activity.failed ? "error" : "completed", label: activity.failed ? "运行失败" : "回答已完成", detail: "正在同步本轮记录。", active: false, attention: true };
   if (error) return { id: "error", label: "需要处理", detail: String(error), active: false, attention: true };
   const pendingApproval = approvals.some((item) => item?.status === "pending");
   if (pendingApproval) return { id: "awaiting_approval", label: "等待你的确认", detail: "Agent 已停在实际操作之前。", active: false, attention: true };

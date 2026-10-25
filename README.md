@@ -59,6 +59,9 @@ FetchCV 是本地优先的 Windows 桌面求职 Agent。它把个人资料、目
 
 ### 面试情报与知识库
 
+- 默认 Python 后端通过 SQLite FTS5/BM25 检索面经与简报，支持中文相邻双字和英文词项匹配。
+- 岗位对话、独立聊天与知识库搜索共用索引；查询先限定资料范围，再排序。命中返回摘要与片段，原文可按需分页读取。
+- 索引随资料写入、修改和删除在同一事务内同步；当前为关键词检索，不代表已提供向量语义检索。
 - 完成岗位材料后可进入独立“面试”工作区。
 - 先检索本地面试知识库，再发现公开面经来源。
 - 小红书作为重点来源时使用只读、无账号优先、有限预算和熔断策略；遇到登录、验证码或访问限制立即停止，不绕过平台控制。
@@ -145,6 +148,26 @@ npm run desktop
 不要复用 macOS 生成的 `node_modules`、Python 虚拟环境、Sidecar 或 `.app`。
 
 `http://127.0.0.1:8766/docs` 是 Sidecar 调试接口，不是 FetchCV 客户端。
+
+### 开发版启动缓存
+
+`打开开发版.cmd` 使用的启动器会复用工作目录中的 Electron 构建和 Vite 依赖缓存。首次启动或 Electron 源码、依赖、preload 变化时重新构建；前端修改仍由 Vite 实时加载。构建期间保存文件不会把旧输出标记为可复用。每次构建保留独立输出目录，运行中的窗口不受下一次构建影响。
+
+开发版、浏览器预检和开发模式自动化共用 Electron 路径解析：显式路径 → `FETCHCV_ELECTRON_PATH` → `.m1-work/desktop-dev-local.json` → 已安装依赖。选择失效或版本不符会直接报错，不静默切换。`npm run browser:check` 检查主进程与隔离 renderer；`npm run test:browser-bridge` 检查浏览器桥的鉴权及生命周期。
+
+`npm run desktop:dev` 启动热更新窗口，默认使用独立开发资料库；现有 `打开开发版.cmd` 继续按本机配置使用指定资料库。运行时选择本身不会读取或复制用户资料。
+
+`current.json` 中的 `runtimeReused` 和 `runtimePreparationMs` 可用于确认缓存命中。需要强制重建时，可删除该开发工作目录下的 `runtime-cache.json`，无需清理个人数据。生产包将模型 SDK 分成按需加载的模块；设置、导入和资料库界面也在打开时加载。
+
+可用以下命令测量三次运行包准备耗时（不启动窗口或访问个人资料；该指标不代表完整启动时间）：
+
+```powershell
+node scripts/benchmark-startup.mjs --runtime-only --runs 3
+```
+
+省略 `--runtime-only` 可使用独立测试资料库测量开发版窗口和界面就绪时间，并检查设置面板。可通过 `--electron` 指定 Electron 可执行文件，或用 `--software-rendering` 测试软件渲染环境。
+
+启动日志区分资料可读和 Agent 就绪两个阶段。`--sidecar-only` 可单独测量 Python 后端；`startup-report.mjs` 按 cold/warm/unclassified 分别汇总中位数与 P95。
 
 ## 测试与打包
 

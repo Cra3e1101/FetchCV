@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Sequence
+from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any
 
@@ -53,10 +55,18 @@ def _signal_terms(value: str) -> list[str]:
     return sorted(terms, key=lambda item: (-len(item), item))
 
 
-def _requirement_match(requirement: str, resume_text: str, keywords: list[str]) -> tuple[bool, list[str]]:
-    normalized_resume = _normalized(resume_text)
-    explicit = [item for item in keywords if _normalized(item) and _normalized(item) in _normalized(requirement)]
-    explicit_hits = [item for item in explicit if _normalized(item) in normalized_resume]
+def _requirement_match(
+    requirement: str, resume_text: str, keywords: list[str], *,
+    normalized_resume: str | None = None,
+    normalized_keywords: list[tuple[str, str]] | None = None,
+) -> tuple[bool, list[str]]:
+    if normalized_resume is None:
+        normalized_resume = _normalized(resume_text)
+    if normalized_keywords is None:
+        normalized_keywords = [(item, _normalized(item)) for item in keywords]
+    normalized_requirement = _normalized(requirement)
+    explicit = [(item, term) for item, term in normalized_keywords if term and term in normalized_requirement]
+    explicit_hits = [item for item, term in explicit if term in normalized_resume]
     if explicit:
         required_explicit_hits = max(1, math.ceil(len(explicit) * 0.6))
         return len(explicit_hits) >= required_explicit_hits, explicit_hits[:5]
@@ -97,11 +107,9 @@ def _jd_context(source: str, offset: int, length: int) -> dict[str, str] | None:
     }
 
 
-def _resume_evidence_locations(snapshot: dict[str, Any], terms: list[str]) -> list[dict[str, Any]]:
-    """Return local, inspectable resume locations for matched requirement terms."""
-    if not terms:
-        return []
-    locations: list[dict[str, Any]] = []
+def _prepare_resume_evidence(snapshot: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    """Flatten each resume item once for all requirements in this evaluation."""
+    items: list[tuple[str, dict[str, Any]]] = []
     sections = snapshot.get("sections") if isinstance(snapshot, dict) else []
     for section_index, section in enumerate(sections or []):
         if not isinstance(section, dict):
@@ -113,9 +121,6 @@ def _resume_evidence_locations(snapshot: dict[str, Any], terms: list[str]) -> li
                 continue
             item_text = " · ".join(part.strip() for part in _flatten_strings(item) if part.strip())
             normalized_item = _normalized(item_text)
-            matched_terms = [term for term in terms if _normalized(term) in normalized_item]
-            if not matched_terms:
-                continue
             fields = item.get("fields") if isinstance(item.get("fields"), dict) else {}
             item_label = next(
                 (
@@ -136,25 +141,55 @@ def _resume_evidence_locations(snapshot: dict[str, Any], terms: list[str]) -> li
             snippet = re.sub(r"\s+", " ", body or item_text).strip()
             if len(snippet) > 180:
                 snippet = f"{snippet[:177].rstrip()}…"
-            locations.append({
+            items.append((normalized_item, {
                 "section_id": section_id,
                 "section_label": section_label,
                 "item_id": str(item.get("id") or f"{section_id}-{item_index + 1}"),
                 "item_label": item_label,
                 "snippet": snippet,
-                "matched_terms": matched_terms[:5],
-            })
+            }))
+    return items
+
+
+def _resume_evidence_locations(
+    snapshot: dict[str, Any], terms: list[str], *,
+    items: list[tuple[str, dict[str, Any]]] | None = None,
+) -> list[dict[str, Any]]:
+    """Return local, inspectable resume locations for matched requirement terms."""
+    if not terms:
+        return []
+    if items is None:
+        items = _prepare_resume_evidence(snapshot)
+    normalized_terms = [(term, _normalized(term)) for term in terms]
+    locations: list[dict[str, Any]] = []
+    for normalized_item, location in items:
+        matched_terms = [term for term, normalized in normalized_terms if normalized in normalized_item]
+        if matched_terms:
+            locations.append({**location, "matched_terms": matched_terms[:5]})
             if len(locations) >= 4:
                 return locations
     return locations
+
+
+@dataclass(frozen=True)
+class AtsReadinessInputs:
+    """Already-loaded workspace rows, including known missing/empty values."""
+
+    profile: JobProfile | None
+    reports: Sequence[QualityReport]
 
 
 class AtsReadinessEvaluator:
     def __init__(self, session: Session):
         self.session = session
 
-    def evaluate(self, *, job: Job, run: AgentRun | None, resume: ResumeVersion | None) -> dict[str, Any]:
-        profile = self.session.scalar(select(JobProfile).where(JobProfile.job_id == job.id))
+    def evaluate(
+        self, *, job: Job, run: AgentRun | None, resume: ResumeVersion | None,
+        inputs: AtsReadinessInputs | None = None,
+    ) -> dict[str, Any]:
+        profile = inputs.profile if inputs is not None else self.session.scalar(
+            select(JobProfile).where(JobProfile.job_id == job.id).limit(1)
+        )
         if resume is None or profile is None:
             return {
                 "status": "not_ready",
@@ -168,16 +203,24 @@ class AtsReadinessEvaluator:
             }
 
         resume_text = "\n".join(_flatten_strings(resume.content_json or {}))
+        normalized_resume = _normalized(resume_text)
+        normalized_keywords = [(keyword, _normalized(keyword)) for keyword in (profile.keywords or [])]
         keyword_rows = [
-            {"text": keyword, "matched": _normalized(keyword) in _normalized(resume_text)}
-            for keyword in list(dict.fromkeys(profile.keywords or []))
+            {"text": keyword, "matched": term in normalized_resume}
+            for keyword, term in dict(normalized_keywords).items()
             if str(keyword).strip()
         ]
         requirement_rows = []
         jd_source = job.jd_raw or ""
         snapshot = (resume.content_json or {}).get("editor_snapshot") or {}
+        evidence_items = None
         for requirement in list(dict.fromkeys(profile.hard_requirements or [])):
-            matched, evidence = _requirement_match(requirement, resume_text, profile.keywords or [])
+            matched, evidence = _requirement_match(
+                requirement, resume_text, profile.keywords or [],
+                normalized_resume=normalized_resume, normalized_keywords=normalized_keywords,
+            )
+            if evidence and evidence_items is None:
+                evidence_items = _prepare_resume_evidence(snapshot)
             source_offset = jd_source.find(requirement)
             requirement_rows.append({
                 "requirement_id": _requirement_identity(requirement),
@@ -187,16 +230,16 @@ class AtsReadinessEvaluator:
                 "matched": matched,
                 "evidence": evidence,
                 "jd_context": _jd_context(jd_source, source_offset, len(requirement)),
-                "resume_evidence": _resume_evidence_locations(snapshot, evidence),
+                "resume_evidence": _resume_evidence_locations(snapshot, evidence, items=evidence_items),
                 "support_status": "supported" if matched else ("partial" if evidence else "unsupported"),
             })
 
-        reports = [] if run is None else list(
+        reports = inputs.reports if inputs is not None else [] if run is None else list(
             self.session.scalars(select(QualityReport).where(QualityReport.run_id == run.id)).all()
         )
         sections = snapshot.get("sections") if isinstance(snapshot, dict) else []
         document_checks = [
-            {"code": "text_layer", "label": "存在可检索文本", "passed": len(_normalized(resume_text)) >= 120},
+            {"code": "text_layer", "label": "存在可检索文本", "passed": len(normalized_resume) >= 120},
             {"code": "section_structure", "label": "包含标准分区结构", "passed": isinstance(sections, list) and len(sections) >= 3},
             {
                 "code": "quality_gate",

@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from applyos_domain.models import AgentMessage, AgentRun, Fact, Job, JobProfile, ResumeVersion, VersionSnapshot
+from applyos_domain.job_context import current_analysis_marker
 from applyos_harness.errors import HarnessError
 from applyos_harness.state_machine import PipelineStage
 from applyos_harness.trace import TraceService
@@ -22,11 +23,18 @@ class AgentService:
         self.versions = VersionService(session)
 
     def analyze_job(self, job: Job, *, run: AgentRun | None = None) -> JobProfile:
+        marker = current_analysis_marker(job)
         analysis, runtime = self.suite.analyze_jd(job, session_id=run.session_id if run else None)
+        self.session.refresh(job)
+        if current_analysis_marker(job) != marker:
+            marker = {**marker, "analysis_status": "stale", "stale_reason": "job_input_changed_during_analysis",
+                      "current_input_revision": job.input_revision}
         profile = self.session.scalar(select(JobProfile).where(JobProfile.job_id == job.id))
         if profile is None:
             profile = JobProfile(job_id=job.id)
             self.session.add(profile)
+        if (profile.business_context or {}).get("stale_related_artifacts"):
+            marker["stale_related_artifacts"] = profile.business_context["stale_related_artifacts"]
         profile.responsibilities = [item.text for item in analysis.responsibilities]
         profile.hard_requirements = [item.text for item in analysis.hard_requirements]
         profile.preferred_requirements = [item.text for item in analysis.preferred_requirements]
@@ -34,6 +42,7 @@ class AgentService:
         profile.competencies = analysis.competencies
         profile.uncertain_items = analysis.uncertain_items
         profile.business_context = {
+            **marker,
             "evidence": [item.source_quote for item in analysis.responsibilities + analysis.hard_requirements + analysis.preferred_requirements],
             "runtime": runtime.usage.get("runtime", "mock"),
         }

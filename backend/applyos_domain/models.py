@@ -122,6 +122,9 @@ class Job(TimestampMixin, Base):
     source_type: Mapped[str] = mapped_column(String(80), default="manual", nullable=False)
     source_url: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(80), default="draft", nullable=False)
+    context_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    jd_provenance: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    input_revision: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
 
     candidate: Mapped[Candidate] = relationship(back_populates="jobs")
     profile: Mapped["JobProfile | None"] = relationship(back_populates="job", cascade="all, delete-orphan", uselist=False)
@@ -421,6 +424,7 @@ class RewriteProposal(TimestampMixin, Base):
     jd_evidence: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     fact_ids: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     risk_level: Mapped[RiskLevel] = mapped_column(enum_type(RiskLevel), default=RiskLevel.MEDIUM, nullable=False)
+    claim_contract: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     approval_status: Mapped[ProposalStatus] = mapped_column(enum_type(ProposalStatus), default=ProposalStatus.PENDING, nullable=False)
 
 

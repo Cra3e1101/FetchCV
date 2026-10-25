@@ -1,10 +1,13 @@
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useIsPresent } from "framer-motion";
 import {
-  BookOpenCheck, ChevronDown, ChevronRight, CircleAlert,
-  Database, ExternalLink, FileText, LoaderCircle, MessageCircleQuestion, Quote, RefreshCw,
+  ChevronRight, CircleAlert,
+  Database, ExternalLink, FileText, Quote, RefreshCw,
   SearchCheck, ShieldCheck, Sparkles,
 } from "lucide-react";
-import { lazy, Suspense, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { ActivityIndicator } from "../ui/ActivityIndicator";
+import { AnimatedCollapse } from "../ui/AnimatedCollapse";
+import { motionTokens, useAgentMotion } from "../ui/motion";
 
 function XiaohongshuConnection() {
   const [opened, setOpened] = useState(false);
@@ -30,19 +33,15 @@ function XiaohongshuConnection() {
 }
 import { formatInterviewSourceDate, sortInterviewSourcesNewest } from "../lib/interview-sources";
 import { openOriginalInterviewSource } from "../lib/interview-source-actions";
-import { sanitizeAssistantContent } from "../lib/model-protocol";
+import { matchingQuestionEvidence, readInterviewSourceHints } from "../lib/interview-evidence";
 import { coverageLabel, SourceReaderDialog, sourceLabel, sourcePlatformLabel } from "./InterviewSourceReader";
-import {
-  findLatestInterviewResearchResult,
-  hasUnansweredInterviewResearchRequest,
-  resolveInterviewResearchState,
-} from "../lib/interview-research";
-
-const AgentMarkdown = lazy(() => import("./AgentMarkdown"));
+import { buildJdPreparation, summarizeInterviewEvidence } from "../lib/interview-progress";
+import "./InterviewIntelligence.css";
 
 function SourceLink({ source, onOpen }) {
   const [opening, setOpening] = useState(false);
   if (!source) return null;
+  const hints = readInterviewSourceHints(source);
   const openOriginal = async () => {
     setOpening(true);
     try {
@@ -57,33 +56,28 @@ function SourceLink({ source, onOpen }) {
         <span>
           <small>{sourcePlatformLabel(source)} · {coverageLabel(source)} · {formatInterviewSourceDate(source)}</small>
           <strong>{sourceLabel(source)}</strong>
+          <small className="interview-source-hint-preview">{hints.preview}</small>
         </span>
-        {opening ? <LoaderCircle className="spin" size={12} /> : <ExternalLink size={12} />}
+        {opening ? <ActivityIndicator active priority={5} label="正在打开原帖" /> : <ExternalLink size={12} />}
       </button>
       <button type="button" className="snapshot" onClick={() => onOpen?.(source)} title="查看 FetchCV 本地备份"><FileText size={11} /></button>
     </article>
   );
 }
 
-function matchingEvidence(source, item) {
-  const target = String(item?.question || "").replace(/\s+/g, "");
-  const questions = source?.extracted_questions || source?.questions || [];
-  return questions.find((question) => {
-    const candidate = String(question?.question || "").replace(/\s+/g, "");
-    return candidate === target || candidate.includes(target) || target.includes(candidate);
-  }) || null;
-}
-
 function QuestionItem({ item, index, sourceById, onOpenSource }) {
+  const { reducedMotion, transition, enter } = useAgentMotion();
   const [open, setOpen] = useState(index < 3);
-  const evidenceSources = (item.source_ids || []).map((id) => sourceById.get(id)).filter(Boolean);
+  // The helper also requires the current source support to cover the stored
+  // independentQuestionCount; deleted or re-captured sources cannot keep it.
+  const independentCount = item.currentIndependentCount;
+  const evidenceSources = (item.currentSupportingSourceIds || []).map((id) => sourceById.get(id)).filter(Boolean);
   return (
     <motion.article
       className="interview-question"
-      layout
-      initial={{ opacity: 0, y: 6 }}
+      initial={enter()}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: Math.min(index * 0.035, 0.18), duration: 0.2 }}
+      transition={{ ...transition("enter"), delay: reducedMotion ? 0 : Math.min(index, 2) * motionTokens.stagger / 1000 }}
     >
       <button className="interview-question-head" type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
         <span className="interview-question-index">{String(index + 1).padStart(2, "0")}</span>
@@ -91,28 +85,19 @@ function QuestionItem({ item, index, sourceById, onOpenSource }) {
           <small>{item.category || "综合"}</small>
           <strong>{item.question}</strong>
         </span>
-        <span className={`interview-frequency ${item.confidence === "recurring" ? "recurring" : ""}`}>
-          {item.frequency >= 2 ? `${item.frequency} 篇提及` : "单一经验"}
+        <span className={`interview-frequency ${independentCount >= 2 ? "recurring" : ""}`}>
+          {independentCount >= 2 ? `${independentCount} 个独立来源` : independentCount === 1 ? "单一经验" : "独立性待核验"}
         </span>
-        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        <motion.span className="disclosure-arrow" animate={{ rotate: open ? 90 : 0 }} transition={reducedMotion ? { duration: 0 } : transition("micro")}><ChevronRight size={14} /></motion.span>
       </button>
-      <AnimatePresence initial={false}>
-        {open && (
-          <motion.div
-            className="interview-question-body"
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-          >
-            {item.why_it_matters && <div><small>为什么可能会问</small><p>{item.why_it_matters}</p></div>}
-            {item.preparation && <div><small>准备建议</small><p>{item.preparation}</p></div>}
-            {!item.why_it_matters && !item.preparation && <div><small>问题依据</small><p>该问题来自已读取面经的归纳；可在下方打开本地原文核对上下文。</p></div>}
+      <AnimatedCollapse open={open}>
+          <div className="interview-question-body">
+            <div><small>准备边界</small><p>练习解释思路与取舍；涉及个人经历时，只使用本人已确认的事实。可在下方打开原文核对问题上下文。</p></div>
             <footer>
               <span>来源依据</span>
               <div>
                 {evidenceSources.length ? evidenceSources.map((source) => {
-                  const evidence = matchingEvidence(source, item);
+                  const evidence = matchingQuestionEvidence(source, item);
                   return (
                     <button className="interview-evidence-card" type="button" key={source.id} onClick={() => onOpenSource?.(source)}>
                       <span><Quote size={11} />{coverageLabel(source)}</span>
@@ -121,171 +106,112 @@ function QuestionItem({ item, index, sourceById, onOpenSource }) {
                       <small>查看已保存原文 <ChevronRight size={11} /></small>
                     </button>
                   );
-                }) : <p className="interview-evidence-empty">旧简报尚未保存逐条来源映射；更新调研后会补全原文依据。</p>}
+                }) : <p className="interview-evidence-empty">当前没有可用来源支持该问题。</p>}
               </div>
             </footer>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          </div>
+      </AnimatedCollapse>
     </motion.article>
   );
 }
 
-function ResearchProgress({ activity }) {
+function researchStatus(activity, waitingForApproval) {
+  if (activity?.stopping) return { active: false, label: "正在停止生成" };
+  if (activity?.finished) return { active: false, label: activity.failed ? "本轮调研失败" : "本轮调研已结束" };
+  if (waitingForApproval) return { active: false, label: "等待你的确认" };
+  return { active: true, label: activity?.label || "检索本地知识库与公开面经" };
+}
+
+function ResearchProgress({ activity, waitingForApproval }) {
+  const { transition, enter, exit } = useAgentMotion();
+  const present = useIsPresent();
+  const state = researchStatus(activity, waitingForApproval);
   return (
-    <motion.section className="interview-progress" layout initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
-      <span className="interview-progress-mark"><Sparkles size={15} /></span>
-      <div>
-        <small>Agent 正在调研</small>
-        <strong className="interview-progress-label">{activity?.label || "检索本地知识库与公开面经"}</strong>
-        <p>当前只显示正在进行的动作；抓取日志、来源和校验状态统一收纳在右侧。</p>
-      </div>
+    <motion.section className="interview-progress" initial={enter()} animate={{ opacity: 1, y: 0 }} exit={{ ...exit(), transition: transition("exit") }} transition={transition("enter")}>
+      <span className="interview-progress-mark"><ActivityIndicator active={present && state.active} priority={20} label={state.label} /></span>
+      <div><small>Agent 调研状态</small><strong className="interview-progress-label">{state.label}</strong><p>本轮执行状态与当前证据分别记录；已保存的来源会持续保留。</p></div>
     </motion.section>
   );
 }
 
-function ResearchOutcome({ message, state, sourceCount, researching, canResearch, busy, onResearch, onOpenConversation }) {
-  const [expanded, setExpanded] = useState(false);
-  const content = sanitizeAssistantContent(message?.content || "");
-  const toolCount = Number(message?.metadata_json?.runtime?.evidence?.tool_count || 0);
-  const duration = Math.max(0, Math.round(Number(message?.metadata_json?.processing_duration_ms || 0) / 1000));
-  const title = state === "sources_saved" ? "已保存来源，等待生成面试简报" : "本轮调研已完成";
-  const description = state === "completed_without_brief"
-    ? "暂未形成可核查的共性问题，结论与下一步建议已经保留。"
-    : "已有调研结果，但还没有形成结构化面试简报。";
-
+function ResearchOutcome({ summary, researching, canResearch, busy, onResearch, onOpenConversation, onPrepare }) {
+  const { transition, enter } = useAgentMotion();
   return (
-    <motion.section className={`interview-outcome ${researching ? "previous" : ""}`} layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+    <motion.section className="interview-outcome" aria-label="面试证据状态" initial={enter()} animate={{ opacity: 1, y: 0 }} transition={transition("enter")}>
       <header>
-        <span className="interview-outcome-mark"><SearchCheck size={16} /></span>
-        <div><small>{researching ? "上一次调研" : "调研结果"}</small><strong>{title}</strong><p>{description}</p></div>
-        <button className="interview-outcome-toggle" type="button" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>
-          {expanded ? "收起" : "查看结论"}{expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-        </button>
+        <span className="interview-outcome-mark">{summary.reasons.some(reason => reason.key === "restricted") ? <CircleAlert size={16} /> : <SearchCheck size={16} />}</span>
+        <div><small>{summary.run.label}</small><strong>{summary.evidence.label}</strong><p>{summary.gapText}</p></div>
       </header>
       <div className="interview-outcome-facts">
-        {toolCount > 0 && <span>{toolCount} 次工具调用</span>}
-        <span>{sourceCount} 篇已验证面经已保存</span>
-        {duration > 0 && <span>用时 {duration} 秒</span>}
+        <span>累计已保存正文 {summary.savedBodyCount} 篇</span>
+        <span>已完成问题提取 {summary.extractedSourceCount} 篇</span>
+        <span>支持当前问题 {summary.usableSourceCount} 篇</span>
+        {summary.ocrPendingCount > 0 && <span>图片 OCR 待核对 {summary.ocrPendingCount} 篇</span>}
       </div>
-      <AnimatePresence initial={false}>
-        {expanded && (
-          <motion.div className="interview-outcome-report" initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }}>
-            <div className="interview-outcome-markdown">
-              <Suspense fallback={<p>{content}</p>}><AgentMarkdown content={content} /></Suspense>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <div className="interview-outcome-facts interview-evidence-accounting" aria-label="来源分组核验">
+        {summary.evidenceAccounting.metrics.map(metric => <span key={metric.key}>{metric.label} {metric.display}</span>)}
+      </div>
+      <p className="interview-round-accounting">{summary.evidenceAccounting.readinessText}</p>
+      <p className="interview-round-accounting">{summary.currentRoundSavedLabel}</p>
+      {!!summary.reasons.length && <div className="interview-research-reasons" aria-label="本轮调研原因">
+        {summary.reasons.map(reason => <p key={reason.key} data-reason={reason.key}><strong>{reason.label}{reason.count !== null ? " · " + reason.count + (reason.key === "irrelevant" ? " 个候选" : " 次") : ""}</strong><span>{reason.detail}</span></p>)}
+      </div>}
+      {summary.unsupportedQuestionCount > 0 && <p className="interview-stale-note">旧简报中有 {summary.unsupportedQuestionCount} 个问题缺少当前来源支持，未作为准备成果展示。历史记录已经保留。</p>}
       <footer>
-        <button type="button" onClick={onOpenConversation}>在对话中继续</button>
-        <button type="button" disabled={busy || !canResearch} onClick={onResearch}><RefreshCw size={13} />重新调研</button>
+        {!summary.supportedQuestionCount && <button type="button" onClick={onPrepare}><FileText size={13} />按 JD 准备</button>}
+        <button type="button" onClick={onOpenConversation}>补充原文或查看历史对话</button>
+        <button type="button" disabled={busy || !canResearch} onClick={onResearch}><RefreshCw size={13} />{researching ? "正在调研" : "重新调研"}</button>
       </footer>
     </motion.section>
   );
 }
 
-function ResearchFailure({ error, canResearch, busy, onResearch }) {
-  return (
-    <motion.section className="interview-outcome error" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
-      <header>
-        <span className="interview-outcome-mark"><CircleAlert size={16} /></span>
-        <div><small>调研中断</small><strong>本轮没有完成</strong><p>{error}</p></div>
-      </header>
-      <footer><button type="button" disabled={busy || !canResearch} onClick={onResearch}><RefreshCw size={13} />重试调研</button></footer>
-    </motion.section>
-  );
+function JdPreparation({ job, preparationRef }) {
+  const items = buildJdPreparation(job);
+  return <section className="interview-section interview-jd-preparation" aria-label="基于 JD 推导的准备建议" ref={preparationRef}>
+    <header><div><small>JD</small><h3>基于 JD 推导的准备建议</h3></div><p>以下由岗位要求派生，可先开始练习；不代表目标公司的真实面试题或高频问题。</p></header>
+    {items.length ? <div className="interview-advice">{items.map((item, index) => <article key={item.id}>
+      <span>{String(index + 1).padStart(2, "0")}</span>
+      <div><strong>{item.title}</strong><p>{item.action}</p><blockquote><small>JD 依据</small><p>{item.jdQuote}</p></blockquote></div>
+    </article>)}</div> : <p className="interview-evidence-empty">补充岗位 JD 原文后，可按具体要求整理练习清单。</p>}
+  </section>;
 }
 
 export function InterviewIntelligence({ detail, activity, busy, error, runtime, onResearch, onOpenConversation }) {
+  const { transition, enter } = useAgentMotion();
   const [readerSource, setReaderSource] = useState(null);
-  const briefs = detail.interview_briefs || [];
-  const brief = briefs[0];
-  const researchResult = useMemo(() => findLatestInterviewResearchResult(detail.messages || []), [detail.messages]);
-  const failedResearch = Boolean(error && hasUnansweredInterviewResearchRequest(detail.messages || []));
-  const researchState = resolveInterviewResearchState({ briefs, sources: detail.interview_sources || [], result: researchResult });
-  const recurringCount = (brief?.common_questions || []).filter((item) => item.frequency >= 2).length;
+  const [preparationElement, setPreparationElement] = useState(null);
+  const summary = useMemo(() => summarizeInterviewEvidence(detail, { activity, busy, error }), [detail, activity, busy, error]);
+  const brief = (detail.interview_briefs || [])[0];
   const canResearch = Boolean(runtime?.configured || runtime?.allow_mock_runtime);
   const researching = busy && activity?.kind === "chat" && activity?.taskKind === "interview_research";
-  const sourceById = useMemo(
-    () => new Map((detail.interview_sources || []).map((source) => [source.id, source])),
-    [detail.interview_sources],
-  );
-
-  if (!brief && !researching && !researchResult && !failedResearch) {
-    return (
-      <div className="interview-empty-wrap">
-        <motion.section className="interview-empty" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
-          <span className="interview-empty-mark"><BookOpenCheck size={22} /></span>
-          <p className="eyebrow">INTERVIEW INTELLIGENCE</p>
-          <h2>从真实面经，准备下一轮</h2>
-          <p>先复用已核验面经，再结合小红书与牛客原帖交叉验证。小红书按访问预算少量读取，受限时自动转向牛客。</p>
-          <div className="interview-empty-flow">
-            <span><SearchCheck size={14} />检索知识库</span><i />
-            <span><ExternalLink size={14} />验证多站点原帖</span><i />
-            <span><MessageCircleQuestion size={14} />归纳共性问题</span>
-          </div>
-          <div className="interview-public-mode"><ShieldCheck size={14} /><span><strong>原帖优先，快照备用</strong><small>失效页不会进入简报；遇到验证码或访问限制会立即停止。</small></span></div>
-          <button className="interview-primary" disabled={busy || !canResearch} onClick={onResearch}><Sparkles size={15} />开始面试调研</button>
-          <XiaohongshuConnection />
-          {!canResearch && <small className="interview-empty-note"><CircleAlert size={12} />请先在设置中连接模型</small>}
-        </motion.section>
-      </div>
-    );
-  }
-
+  const waitingForApproval = (detail.approvals || []).some(item => item.status === "pending");
+  const sourceById = useMemo(() => new Map(summary.sources.map(source => [source.id, source])), [summary.sources]);
   return (
     <div className="interview-scroll content-scroll">
       <div className="interview-page">
         <XiaohongshuConnection />
-        <AnimatePresence mode="popLayout">{researching && <ResearchProgress key="research-progress" activity={activity} />}</AnimatePresence>
-        {!brief && researchResult && (
-          <ResearchOutcome
-            message={researchResult}
-            state={researchState}
-            sourceCount={(detail.interview_sources || []).length}
-            researching={researching}
-            canResearch={canResearch}
-            busy={busy}
-            onResearch={onResearch}
-            onOpenConversation={onOpenConversation}
-          />
-        )}
-        {!brief && !researchResult && !researching && failedResearch && <ResearchFailure error={error} canResearch={canResearch} busy={busy} onResearch={onResearch} />}
-        {brief && (
-          <>
-            <header className="interview-brief-head">
-              <div><p className="eyebrow">INTERVIEW BRIEF</p><h2>{brief.company}{brief.business_unit ? ` · ${brief.business_unit}` : ""}</h2><p>{brief.role}</p></div>
-              <button type="button" disabled={busy || !canResearch} onClick={onResearch}><RefreshCw size={13} />更新调研</button>
-            </header>
-            <section className="interview-summary">
-              <p>{brief.summary}</p>
-              <div>
-                <span><b>{(brief.common_questions || []).length}</b> 个问题</span>
-                <span><b>{recurringCount}</b> 个多源共性</span>
-              </div>
-            </section>
-            <section className="interview-section">
-              <header><div><small>01</small><h3>可能被问到什么</h3></div><p>优先展示多篇面经共同出现的问题，单一经验会明确标记。</p></header>
-              <div className="interview-questions">
-                {(brief.common_questions || []).map((item, index) => <QuestionItem key={`${item.question}-${index}`} item={item} index={index} sourceById={sourceById} onOpenSource={setReaderSource} />)}
-              </div>
-            </section>
-            {!!brief.recommendations?.length && (
-              <section className="interview-section">
-                <header><div><small>02</small><h3>针对这份岗位的准备</h3></div><p>结合岗位要求、简历事实和已核验面经形成行动建议。</p></header>
-                <div className="interview-advice">
-                  {brief.recommendations.map((item, index) => (
-                    <article key={`${item.title}-${index}`}>
-                      <span>{String(index + 1).padStart(2, "0")}</span>
-                      <div><strong>{item.title}</strong><p>{item.action}</p>{item.rationale && <small>{item.rationale}</small>}</div>
-                    </article>
-                  ))}
-                </div>
-              </section>
-            )}
-          </>
-        )}
+        <AnimatePresence>{researching && <ResearchProgress key="research-progress" activity={activity} waitingForApproval={waitingForApproval} />}</AnimatePresence>
+        {summary.run.key === "idle" && !summary.savedBodyCount && <motion.header className="interview-brief-head" initial={enter()} animate={{ opacity: 1, y: 0 }} transition={transition("enter")}>
+          <div><p className="eyebrow">INTERVIEW PREPARATION</p><h2>先从岗位要求开始准备</h2><p>可结合公开面经补充问题依据，也可直接按 JD 练习。</p></div>
+          <button type="button" disabled={busy || !canResearch} onClick={onResearch}><Sparkles size={13} />开始面试调研</button>
+        </motion.header>}
+        <ResearchOutcome summary={summary} researching={researching} canResearch={canResearch} busy={busy} onResearch={onResearch} onOpenConversation={onOpenConversation} onPrepare={() => preparationElement?.scrollIntoView({ behavior: "smooth", block: "start" })} />
+        {!canResearch && <p className="interview-empty-note"><CircleAlert size={12} />连接模型后可调研；下方 JD 准备建议可直接使用。</p>}
+        {!!summary.questions.length && <>
+          <header className="interview-brief-head">
+            <div><p className="eyebrow">INTERVIEW BRIEF</p><h2>{brief?.company || detail.job?.company}{brief?.business_unit ? " · " + brief.business_unit : ""}</h2><p>{brief?.role || detail.job?.role}</p></div>
+          </header>
+          <section className="interview-summary">
+            <p>以下问题保留了当前来源的逐题支持映射。面经提供定向练习依据，个人答案仍需本人事实支持。</p>
+            <div><span><b>{summary.supportedQuestionCount}</b> 个有来源支持的问题</span>{summary.recurringQuestionCount > 0 && <span><b>{summary.recurringQuestionCount}</b> 个多源共性</span>}<span>证据有限</span></div>
+          </section>
+          <section className="interview-section">
+            <header><div><small>01</small><h3>有来源支持的练习问题</h3></div><p>独立来源频次须有当前有效的支持记录；来源数量不能证明岗位覆盖。</p></header>
+            <div className="interview-questions">{summary.questions.map((item, index) => <QuestionItem key={item.id || item.question} item={item} index={index} sourceById={sourceById} onOpenSource={setReaderSource} />)}</div>
+          </section>
+        </>}
+        <JdPreparation job={detail.job} preparationRef={setPreparationElement} />
       </div>
       <AnimatePresence>{readerSource && <SourceReaderDialog source={readerSource} onClose={() => setReaderSource(null)} />}</AnimatePresence>
     </div>
@@ -294,79 +220,53 @@ export function InterviewIntelligence({ detail, activity, busy, error, runtime, 
 
 export function InterviewRail({ detail, activity, busy, runtime, onResearch }) {
   const [readerSource, setReaderSource] = useState(null);
-  const brief = (detail.interview_briefs || [])[0];
-  const sources = useMemo(() => {
-    const all = detail.interview_sources || [];
-    if (!brief?.source_ids?.length) return all;
-    const ids = new Set(brief.source_ids);
-    return all.filter((source) => ids.has(source.id));
-  }, [brief, detail.interview_sources]);
-  const questions = brief?.common_questions || [];
-  const recurring = questions.filter((item) => item.frequency >= 2);
-  const xhsSources = sortInterviewSourcesNewest(sources.filter((source) => source.platform === "xiaohongshu"));
-  const supplementalSources = sortInterviewSourcesNewest(sources.filter((source) => source.platform !== "xiaohongshu"));
-  const sameBusinessSources = xhsSources.filter((source) => source.metadata_json?.coverage_scope === "same_business_role");
-  const companyRoleSources = xhsSources.filter((source) => source.metadata_json?.coverage_scope !== "same_business_role");
-  const verified = sources.filter((source) => source.status === "analyzed" || source.verified || source.content_verified || source.questions?.length).length;
-  const evidenceStatus = brief?.metadata_json?.evidence_status || (sources.length >= 4 && xhsSources.length ? "sufficient" : "limited");
+  const summary = useMemo(() => summarizeInterviewEvidence(detail, { activity, busy }), [detail, activity, busy]);
+  const sources = summary.sources;
+  const recurring = summary.questions.filter(item => item.currentIndependentCount >= 2);
+  const xhsSources = sortInterviewSourcesNewest(sources.filter(source => source.platform === "xiaohongshu"));
+  const supplementalSources = sortInterviewSourcesNewest(sources.filter(source => source.platform !== "xiaohongshu"));
   const canResearch = Boolean(runtime?.configured || runtime?.allow_mock_runtime);
-  const researching = busy && activity?.kind === "chat" && activity?.taskKind === "interview_research";
-
   return (
     <div className="interview-rail">
-      <section className={`interview-rail-state ${researching ? "researching" : ""}`}>
-        <span>{researching ? <Sparkles size={14} /> : <SearchCheck size={14} />}</span>
-        <div><small>{researching ? "正在调研" : brief ? "情报已就绪" : "等待开始"}</small><strong>{researching ? activity?.label || "读取公开来源" : brief ? "面试准备简报" : "暂无面试情报"}</strong></div>
+      <section className={"interview-rail-state " + (summary.run.active ? "researching" : "")}>
+        <span>{summary.run.active ? <ActivityIndicator active priority={10} label={summary.run.label} /> : <SearchCheck size={14} />}</span>
+        <div><small>{summary.run.label}</small><strong>{summary.evidence.label}</strong></div>
       </section>
-
       <section className="interview-rail-metrics">
-        <header><span>本轮结果</span></header>
+        <header><span>当前岗位累计</span></header>
         <div>
-          <article><b>{xhsSources.length}</b><small>小红书主来源</small></article>
-          <article><b>{supplementalSources.length}</b><small>社区补充</small></article>
-          <article><b>{verified}</b><small>正文核验</small></article>
+          <article><b>{summary.savedBodyCount}</b><small>已保存正文</small></article>
+          <article><b>{summary.extractedSourceCount}</b><small>已提取问题</small></article>
+          <article><b>{summary.usableSourceCount}</b><small>支持当前问题</small></article>
         </div>
-        {brief && <p className={`interview-evidence-status ${evidenceStatus}`}>{evidenceStatus === "sufficient" ? "已达到多源交叉验证门槛" : "证据有限，结论仅供定向准备"}</p>}
+        <div className="interview-rail-accounting" aria-label="来源分组核验">
+          {summary.evidenceAccounting.metrics.map(metric => <article key={metric.key}><b>{metric.count ?? metric.display}</b><small>{metric.label}</small></article>)}
+        </div>
+        {summary.ocrPendingCount > 0 && <p>图片 OCR 待核对：{summary.ocrPendingCount} 篇</p>}
+        <p className="interview-evidence-status limited">证据有限，来源篇数不代表独立性或岗位覆盖。</p>
+        <p>{summary.evidenceAccounting.readinessText}</p>
+        <p>{summary.currentRoundSavedLabel}</p>
       </section>
-
-      {!!recurring.length && (
-        <section className="interview-rail-common">
-          <header><span>高频问题</span><small>{Math.min(recurring.length, 3)}</small></header>
-          {recurring.slice(0, 3).map((item, index) => (
-            <div key={`${item.question}-${index}`}><span>{index + 1}</span><p>{item.question}</p></div>
-          ))}
-        </section>
-      )}
-
+      {!!recurring.length && <section className="interview-rail-common">
+        <header><span>高频问题</span><small>{Math.min(recurring.length, 3)}</small></header>
+        {recurring.slice(0, 3).map((item, index) => <div key={item.question + "-" + index}><span>{index + 1}</span><p>{item.question}</p></div>)}
+      </section>}
       <section className="interview-rail-sources">
         <header><span>来源证据库</span><small>{sources.length}</small></header>
-        {xhsSources.length ? (
-          <>
-            {!!sameBusinessSources.length && <div className="interview-source-group"><small>同事业部同岗 · {sameBusinessSources.length}</small>{sameBusinessSources.map((source) => <SourceLink key={source.id || source.source_url} source={source} onOpen={setReaderSource} />)}</div>}
-            {!!companyRoleSources.length && <div className="interview-source-group"><small>公司同岗 / 未注明事业部 · {companyRoleSources.length}</small>{companyRoleSources.map((source) => <SourceLink key={source.id || source.source_url} source={source} onOpen={setReaderSource} />)}</div>}
-          </>
-        ) : <p className="interview-rail-empty">读取到小红书正文并通过引用校验后，本地快照会出现在这里。</p>}
-        {!!supplementalSources.length && (
-          <div className="interview-source-group supplemental">
-            <small>牛客等补充来源 · {supplementalSources.length}</small>
-            {supplementalSources.map((source) => <SourceLink key={source.id || source.source_url} source={source} onOpen={setReaderSource} />)}
-          </div>
-        )}
+        {!!xhsSources.length && <div className="interview-source-group"><small>小红书来源 · {xhsSources.length}</small>{xhsSources.map(source => <SourceLink key={source.id} source={source} onOpen={setReaderSource} />)}</div>}
+        {!!supplementalSources.length && <div className="interview-source-group supplemental"><small>牛客等补充来源 · {supplementalSources.length}</small>{supplementalSources.map(source => <SourceLink key={source.id} source={source} onOpen={setReaderSource} />)}</div>}
+        {!sources.length && <p className="interview-rail-empty">尚无已保存来源。可先按 JD 准备，也可在对话中补充面经原文。</p>}
       </section>
-
       <section className="interview-access-policy">
-        <header><ShieldCheck size={13} /><span>来源校验策略</span></header>
+        <header><ShieldCheck size={13} /><span>来源状态说明</span></header>
         <ul>
-          <li><Database size={12} />本地知识库与缓存优先</li>
-          <li><SearchCheck size={12} />小红书低频读取，牛客默认参与交叉验证</li>
-          <li><CircleAlert size={12} />失效、登录、验证码页面不进入简报</li>
+          <li><Database size={12} />已保存正文与已提取问题分别统计</li>
+          <li><SearchCheck size={12} />原帖优先，快照备用</li>
+          <li><CircleAlert size={12} />失效页不会进入简报；OCR 待核对单列</li>
         </ul>
-        <small>按共享访问预算分批读取；受限时停止小红书，保留缓存并继续牛客。</small>
+        <small>来源摘要来自现有保存状态；完整正文与引文可在本地备份中查看。</small>
       </section>
-
-      <button className="interview-rail-refresh" type="button" disabled={busy || !canResearch} onClick={onResearch}>
-        <RefreshCw size={13} />{brief ? "更新面试情报" : "开始面试调研"}
-      </button>
+      <button className="interview-rail-refresh" type="button" disabled={busy || !canResearch} onClick={onResearch}><RefreshCw size={13} />{sources.length ? "更新面试情报" : "开始面试调研"}</button>
       <AnimatePresence>{readerSource && <SourceReaderDialog source={readerSource} onClose={() => setReaderSource(null)} />}</AnimatePresence>
     </div>
   );

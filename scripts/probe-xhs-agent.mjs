@@ -1,3 +1,4 @@
+import { resolveElectronRuntime } from "./electron-runtime.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -6,6 +7,8 @@ import { _electron as electron } from "playwright";
 import { findFreePort } from "../electron/sidecar.mjs";
 
 const projectRoot = path.resolve(import.meta.dirname, "..");
+// Live-data probe: defaults to APPDATA and copies private DB/model/session data.
+// FETCHCV_PROBE_LIVE=1 writes the original profile; this is NOT an isolated smoke test.
 const sourceUserData = process.env.FETCHCV_PROBE_SOURCE_USER_DATA
   || path.join(process.env.APPDATA || "", "fetchcv-desktop");
 const liveUserData = process.env.FETCHCV_PROBE_LIVE === "1";
@@ -26,6 +29,7 @@ if (!liveUserData) {
 
 const port = await findFreePort();
 const application = await electron.launch({
+  executablePath: (await resolveElectronRuntime({ projectRoot })).executable,
   args: [projectRoot],
   cwd: projectRoot,
   env: {

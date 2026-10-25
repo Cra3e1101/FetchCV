@@ -26,12 +26,12 @@ from applyos_domain.models import (
 
 from .approval import ApprovalService
 from .errors import HarnessError
-from .gates import PublishGate
+from .gates import PublishGate, proposal_claims, rendered_resume_text, resume_evidence_issues
 from .state_machine import PipelineStage, RunStateMachine
 from .trace import TraceService
-from .validation import Claim, FactValidator, role_strength_risk
+from .validation import Claim, FactValidator, grounded_claim, normalized_excerpt, role_strength_risk
 from .versioning import VersionService, canonical_hash
-from integrations.resume.editor_schema import build_editor_snapshot
+from integrations.resume.editor_schema import apply_resume_patches, build_editor_snapshot
 
 
 class MockPipeline:
@@ -204,7 +204,8 @@ class MockPipeline:
             self.session.add(profile)
         profile.responsibilities = [line.strip(" -•") for line in (job.jd_raw or "").splitlines() if line.strip()][:5] or [job.jd_raw or ""]
         profile.keywords = words
-        profile.business_context = {"source": "mock_deterministic_parser", "inferred": False}
+        from applyos_domain.job_context import current_analysis_marker
+        profile.business_context = {"source": "mock_deterministic_parser", "inferred": False, **current_analysis_marker(job, profile.business_context)}
         self.session.flush()
         return [f"job_profile:{profile.id}"]
 
@@ -268,19 +269,29 @@ class MockPipeline:
         resume = self._resume(run)
         if resume is None:
             candidate = self.session.get(Candidate, run.candidate_id)
-            base_resume = self.session.scalar(
+            source_resume = getattr(self, "source_resume", None)
+            base_resume = source_resume or self.session.scalar(
                 select(ResumeVersion)
                 .where(ResumeVersion.candidate_id == run.candidate_id, ResumeVersion.job_id.is_(None))
                 .order_by(ResumeVersion.updated_at.desc())
             )
-            snapshot, strategy = build_editor_snapshot(
-                self.session,
-                candidate=candidate,
-                job=self._job(run),
-                facts=facts,
-                strategy_override=self._strategy_payload(run),
-            )
-            claims = [{"text": fact.content, "fact_ids": [fact.id]} for fact in facts]
+            if source_resume is not None:
+                snapshot = deepcopy((source_resume.content_json or {}).get("editor_snapshot") or {})
+                strategy = self._strategy_payload(run) or {}
+            else:
+                snapshot, strategy = build_editor_snapshot(
+                    self.session, candidate=candidate, job=self._job(run), facts=facts,
+                    strategy_override=self._strategy_payload(run),
+                )
+            claims = [grounded_claim(fact) for fact in self._preserved_facts(run)]
+            self.validator.validate(candidate_id=run.candidate_id, asset_type="resume", claims=claims)
+            # A fact-only local fixture still needs actual visible text. Never
+            # pretend that claims metadata itself is a rendered resume.
+            if not snapshot.get("sections"):
+                if source_resume is not None:
+                    raise HarnessError("resume_editable_source_required", "请先保存含完整正文结构的简历，再准备改写", run_id=run.id)
+                snapshot["sections"] = [{"id": "experience", "title": "经历", "visible": True,
+                                         "items": [{"body": fact.content} for fact in facts]}]
             base_content = deepcopy(base_resume.content_json or {}) if base_resume else {}
             resume = ResumeVersion(
                 legacy_id=f"mock-run:{run.id}:draft",
@@ -289,7 +300,7 @@ class MockPipeline:
                 parent_version_id=base_resume.id if base_resume else None,
                 name=f"{self._job(run).role} · 定制简历",
                 status=AssetStatus.DRAFT,
-                content_json={**base_content, "claims": claims, "editor_snapshot": snapshot, "strategy": strategy, "page_count": 1, "generation_mode": self.execution_mode},
+                content_json={**base_content, "claims": [claim.model_dump(mode="json") for claim in claims], "editor_snapshot": snapshot, "strategy": strategy, "page_count": base_content.get("page_count", 1), "generation_mode": self.execution_mode},
                 source_fact_ids=[fact.id for fact in facts],
             )
             resume.content_hash = canonical_hash(resume.content_json)
@@ -305,6 +316,15 @@ class MockPipeline:
                 detected, matches = role_strength_risk(before, after)
                 if detected == "high":
                     risk = RiskLevel.HIGH
+                contract = item.get("claim_contract") or {}
+                if not contract and self.execution_mode == "local_rule":
+                    fact = next((fact for fact in facts if item.get("fact_ids") == [fact.id] and before == fact.content and after == fact.content), None)
+                    if fact is not None and normalized_excerpt(before) in normalized_excerpt(rendered_resume_text(resume.content_json)):
+                        claim = grounded_claim(fact)
+                        result = self.validator.validate(candidate_id=run.candidate_id, asset_type="resume", claims=[claim])
+                        contract = {"claims": [claim.model_dump(mode="json")], "source_resume_id": resume.id,
+                                    "source_resume_hash": canonical_hash(resume.content_json), "needs_evidence": not result.passed,
+                                    "issues": [issue.model_dump(mode="json") for issue in result.issues]}
                 self.session.add(
                     RewriteProposal(
                         resume_version_id=resume.id,
@@ -315,6 +335,7 @@ class MockPipeline:
                         reason=item.get("reason") or "提高与 JD 的信息对应度",
                         jd_evidence=item.get("jd_evidence") or [(self._job(run).jd_raw or "")[:240]],
                         fact_ids=item.get("fact_ids") or [],
+                        claim_contract=contract,
                         risk_level=risk,
                     )
                 )
@@ -340,30 +361,43 @@ class MockPipeline:
         if pending:
             raise HarnessError("approval_required", "仍有未审批建议", run_id=run.id, details={"ids": pending})
         accepted = [item for item in proposals if item.approval_status in {ProposalStatus.ACCEPTED, ProposalStatus.EDITED_ACCEPTED}]
-        facts = self._verified_facts(run)
-        overrides = {fact_id: item.edited_after or item.after for item in accepted for fact_id in item.fact_ids}
-        claims = [{"text": overrides.get(fact.id, fact.content), "fact_ids": [fact.id]} for fact in facts]
-        fact_ids = [fact.id for fact in facts]
-        candidate = self.session.get(Candidate, run.candidate_id)
-        snapshot, strategy = build_editor_snapshot(
-            self.session,
-            candidate=candidate,
-            job=self._job(run),
-            facts=facts,
-            text_overrides=overrides,
-            strategy_override=self._strategy_payload(run),
-        )
-        content = {**resume.content_json, "claims": claims, "editor_snapshot": snapshot, "strategy": strategy, "page_count": 1}
+        approved_hashes = (approval.decision_payload or {}).get("proposal_content_hashes") or {} if approval else {}
+        changed = [item.id for item in accepted if approved_hashes.get(item.id) != canonical_hash({
+            "before": item.before, "after": item.after, "edited_after": item.edited_after,
+            "claim_contract": item.claim_contract, "fact_ids": item.fact_ids, "approval_status": item.approval_status.value,
+        })]
+        if changed:
+            raise HarnessError("approval_proposal_changed", "已审批建议内容或证据发生变化，请重新审阅", run_id=run.id, details={"proposal_ids": changed})
+        approved_claims = [claim for item in accepted for claim in proposal_claims(self.session, item)]
+        content = apply_resume_patches(resume.content_json, [
+            {"before": item.before, "after": item.edited_after or item.after} for item in accepted
+        ])
+        visible_text = normalized_excerpt(rendered_resume_text(content))
+        # Patches are independent operations, even when they share evidence.
+        # Never collapse multiple reviewed edits into a fact_id -> text map.
+        preserved_claims = []
+        for fact in self._preserved_facts(run):
+            if normalized_excerpt(fact.content) in visible_text:
+                preserved_claims.append(grounded_claim(fact))
+            preserved_claims.extend(grounded_claim(fact, text=sentence) for sentence in re.split(r"(?<=[。！？!?])\s*", fact.content)
+                                    if sentence.strip() and sentence.strip() != fact.content.strip()
+                                    and normalized_excerpt(sentence) in visible_text)
+        claims = [*approved_claims, *preserved_claims]
+        result = self.validator.validate(candidate_id=run.candidate_id, asset_type="resume", claims=claims)
+        if not result.passed:
+            raise HarnessError("resume_apply_needs_evidence", "应用前事实复验失败，请补证后重新审阅", details={"issues": [issue.model_dump(mode="json") for issue in result.issues]})
+        fact_ids = list(dict.fromkeys(ref.fact_id for claim in claims for ref in claim.evidence))
+        content = {**content, "claims": [claim.model_dump(mode="json") for claim in claims],
+                   "verification_status": "verified"}
         self.versions.update_resume(resume, content_json=content, source_fact_ids=fact_ids, run_id=run.id, reason="apply approved proposals")
         return [f"resume:{resume.id}"]
 
     def _validate_resume_facts(self, run: AgentRun) -> list[str]:
         resume = self._require_resume(run)
-        claims = [Claim.model_validate(item) for item in resume.content_json.get("claims", [])]
-        result = self.validator.validate(candidate_id=run.candidate_id, asset_type="resume", claims=claims)
-        if not result.passed:
-            first = result.issues[0]
-            raise HarnessError(f"quality_{first.code}", first.message, run_id=run.id, stage=run.current_stage, details={"issues": [item.model_dump(mode="json") for item in result.issues]})
+        issues = resume_evidence_issues(self.session, resume)
+        if issues:
+            first = issues[0]
+            raise HarnessError(f"quality_{first.code}", first.message, run_id=run.id, stage=run.current_stage, details={"issues": [item.model_dump(mode="json") for item in issues]})
         return [f"validated_resume:{resume.id}"]
 
     def _build_mock_portfolio(self, run: AgentRun) -> list[str]:
@@ -423,6 +457,11 @@ class MockPipeline:
         if selected_ids:
             statement = statement.where(Fact.id.in_(selected_ids))
         return list(self.session.scalars(statement.order_by(Fact.created_at)).all())
+
+    def _preserved_facts(self, run: AgentRun) -> list[Fact]:
+        """Evidence for unchanged imported sections also needs current support."""
+        return [fact for fact in self.session.scalars(select(Fact).where(Fact.candidate_id == run.candidate_id, Fact.verified.is_(True)).order_by(Fact.created_at)).all()
+                if not fact.allowed_outputs or "resume" in fact.allowed_outputs]
 
     def _strategy_payload(self, run: AgentRun) -> dict[str, Any] | None:
         snapshot = self.session.scalar(

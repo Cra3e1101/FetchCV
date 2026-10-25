@@ -1,0 +1,77 @@
+/* Playback and parameters are owned by motion.js / ActivityIndicator.
+   Keep these scoped overrides after the legacy replica styles. */
+.agent-message { animation: none; }
+.agent-message.agent-message-entered { animation: agent-message-enter var(--motion-duration-enter) var(--motion-ease-enter) both; }
+@keyframes agent-message-enter { from { opacity: 0; transform: translateY(var(--motion-distance-sm)); } to { opacity: 1; transform: translateY(0); } }
+
+.processing-disclosure.running .processing-summary strong::before,
+.interview-progress::after,
+.interview-rail-state.researching > span::after { content: none; }
+.rail-state > span.running { animation: none; }
+.processing-detail .activity-line.active .activity-line-copy strong,
+.processing-detail .activity-line.active .activity-line-copy > span,
+.interview-progress-label { color: inherit; background: none; -webkit-text-fill-color: currentColor; animation: none; }
+.source-grid .processing-detail .activity-line.active .activity-line-copy strong { color: var(--ui-secondary); }
+.source-grid .processing-disclosure.failed .processing-summary,
+.source-grid .processing-detail .activity-line.failed :is(.activity-line-icon, .activity-line-state),
+.source-grid .tool-receipt-detail.failed :is(.replica-activity-label, .shell-status) {
+  color: #ae5f4e;
+  transition: color var(--motion-duration-micro) var(--motion-ease-enter);
+}
+:root:is([data-interface-theme="dark"], [data-interface-theme="neutral-dark"]) .source-grid .processing-disclosure.failed .processing-summary,
+:root:is([data-interface-theme="dark"], [data-interface-theme="neutral-dark"]) .source-grid .processing-detail .activity-line.failed :is(.activity-line-icon, .activity-line-state),
+:root:is([data-interface-theme="dark"], [data-interface-theme="neutral-dark"]) .source-grid .tool-receipt-detail.failed :is(.replica-activity-label, .shell-status) { color: #d28a79; }
+
+.app-shell :is(.agent-workspace-v2, .standalone-chat, .agent-rail-v2) button {
+  transition: color var(--motion-duration-micro) var(--motion-ease-enter),
+    background-color var(--motion-duration-micro) var(--motion-ease-enter),
+    border-color var(--motion-duration-micro) var(--motion-ease-enter),
+    opacity var(--motion-duration-micro) var(--motion-ease-enter),
+    transform var(--motion-duration-micro) var(--motion-ease-enter);
+}
+.app-shell :is(.agent-workspace-v2, .standalone-chat, .agent-rail-v2) button:active:not(:disabled) { transform: scale(var(--motion-press-scale)); }
+.source-grid .processing-disclosure.rp-actgroup button.processing-summary > svg,
+.source-grid .fold-group .replica-activity-header .fold-chev > svg,
+.rail-evidence-toggle svg { transition: transform var(--motion-duration-micro) var(--motion-ease-enter), opacity var(--motion-duration-micro) var(--motion-ease-enter); }
+.source-grid .processing-disclosure.rp-actgroup button.processing-summary[aria-expanded] > svg,
+.source-grid .fold-group .replica-activity-header .fold-chev > svg { transform: rotate(-90deg); }
+/* Component state owns direction even when a replica skin is loaded later. */
+.source-grid .processing-disclosure.rp-actgroup button.processing-summary[aria-expanded="true"] > svg,
+.source-grid .fold-group .replica-activity-header > button.fold-toggle[aria-expanded="true"] ~ span.fold-chev > svg { transform: rotate(0deg); }
+.fold-chev { transition: opacity var(--motion-duration-micro) var(--motion-ease-enter); }
+.source-grid .fold-group .replica-activity-header { transition: background-color var(--motion-duration-micro) var(--motion-ease-enter); }
+
+.composer-send { position: relative; }
+.composer-action-icon { position: absolute; inset: 0; display: grid; place-items: center; }
+.composer-action-icon > span { grid-area: 1 / 1; display: grid; place-items: center; }
+.tool-approval-interrupt { position: relative; }
+.tool-approval-interrupt::after { content: ""; position: absolute; inset: 0; border: 1px solid currentColor; border-radius: inherit; pointer-events: none; opacity: 0; animation: agent-attention-once var(--motion-duration-panel) var(--motion-ease-exit) both; }
+@keyframes agent-attention-once { from { opacity: .16; } to { opacity: 0; } }
+.source-grid > .agent-rail-v2:not(.collapsed) { display: flex; flex-direction: column; }
+.agent-rail-v2 > .rail-head { flex-shrink: 0; }
+.rail-view-switch { min-width: 0; min-height: 0; flex: 1; overflow-y: auto; }
+.rail-view-switch > .interview-rail { height: auto; min-height: 100%; overflow: visible; }
+.disclosure-arrow { display: inline-flex; }
+.interview-reader-loading .activity-indicator > i { width: 3px; height: 3px; border: 0; border-radius: 50%; }
+.selection-quote-action { animation-duration: var(--motion-duration-micro); animation-timing-function: var(--motion-ease-enter); }
+.composer-quote { animation-duration: var(--motion-duration-enter); animation-timing-function: var(--motion-ease-enter); }
+@keyframes quote-action-enter { from { opacity: 0; transform: translateY(var(--motion-distance-sm)) scale(var(--motion-press-scale)); } to { opacity: 1; transform: translateY(0) scale(1); } }
+.agent-message-actions { transition: opacity var(--motion-duration-micro) var(--motion-ease-enter); }
+.approval-menu.approval-menu { translate: none; scale: none; transition: none; }
+.source-composer .rp-permmenu { animation: none; }
+.message-interview-sources > div > article,
+.interview-evidence-card,
+.rail-cover-letter { transition: background-color var(--motion-duration-micro) var(--motion-ease-enter), border-color var(--motion-duration-micro) var(--motion-ease-enter); }
+.interview-evidence-card:hover { transform: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .source-grid .agent-message.agent-message-entered,
+  .source-grid .selection-quote-action,
+  .source-grid .composer-quote { animation: agent-fade-in var(--motion-duration-micro) linear both !important; }
+  .source-grid .source-composer .rp-permmenu { animation: none !important; }
+  .source-grid .processing-disclosure.rp-actgroup button.processing-summary > svg,
+  .source-grid .fold-group .replica-activity-header .fold-chev > svg { transition: opacity var(--motion-duration-micro) linear !important; }
+  .app-shell :is(.agent-workspace-v2, .standalone-chat, .agent-rail-v2) button:active:not(:disabled) { transform: none; }
+  .source-grid .activity-indicator i { animation: none !important; }
+}
+@keyframes agent-fade-in { from { opacity: 0; } to { opacity: 1; } }

@@ -1,3 +1,5 @@
+import { matchingQuestionEvidence } from "./interview-evidence.js";
+
 export const INTERVIEW_RESEARCH_TASK = "interview_research";
 export const LEGACY_INTERVIEW_RESEARCH_MARKER = "请为当前岗位开展一次可追溯的面试情报调研";
 
@@ -35,9 +37,13 @@ export function hasUnansweredInterviewResearchRequest(messages = []) {
 }
 
 export function resolveInterviewResearchState({ briefs = [], sources = [], result = null } = {}) {
-  if (briefs.length) return briefs[0]?.metadata_json?.evidence_status === "limited" ? "brief_limited" : "brief_ready";
-  const persisted = result?.metadata_json?.research_result?.status;
-  if (persisted) return persisted;
-  if (sources.length) return "sources_saved";
+  const currentSources = new Map(sources.filter(source => source.status === "analyzed"
+    && String(source.text_preview ?? source.raw_text ?? "").trim() && source.extracted_questions?.length).map(source => [source.id, source]));
+  const supported = (briefs[0]?.common_questions || []).some(item =>
+    (item.question_evidence?.supporting_source_ids || []).some(id => currentSources.has(id)
+      && Boolean(matchingQuestionEvidence(currentSources.get(id), item)?.evidence_quote?.trim())));
+  // A legacy brief or persisted source_count cannot establish current evidence.
+  if (supported) return "brief_limited";
+  if (sources.some(source => ["captured", "analyzed"].includes(source.status) && String(source.text_preview ?? source.raw_text ?? "").trim())) return "sources_saved";
   return result ? "completed_without_brief" : "idle";
 }

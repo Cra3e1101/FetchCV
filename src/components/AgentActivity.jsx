@@ -1,66 +1,36 @@
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { motion } from "framer-motion";
+import "./AgentActivity.css";
 import {
-  Brain, Check, ChevronDown, Circle, Copy, FileText, Image as ImageIcon,
-  Search, Sparkles, Wrench,
+  Brain, Check, ChevronDown, Circle, Copy, FileText, Globe2, Image as ImageIcon,
+  Search, Sparkles, Terminal, Wrench,
 } from "lucide-react";
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { compactProcessingEvents, formatProcessingDuration, mergeProcessingEvent } from "../lib/processing";
-
-// activity-fold.html toggleBody, with cancellable completion callbacks so a
-// second click reverses the current transition instead of leaving a stale hide.
-function toggleBody(body, open) {
-  const height = body.hidden ? 0 : body.getBoundingClientRect().height;
-  body.hidden = false;
-  body.style.height = `${height}px`;
-  void body.offsetHeight;
-  body.style.height = open ? `${body.scrollHeight}px` : "0px";
-  const finish = () => {
-    body.style.height = open ? "auto" : "0px";
-    body.hidden = !open;
-  };
-  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-    finish();
-    return undefined;
-  }
-  const end = (event) => {
-    if (event.target === body && event.propertyName === "height") finish();
-  };
-  body.addEventListener("transitionend", end);
-  // transitionend is absent when both heights are zero or the ancestor hides.
-  const timer = window.setTimeout(finish, 350);
-  return () => {
-    body.removeEventListener("transitionend", end);
-    window.clearTimeout(timer);
-  };
-}
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { chronologicalProcessingEvents, formatProcessingDuration, mergeProcessingEvent } from "../lib/processing";
+import { AnimatedCollapse } from "../ui/AnimatedCollapse";
+import { ActivityIndicator } from "../ui/ActivityIndicator";
+import { motionTokens, useAgentMotion } from "../ui/motion";
+import { receiptActivity } from "../../shared/tool-activity.mjs";
+import "../ui/agent-links.css";
 
 function FoldBody({ open, id, children }) {
-  const ref = useRef(null);
-  const initial = useRef(true);
-  useLayoutEffect(() => {
-    const body = ref.current;
-    if (initial.current) {
-      initial.current = false;
-      body.hidden = !open;
-      body.style.height = open ? "auto" : "0px";
-      return undefined;
-    }
-    return toggleBody(body, open);
-  }, [open]);
-  return <div ref={ref} id={id} className="fold-body" aria-hidden={!open} inert={!open ? "" : undefined}>{children}</div>;
+  return <AnimatedCollapse open={open} id={id} className="fold-body rp-actbody">{children}</AnimatedCollapse>;
 }
 
-function FoldHeader({ label, open, onToggle, bodyId, className = "", disabled = false }) {
-  const handleClick = (event) => { event.stopPropagation(); if (!disabled) onToggle(); };
+function FoldHeader({ label, open, onToggle, bodyId, className = "", disabled = false, icon: Icon = Wrench, activity }) {
+  const handleClick = (event) => { event.stopPropagation(); if (!disabled && !event.target.closest('a')) onToggle(); };
   return <div className="group/activity-header replica-activity-header" onClick={handleClick}>
     <button type="button" className={`fold-toggle ${className}`} aria-label={label} aria-expanded={disabled ? undefined : open} aria-controls={disabled ? undefined : bodyId} disabled={disabled} onClick={handleClick} />
-    <span className="inline-flex min-w-0 gap-1.5 replica-activity-label"><Wrench size={16} /><span>{label}</span></span>
-    {!disabled && <span className="fold-chev pointer-events-none relative flex"><ChevronDown size={16} /></span>}
+    <span className="inline-flex min-w-0 gap-1.5 replica-activity-label"><Icon size={16} aria-hidden="true" /><span>{label}</span></span>
+    {activity && (activity.href
+      ? <a className="tool-activity-target agent-link" href={activity.href} target="_blank" rel="noreferrer" title={activity.href}>{new URL(activity.href).hostname.replace(/^www\./, '')}</a>
+      : <span className="tool-activity-target" title={activity.text}>{activity.kind === 'search' ? `“${activity.text}”` : activity.text}</span>)}
+    {!disabled && <span className="fold-chev rp-rowchev pointer-events-none relative flex"><ChevronDown size={16} aria-hidden="true" /></span>}
   </div>;
 }
 
-export function ToolReceipt({ receipts = [] }) {
-  const [open, setOpen] = useState(false);
+export function ToolReceipt({ receipts = [], defaultExpanded = false, animate = false }) {
+  const animation = useAgentMotion();
+  const [open, setOpen] = useState(defaultExpanded);
   const [expandedIds, setExpandedIds] = useState(() => new Set());
   const bodyId = useId();
   const completed = receipts.filter((item) => item.status === "completed");
@@ -71,47 +41,70 @@ export function ToolReceipt({ receipts = [] }) {
     setExpandedIds(new Set());
   };
   if (!receipts.length) return null;
-  return <section className="agent-tool-receipt fold-group rp-actgroup" data-open={open}>
+  return <motion.section className="agent-tool-receipt fold-group rp-actgroup" data-open={open} initial={animate ? animation.enter() : false} animate={{ opacity: 1, y: 0 }} transition={animation.transition("enter")}>
     <div className="outline-none"><div className="min-w-0 text-size-chat relative overflow-visible py-0"><div className="flex min-w-0 flex-col">
       <FoldHeader className="tool-group-toggle" label={label} open={open} onToggle={toggleGroup} bodyId={bodyId} />
     </div></div></div>
-    <FoldBody open={open} id={bodyId}><div className="fold-command-list">{receipts.map((item) => {
-      const key = item.tool_call_id || `${item.tool_name}-${item.summary}`;
+    <FoldBody open={open} id={bodyId}><div className="fold-command-list">{receipts.map((item, index) => {
+      const key = item.tool_call_id || `${item.tool_name}-${index}`;
       return <ReceiptDetail key={key} item={item} open={open && expandedIds.has(key)} onToggle={() => setExpandedIds(previous => {
         const next = new Set(previous);
         if (next.has(key)) next.delete(key); else next.add(key);
         return next;
       })} />;
     })}</div></FoldBody>
-  </section>;
+  </motion.section>;
 }
 
 function ReceiptDetail({ item, open, onToggle }) {
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState(null);
   const copyTimer = useRef(null);
   const bodyId = useId();
   useEffect(() => () => window.clearTimeout(copyTimer.current), []);
-  const status = item.requires_user_action ? "等待确认" : ({completed:"成功",failed:"失败",cancelled:"已中断",interrupted:"已中断",running:"运行中",active:"运行中",pending:"等待中",paused:"已暂停"}[item.status] || "状态未知");
-  const label = `${item.status === "completed" ? "已运行" : status} ${item.tool_name || "工具"}`;
-  return <article className={`fold-command-row tool-receipt-detail outline-none ${item.status || "unknown"}`} data-open={open}>
+  const status = item.requires_user_action ? "等待确认" : ({completed:"成功",completed_refresh_failed:"已执行，后续处理失败",failed:"失败",cancelled:"已中断",interrupted:"已中断",running:"运行中",active:"运行中",pending:"等待中",awaiting_approval:"等待确认",paused:"已暂停"}[item.status] || "状态未知");
+  const succeeded = item.status === "completed" && !item.requires_user_action;
+  const toolName = item.tool_name || "工具";
+  const activity = receiptActivity(item);
+  // Current receipts retain summaries, not shell arguments. Never invent a
+  // command from a tool name or display a generic result as shell execution.
+  const isShell = /^(exec_command|run_command|shell|bash|powershell)$/.test(toolName.split(/__|\./).at(-1))
+    && typeof item.command === "string" && Boolean(item.command.trim());
+  const command = isShell ? item.command : "";
+  const output = isShell && typeof item.output === "string" ? item.output : item.summary || "";
+  const label = `${succeeded ? "已运行" : status} ${command || toolLabels[toolName] || toolName}`;
+  const copy = async (text, kind) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(kind);
+      window.clearTimeout(copyTimer.current);
+      copyTimer.current = window.setTimeout(() => setCopied(null), 1500);
+    } catch { setCopied(null); }
+  };
+  const toggleRow = (event) => {
+    // Own the entire row hit target, excluding output selection/copy actions.
+    if (event.target.closest("[data-receipt-output], button, a")) return;
+    onToggle();
+  };
+  return <article className={`rp-cmdrow fold-command-row tool-receipt-detail outline-none ${item.status || "unknown"}`} data-open={open} onClick={toggleRow}>
     <div className="min-w-0 text-size-chat relative overflow-visible py-0"><div className="flex min-w-0 flex-col relative overflow-clip">
-      <FoldHeader className="tool-detail-toggle" label={label} open={open} onToggle={onToggle} bodyId={bodyId} />
-      <FoldBody open={open} id={bodyId}><div data-testid="exec-shell-body"><div className="fold-output-spacing flex flex-col gap-2 pt-2 pb-1">
-        <div className="tool-output-card group flex flex-col overflow-hidden rounded-lg border border-strong bg-secondary-soft-alpha">
-          <header><span>工具结果</span>{item.summary && <button type="button" aria-label="复制工具结果" onClick={async () => {
-            try {
-              await navigator.clipboard.writeText(item.summary);
-              setCopied(true);
-              window.clearTimeout(copyTimer.current);
-              copyTimer.current = window.setTimeout(() => setCopied(false), 1500);
-            } catch { setCopied(false); }
-          }}>{copied ? <Check size={12} /> : <Copy size={12} />}</button>}</header>
-          <div className="fold-output-content px-2 pt-2"><pre className="m-0 p-0 font-code text-size-chat-sm text-codex-description">{item.summary || "此工具未返回可展示的摘要"}</pre></div>
+      <FoldHeader className="tool-detail-toggle" label={label} open={open} onToggle={onToggle} bodyId={bodyId} activity={activity} icon={isShell ? Terminal : activity?.kind === 'url' ? Globe2 : activity?.kind === 'search' ? Search : activity?.kind === 'file' ? FileText : Wrench} />
+    </div></div>
+      <FoldBody open={open} id={bodyId}><div data-testid="exec-shell-body" data-receipt-output><div className="fold-output-spacing flex flex-col gap-2 pt-2 pb-1">
+        <div className={`tool-output-card ${isShell ? "shell-output-card" : ""} group flex flex-col overflow-hidden rounded-lg border border-strong bg-secondary-soft-alpha`}>
+          <header><span>{isShell ? "Shell" : "工具结果"}</span>{output && <button type="button" aria-label="复制工具结果" onClick={() => copy(output, "output")}>
+            {copied === "output" ? <Check size={12} /> : <Copy size={12} />}
+          </button>}</header>
+          {command && <div className="shell-command group/command">
+            <span className="shell-command-prefix" aria-hidden="true">$</span><code className="shell-command-text font-code">{command}</code>
+            <button type="button" className="shell-command-copy" aria-label="复制命令" onClick={() => copy(command, "command")}>
+              {copied === "command" ? <Check size={12} /> : <Copy size={12} />}
+            </button>
+          </div>}
+          <div className="fold-output-content px-2 pt-2"><pre className="shell-output m-0 p-0 font-code text-size-chat-sm text-codex-description">{output || "此工具未返回可展示的摘要"}</pre></div>
           {!!item.artifacts?.length && <small>已登记 {item.artifacts.length} 项可追溯记录</small>}
-          <footer>{item.status === "completed" && <Check size={12} />}<span>{status}</span></footer>
+          <footer className="shell-status"><span>{succeeded && <Check size={12} aria-hidden="true" />}{status}</span></footer>
         </div>
       </div></div></FoldBody>
-    </div></div>
   </article>;
 }
 
@@ -124,6 +117,31 @@ const activityLabels = {
 };
 
 const toolLabels = {
+  // These labels already exist in electron/pi-agent-runtime.mjs.
+  search_web: "搜索网页",
+  read_web_page: "读取网页",
+  open_browser_page: "打开网页",
+  read_browser_page: "读取当前网页",
+  list_workspace_files: "查看工作区文件",
+  read_workspace_file: "读取工作区文件",
+  search_workspace_text: "搜索工作区",
+  read_job_workspace_context: "读取岗位与简历上下文",
+  search_interview_knowledge: "检索面试知识库",
+  read_interview_source: "读取面经原文",
+  discover_interview_sources: "发现面经来源",
+  capture_interview_source: "读取面经原文",
+  analyze_interview_source: "提取面试问题",
+  build_interview_brief: "生成面试简报",
+  activate_interview_research: "切换到面试调研",
+  inspect_application_workspace: "读取求职工作区",
+  prepare_job_review: "形成岗位理解与经历建议",
+  prepare_resume_review: "生成简历策略与改写补丁",
+  apply_and_verify_resume: "应用并验证简历新版本",
+  finalize_resume_version: "完成简历版本",
+  write_workspace_file: "写入工作区文件",
+  move_workspace_file: "移动工作区文件",
+  delete_workspace_file: "删除工作区文件",
+  read_skill: "读取 Skill",
   validate_run_input: "核对岗位与资料",
   analyze_job: "理解岗位要求",
   match_candidate_experiences: "匹配完整经历",
@@ -169,42 +187,57 @@ function ActivityIcon({ label, size = 16 }) {
   return <Icon size={size} strokeWidth={1.8} />;
 }
 
-function ActivityLine({ item, detail = false }) {
-  const active = item.status === "active";
-  const reduceMotion = useReducedMotion();
-  return <motion.div layout={reduceMotion ? false : "position"} initial={reduceMotion ? false : { opacity: 0, y: 3 }} animate={{ opacity: 1, y: 0 }} transition={reduceMotion ? { duration: 0 } : { duration: .2, ease: [.23, 1, .32, 1] }} className={`activity-line ${active ? "active" : item.status || "unknown"}`}>
-    <span className="activity-line-icon">
-      {detail ? (active ? <span className="activity-wave" aria-label="正在处理"><i /><i /><i /><i /></span> : item.status === "completed" ? <Check size={12} /> : <Circle size={12} />) : <ActivityIcon label={item.label} />}
-    </span>
+function ActivityLine({ item, detail = false, parentStatus, indicator = false, animateEntry = false, index = 0 }) {
+  const animation = useAgentMotion();
+  const recordedActive = item.status === "active";
+  const active = recordedActive && parentStatus === "running";
+  const stopped = recordedActive && !active;
+  const stateLabel = stopped
+    ? parentStatus === "awaiting_approval" ? "等待确认" : parentStatus === "stopping" ? "停止中" : parentStatus === "paused" ? "已暂停" : ["cancelled", "interrupted"].includes(parentStatus) ? "已停止" : "已结束"
+    : { failed: "失败", paused: "已暂停", cancelled: "已中断" }[item.status];
+  const iconState = active && indicator ? "processing" : item.status === "completed" ? "completed" : "static";
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+  const transition = animation.transition("enter");
+  const delay = animation.reducedMotion ? 0 : Math.min(index, 2) * motionTokens.stagger / 1000;
+  return <motion.div layout={animation.reducedMotion ? false : "position"} initial={animateEntry ? animation.enter() : false} animate={{ opacity: 1, y: 0 }} transition={{ ...transition, delay, layout: transition }} className={`activity-line ${active ? "active" : stopped ? "stopped" : item.status || "unknown"}`} data-recorded-status={item.status}>
+    <motion.span key={iconState} className="activity-line-icon" initial={mounted ? { opacity: 0 } : false} animate={{ opacity: 1 }} transition={animation.transition("micro")}>
+      {detail ? (active && indicator ? <ActivityIndicator priority={item.id === "active-model-summary" ? 20 : 30} label="正在处理" /> : item.status === "completed" ? <Check size={12} /> : <Circle size={12} />) : <ActivityIcon label={item.label} />}
+    </motion.span>
     <span className="activity-line-copy"><strong>{item.label}</strong></span>
-    {["failed", "paused", "cancelled"].includes(item.status) && <span className="activity-line-state">{{failed:"失败",paused:"已暂停",cancelled:"已中断"}[item.status]}</span>}
+    {stateLabel && <span className="activity-line-state">{stateLabel}</span>}
   </motion.div>;
 }
 
-export function ProcessingDisclosure({ status = "completed", startedAt, durationMs, events = [], defaultExpanded = false, contextKind = "conversation" }) {
+export function ProcessingDisclosure({ status = "completed", startedAt, durationMs, events = [], receipts = [], defaultExpanded = false, currentLabel }) {
+  const bodyId = useId();
+  const historyId = useId();
   const [expanded, setExpanded] = useState(defaultExpanded);
-  const [showAll, setShowAll] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [expandedIds, setExpandedIds] = useState(() => new Set());
   const [elapsed, setElapsed] = useState(() => durationMs ?? Math.max(0, Date.now() - Number(startedAt || Date.now())));
   const running = status === "running";
-  const wasRunning = useRef(running);
+  const stopping = status === "stopping";
+  const waiting = status === "awaiting_approval";
+  const wasRunning = useRef(running || stopping || waiting);
   const keepExpanded = useRef(false);
   useEffect(() => {
     const previous = wasRunning.current;
-    wasRunning.current = running;
+    wasRunning.current = running || stopping || waiting;
     if (running && !previous) {
       keepExpanded.current = false;
       setExpanded(true);
     }
-    if (!running && previous) {
+    if (!running && !stopping && !waiting && previous) {
       const timer = window.setTimeout(() => {
         if (!keepExpanded.current) setExpanded(false);
       }, 520);
-      setShowAll(false);
       return () => window.clearTimeout(timer);
     }
     return undefined;
-  }, [running]);
+  }, [running, stopping, waiting]);
   useEffect(() => {
+    if (stopping || waiting) return undefined;
     if (!running) {
       setElapsed(Number(durationMs || 0));
       return undefined;
@@ -213,36 +246,54 @@ export function ProcessingDisclosure({ status = "completed", startedAt, duration
     update();
     const timer = window.setInterval(update, 1000);
     return () => window.clearInterval(timer);
-  }, [durationMs, running, startedAt]);
-  const compactedEvents = useMemo(() => compactProcessingEvents(events, contextKind), [contextKind, events]);
+  }, [durationMs, running, startedAt, stopping, waiting]);
+  const compactedEvents = useMemo(() => chronologicalProcessingEvents(events, receipts), [events, receipts]);
+  const [seenEvents, setSeenEvents] = useState(() => new Set(compactedEvents.map(item => item.id)));
+  useEffect(() => {
+    setSeenEvents(previous => {
+      const added = compactedEvents.filter(item => !previous.has(item.id));
+      return added.length ? new Set([...previous, ...added.map(item => item.id)]) : previous;
+    });
+  }, [compactedEvents]);
   if (!compactedEvents.length && !running && !(durationMs > 0) && status === "completed") return null;
   const current = [...compactedEvents].reverse().find((item) => item.status === "active") || compactedEvents.at(-1);
-  const hiddenCount = !showAll ? Math.max(0, compactedEvents.length - 4) : 0;
-  const visibleEvents = hiddenCount ? compactedEvents.slice(-4) : compactedEvents;
+  // Keep the latest steps compact without hiding an open result or a pending
+  // decision as new events arrive. The full chronology remains one click away.
+  const recentEvents = compactedEvents.filter((item, index) => index >= compactedEvents.length - 4
+    || expandedIds.has(item.id) || item.receipt?.requires_user_action || item.receipt?.status === 'awaiting_approval');
+  const hiddenCount = compactedEvents.length - recentEvents.length;
+  const visibleEvents = showHistory ? compactedEvents : recentEvents;
   const toggleExpanded = () => {
     const next = !expanded;
     if (!running) keepExpanded.current = next;
     setExpanded(next);
   };
-  const hasDetails = compactedEvents.length > 0;
-  const summary = running ? "正在处理" : status === "failed" ? "运行失败" : ["cancelled", "interrupted", "paused"].includes(status) ? "已中断" : "处理记录";
-  return <section className={`processing-disclosure fold-group ${running ? "running" : status} rp-actgroup`} data-open={expanded} aria-busy={running}>
-    {!running && durationMs > 0 && <div className="outline-none"><div className="min-w-0 text-size-chat relative overflow-visible py-0"><div className="processing-elapsed text-size-chat text-secondary">用时 {formatProcessingDuration(durationMs)}</div></div></div>}
-    {(hasDetails || running || status !== "completed") && <>
+  const hasDetails = compactedEvents.length > 0 || running || stopping || waiting || status !== "completed";
+  const summary = waiting ? "等待你的确认" : stopping ? "正在停止生成" : running ? "正在处理" : status === "failed" ? "运行失败" : status === "paused" ? "已暂停" : ["cancelled", "interrupted"].includes(status) ? "已中断" : "处理记录";
+  return <section className={`processing-disclosure fold-group ${status} rp-actgroup`} data-open={expanded} aria-busy={running || stopping}>
     <div className="outline-none"><div className="min-w-0 text-size-chat"><div className="flex min-w-0 flex-col"><div className="group/activity-header">
-    <button type="button" className="processing-summary _summary_1qt3f_2 text-text/40 font-sans text-codex-description" onClick={hasDetails ? toggleExpanded : undefined} disabled={!hasDetails} aria-expanded={hasDetails ? expanded : undefined}>
-      <span className="inline-flex min-w-0 gap-1.5"><strong>{running ? current?.label || summary : summary}</strong>{running && <time>{formatProcessingDuration(elapsed)}</time>}</span>
+    <button type="button" className="processing-summary _summary_1qt3f_2 text-text/40 font-sans text-codex-description" onClick={hasDetails ? toggleExpanded : undefined} disabled={!hasDetails} aria-expanded={hasDetails ? expanded : undefined} aria-controls={hasDetails ? bodyId : undefined}>
+      <span className="inline-flex min-w-0 gap-1.5"><time>用时 {formatProcessingDuration(elapsed).replace("m", "分").replace("s", "秒")}</time></span>
       {hasDetails && <ChevronDown size={16} />}
     </button></div></div></div></div>
-    <FoldBody open={hasDetails && expanded}><div className="processing-detail" aria-live="polite" aria-atomic="false">
-      {hiddenCount > 0 && <button type="button" className="processing-older" onClick={() => setShowAll(true)}>展开此前 {hiddenCount} 个阶段</button>}
-      <AnimatePresence initial={false}>{visibleEvents.map((item) => <ActivityLine key={item.id} item={item} detail />)}</AnimatePresence>
+    <FoldBody open={hasDetails && expanded} id={bodyId}><div className="processing-detail" aria-live="polite" aria-atomic="false">
+      {(running || stopping || waiting || status === "failed" || status === "cancelled") && <div className="processing-current" role="status">{running && <ActivityIndicator priority={30} label="正在处理" />}<span>{running ? currentLabel || current?.label || summary : summary}</span></div>}
+      {hiddenCount > 0 && <button type="button" className="processing-history-toggle" aria-expanded={showHistory} aria-controls={historyId} onClick={() => setShowHistory(value => !value)}>
+        <ChevronDown size={12} aria-hidden="true"/><span>{showHistory ? '收起较早记录' : `较早的 ${hiddenCount} 步`}</span>
+      </button>}
+      <div id={historyId} className="processing-events">{visibleEvents.map((item, index) => item.receipt
+        ? <ReceiptDetail key={item.id} item={item.receipt} open={expandedIds.has(item.id)} onToggle={() => setExpandedIds(previous => {
+          const next = new Set(previous);
+          if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
+          return next;
+        })} />
+        : <ActivityLine key={item.id} item={item} detail parentStatus={status} indicator={false} animateEntry={running && expanded && !seenEvents.has(item.id)} index={index} />)}</div>
     </div></FoldBody>
-    </>}
   </section>;
 }
 
-export function AgentActivity({ activity, task, steps = [] }) {
+export function AgentActivity({ activity, task, steps = [], waitingForApproval = false }) {
+  const animation = useAgentMotion();
   const recentSteps = useMemo(() => steps
     .filter((item) => item.event_type === "stage" || item.event_type === "agent" || item.event_type === "model_turn" || item.event_type === "tool" || item.event_type?.startsWith("task_") || item.tool_calls?.length)
     .slice(-12), [steps]);
@@ -262,7 +313,7 @@ export function AgentActivity({ activity, task, steps = [] }) {
   const startedAt = activity?.startedAt || (task?.started_at ? Date.parse(task.started_at) : Date.parse(task?.created_at || "")) || 0;
   const completedAt = task?.completed_at ? Date.parse(task.completed_at) : 0;
   const durationMs = completedAt && startedAt ? Math.max(1, completedAt - startedAt) : undefined;
-  return <motion.section className="agent-activity" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .18 }}>
-    <ProcessingDisclosure status={activity || taskRunning ? "running" : task?.status || "completed"} startedAt={startedAt} durationMs={durationMs} events={events} defaultExpanded={Boolean(activity || taskRunning)} contextKind={activity?.taskKind || "conversation"} />
+  return <motion.section className="agent-activity" initial={animation.enter()} animate={{ opacity: 1, y: 0 }} transition={animation.transition("enter")}>
+    <ProcessingDisclosure status={activity?.stopping ? "stopping" : activity?.finished ? activity.failed ? "failed" : "completed" : waitingForApproval ? "awaiting_approval" : activity || taskRunning ? "running" : task?.status || "completed"} startedAt={startedAt} durationMs={durationMs} events={events} defaultExpanded={Boolean(activity || taskRunning)} contextKind={activity?.taskKind || "conversation"} />
   </motion.section>;
 }

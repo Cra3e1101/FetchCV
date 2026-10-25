@@ -1,0 +1,18 @@
+.interview-reader.interview-reader > footer { justify-content:flex-end; }
+.interview-reader.interview-reader > footer > div { flex-wrap:wrap; justify-content:flex-end; }
+.interview-reader.interview-reader > header { align-items:start; min-height:80px; }
+.interview-reader.interview-reader > header > div { min-width:0; }
+.interview-reader.interview-reader > header strong { overflow-wrap:anywhere; white-space:normal; }
+.interview-reader.interview-reader > header small { line-height:1.6; }
+.interview-reader.interview-reader .interview-reader-meta { flex-wrap:wrap; gap:6px 14px; }
+@media (max-width:600px) {
+  .interview-reader.interview-reader > header { padding:16px; gap:10px; }
+  .interview-reader.interview-reader > header strong { font-size:16px; }
+  .interview-reader.interview-reader > footer { padding:12px 16px; }
+}
+.interview-reader.interview-reader { background:var(--ui-surface); color:var(--ui-ink); border-color:var(--ui-line-strong); }
+.interview-source-hints { margin-block: 16px; padding: 12px; border: 1px solid var(--line-strong); border-radius: 8px; }
+.interview-source-hints p { margin: 8px 0; font-size: var(--text-xs); line-height: 1.65; }
+.interview-source-hints blockquote { margin: 8px 0; padding-left: 10px; border-left: 2px solid var(--line-strong); white-space: pre-wrap; overflow-wrap: anywhere; }
+.interview-similar-candidates { display: flex; flex-wrap: wrap; gap: 8px; }
+.interview-similar-candidates button { padding: 6px 8px; border: 1px solid var(--line-strong); border-radius: 6px; font: inherit; color: inherit; background: var(--ui-surface); }

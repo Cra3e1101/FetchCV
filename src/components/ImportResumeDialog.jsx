@@ -3,6 +3,7 @@ import { ArrowDown, ArrowLeft, ArrowUp, Check, FileText, FolderArchive, LoaderCi
 import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 import { useModalFocusTrap } from "../lib/modal-focus";
+import "./ImportResumeDialog.css";
 
 export function ImportResumeDialog({ open, candidates, preferredCandidateId, onClose, onImported, onLegacyImport }) {
   const [phase, setPhase] = useState("select");
@@ -115,17 +116,17 @@ export function ImportResumeDialog({ open, candidates, preferredCandidateId, onC
   const sectionTotal = preview?.sections.reduce((sum, item) => sum + item.entry_count, 0) || 0;
   return <div className="modal-layer import-layer" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && phase !== "working" && onClose()}>
     <motion.section ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="import-title" className="import-dialog" initial={{ opacity: 0, y: 3, scale: .98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 8 }} transition={{ duration: .2, ease: [.23, 1, .32, 1] }}>
-      <header className="import-head"><div><p className="eyebrow">PERSONAL LIBRARY</p><h2 id="import-title">导入基础简历</h2></div><button type="button" className="modal-close" onClick={onClose} disabled={phase === "working"} aria-label="关闭"><X size={16} /></button></header>
+      <header className="import-head"><h2 id="import-title">导入基础简历</h2><button type="button" className="modal-close" onClick={onClose} disabled={phase === "working"} aria-label="关闭"><X size={16} /></button></header>
       <div className="import-steps" aria-label="导入进度"><span className={phase !== "select" ? "done" : "current"}><b>{phase !== "select" ? <Check size={11} /> : "1"}</b>选择 PDF</span><i /><span className={phase === "review" ? "current" : ["working", "done"].includes(phase) && preview ? "done" : ""}><b>{phase === "done" ? <Check size={11} /> : "2"}</b>核对内容</span><i /><span className={phase === "done" ? "done" : ""}><b>{phase === "done" ? <Check size={11} /> : "3"}</b>建立资料库</span></div>
       <AnimatePresence mode="wait">
         {phase === "select" && <motion.div key="select" className="import-select" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
           <button className="pdf-drop" onClick={choosePdf}><span><Upload size={21} /></span><strong>选择 PDF 简历</strong><small>支持带文本层的 PDF，最大 20MB</small></button>
           <div className={`ai-recognition-option ${aiEnhanced ? "enabled" : ""}`}>
             <span className="ai-recognition-icon">{aiEnhanced ? <Sparkles size={16} /> : <ShieldCheck size={16} />}</span>
-            <div><strong>AI 增强识别（可选）</strong><small>{modelAvailable ? "选择 PDF 后先在本地解析；发送给模型前，你可以展开查看完整的脱敏外发文本。不会上传 PDF 文件或头像。" : "连接模型后可选；当前将完全在本地解析。"}</small></div>
+            <div><strong>AI 增强识别</strong><small>{modelAvailable ? "仅发送脱敏文本，发送前可核对；不会上传 PDF 或头像。" : "需先连接模型；当前仅在本地解析。"}</small></div>
             <button type="button" role="switch" aria-checked={aiEnhanced} aria-label="AI 增强识别" disabled={!modelAvailable} onClick={() => setAiEnhanced((value) => !value)}><i /></button>
           </div>
-          <div className="legacy-import"><div><FolderArchive size={16} /><span><strong>使用过旧版简历编辑器？</strong><small>可迁移 resume-editor-prototype 的 JSON 工作区</small></span></div><button onClick={onLegacyImport}>迁移旧数据</button></div>
+          <div className="legacy-import"><div><FolderArchive size={16} /><strong>旧版 JSON 工作区</strong></div><button onClick={onLegacyImport}>导入</button></div>
         </motion.div>}
         {phase === "working" && <motion.div key="working" className="import-working" initial={{ opacity: 0 }} animate={{ opacity: 1 }}><LoaderCircle className="spin" size={24} /><h3>{preview ? "正在建立个人资料库" : "正在本地读取简历"}</h3><p>{preview ? "保存原始 PDF，并把经历拆成可追溯条目…" : "此阶段不会向模型发送任何内容；完成后再由你决定是否增强识别。"}</p>{!preview && <button type="button" className="text-button" onClick={cancelPreview}>停止识别并返回</button>}</motion.div>}
         {phase === "review" && preview && <motion.div key="review" className="import-review" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }}>
@@ -154,7 +155,7 @@ export function ImportResumeDialog({ open, candidates, preferredCandidateId, onC
           {preview.warnings?.length > 0 && <details className="recognition-warnings"><summary>识别说明</summary><ul>{preview.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details>}
           <details className="text-preview"><summary>查看提取文本</summary><pre>{preview.text_preview}</pre></details>
         </motion.div>}
-        {phase === "done" && <motion.div key="done" className="import-done" initial={{ opacity: 0, scale: .98 }} animate={{ opacity: 1, scale: 1 }}><span><Check size={23} /></span><h3>个人资料库已建立</h3><p>原始 PDF 和提取出的经历已经保存。下一步可以新建目标岗位，不需要先处理“事实锁”。</p></motion.div>}
+        {phase === "done" && <motion.div key="done" className="import-done" initial={{ opacity: 0, scale: .98 }} animate={{ opacity: 1, scale: 1 }}><span><Check size={23} /></span><h3>个人资料库已建立</h3></motion.div>}
       </AnimatePresence>
       {notice && <div className="dialog-notice" role="status">{notice}</div>}
       {error && <div className="dialog-error" role="alert">{error}</div>}

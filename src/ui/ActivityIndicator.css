@@ -1,0 +1,7 @@
+.activity-indicator { width: 16px; height: 16px; display: inline-flex; flex: 0 0 16px; align-items: center; justify-content: center; gap: 2px; color: inherit; }
+.activity-indicator i { width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: .68; }
+.activity-indicator[data-motion-active="true"] i { animation: agent-dot-breathe var(--motion-duration-loop) ease-in-out infinite; }
+.activity-indicator[data-motion-active="true"] i:nth-child(2) { animation-delay: calc(var(--motion-duration-loop) / -3); }
+.activity-indicator[data-motion-active="true"] i:nth-child(3) { animation-delay: calc(var(--motion-duration-loop) / -1.5); }
+@keyframes agent-dot-breathe { 0%, 100% { opacity: .62; } 50% { opacity: .88; } }
+@media (prefers-reduced-motion: reduce) { .activity-indicator i { animation: none !important; } }

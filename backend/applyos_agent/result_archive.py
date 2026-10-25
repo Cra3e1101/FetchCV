@@ -9,9 +9,9 @@ from applyos_harness.trace import sanitize_trace
 
 class ReadToolResultInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    result_id: str = Field(pattern=r"^[a-f0-9]{64}$")
-    offset: int = Field(default=0, ge=0)
-    limit: int = Field(default=4000, ge=1, le=12000)
+    result_id: str = Field(pattern=r"^[a-f0-9]{64}$", description="Exact result_id returned by a tool in the current task or conversation. Do not invent IDs.")
+    offset: int = Field(default=0, ge=0, description="Character offset. Start at 0; use the previous page's next_offset for continuation.")
+    limit: int = Field(default=4000, ge=1, le=12000, description="Maximum number of archived-result characters to return in this page.")
 
 def archive_result(session, scope, result):
     text = json.dumps(sanitize_trace(result), ensure_ascii=False, separators=(",", ":"))
@@ -40,7 +40,7 @@ def read_result(session, scope, arguments):
             "sha256": row.content_hash}
 
 def definition():
-    return {"name": "read_tool_result", "description": "按工具结果返回的 result_id 和 next_offset 分页回读本任务完整结果；不得猜测截断内容。",
+    return {"name": "read_tool_result", "description": "Read the complete archived tool result for the current task or conversation in pages. Use the returned result_id and pass next_offset as offset to continue. Never guess truncated content.",
             "input_schema": ReadToolResultInput.model_json_schema(), "read_only": True, "side_effect": False}
 
 def register_result_reader(gateway):

@@ -10,12 +10,30 @@ export function mergeProcessingEvent(events = [], nextEvent) {
   return mergeAgentEvent(events, nextEvent);
 }
 
+// Keep each operation at its first execution position. Results update that
+// row; repeated tool names must never regroup earlier and later calls.
+export function chronologicalProcessingEvents(events = [], receipts = []) {
+  const receiptById = new Map(receipts.map(item => [`tool-${item.tool_call_id}`, item]));
+  const ordered = events.reduce((items, event) => mergeAgentEvent(items, event), []);
+  const used = new Set();
+  const timeline = ordered.map(event => {
+    const receipt = receiptById.get(event.id);
+    if (receipt) used.add(event.id);
+    return { ...event, detail: "", ...(receipt ? { receipt } : {}) };
+  });
+  for (const [id, receipt] of receiptById) {
+    if (!used.has(id)) timeline.push({ id, kind: "tool", status: receipt.status, receipt });
+  }
+  return timeline;
+}
+
 const INTERNAL_MODEL_LABEL = /正在分析请求|模型正在推理|正在核对工具结果|正在生成回答|整理最终回答|完成回答/;
 
 function publicDetail(label, count, completed, failed) {
-  if (/读取面经原文/.test(label)) return `已读取并保存 ${completed || count} 篇可核查面经；原文内容不在过程区展开。`;
-  if (/发现面经来源/.test(label)) return `已完成来源发现与去重，候选页面将在后台继续核验。`;
-  if (/提取面试问题/.test(label)) return `已从 ${completed || count} 篇来源提取有原文依据的问题。`;
+  const operations = `已记录 ${count} 次操作，其中 ${completed} 次完成${failed ? `、${failed} 次失败` : ""}`;
+  if (/读取面经原文/.test(label)) return `${operations}；成功保存篇数以来源回执为准。`;
+  if (/发现面经来源/.test(label)) return `${operations}；候选结果与停止原因见面试证据状态。`;
+  if (/提取面试问题/.test(label)) return `${operations}；问题提取篇数以当前来源状态为准。`;
   if (/生成面试简报/.test(label)) return "正在把共性问题、岗位建议和原始链接整理为面试简报。";
   if (/检索面试知识库/.test(label)) return "已优先复用本机保存的面试知识。";
   if (count > 1) return `已合并 ${count} 次同类操作${failed ? `，其中 ${failed} 次未完成` : ""}。`;

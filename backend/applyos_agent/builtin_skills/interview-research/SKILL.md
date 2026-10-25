@@ -5,15 +5,26 @@ description: Build a traceable interview brief from local evidence, low-frequenc
 
 # Interview research
 
-Use for 面经、面试问题、面试准备 and interview intelligence.
+Use for interview accounts, interview questions, interview preparation and
+interview intelligence. Write user-facing answers and preparation content in
+Simplified Chinese unless the user requests another language. Preserve original
+source quotations, titles, names and URLs without translating them.
 
 1. Read job context and confirmed company, business unit and functional role.
    Never infer an unconfirmed business unit.
 2. Call `search_interview_knowledge`. Reuse captured and analyzed sources.
    Default research must include a Nowcoder discovery attempt when
    `needs_nowcoder_discovery=true`, even if enough Xiaohongshu sources exist.
-   When `ready_for_brief=true`, build from verified sources without recapture.
-3. Call `discover_interview_sources`. The default includes Xiaohongshu and 牛客;
+   `limited_brief_ready` (`ready_for_brief` alias) means at least four usable
+   document groups for a limited brief, never evidence sufficiency. Read
+   `usable_document_group_count`, `confirmed_origin_count` and
+   `unresolved_origin_count` separately. Reuse `usable_document_ids` and
+   `representative_ids` without recapturing the same documents; pending origin
+   review may coexist with a completed limited brief. Classification/similarity
+   hints never confirm origin or independence. Follow `next_actions`; targeted
+   discovery for remaining gaps is allowed, but stop at exhaustion, repetition,
+   access protection or budget limits rather than retrying without progress.
+3. Call `discover_interview_sources`. The default includes Xiaohongshu and Nowcoder;
    `platforms: ["nowcoder"]` can continue research when Xiaohongshu is paused.
    Expand company/role wording sparingly. A search miss or partial search does
    not prove posts do not exist. Honor `discovery_exhausted`, stop reasons,
@@ -51,10 +62,13 @@ Use for 面经、面试问题、面试准备 and interview intelligence.
 8. Cluster verified questions and call `build_interview_brief`, retaining
    existing relevant sources. Each question must cite exact source IDs and
    include `why_it_matters` and concrete `preparation`. The tool computes
-   frequency: a single source is one account, not a recurring pattern. Four
-   analyzed sources including one Xiaohongshu source are the existing minimum
-   for sufficient evidence; smaller or Nowcoder-only briefs remain limited.
-   Never manufacture sources merely to satisfy platform coverage.
+   frequency only when this exact extracted question still has a valid quote
+   and its independent origins have been confirmed by the user. Unknown
+   independence is not a zero frequency or a recurring pattern. Source count
+   and platform mix do not establish JD coverage or evidence sufficiency.
+   A limited brief is a valid completed result: explain the gaps and stop after
+   the available evidence or access budget is exhausted. Do not keep collecting
+   to turn evidence_status into sufficient, and never manufacture sources.
 9. Connect preparation to the JD and verified resume facts. Report actual
    per-platform coverage, gaps and stop reasons. List every source actually
    used newest first with publication dates when available. Original post URLs

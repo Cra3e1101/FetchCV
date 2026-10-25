@@ -1,6 +1,8 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { ChevronDown, HelpCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { AnimatedCollapse } from "../ui/AnimatedCollapse";
+import { motionTokens, useAgentMotion } from "../ui/motion";
 import "./AgentEffortControl.css";
 
 export const AGENT_EFFORT_LEVELS = [
@@ -26,6 +28,7 @@ export function getAgentEffortApiLevel(value) {
 }
 
 export function AgentEffortControl({ disabled = false, value = "balanced", onChange, model, onModelMenu }) {
+  const { transition, enter, exit } = useAgentMotion();
   const range = useRef(null);
   const selectedId = useRef(validLevel(value));
   const [level, setLevel] = useState(() => Math.max(0, AGENT_EFFORT_LEVELS.findIndex((item) => item.id === validLevel(value))));
@@ -53,10 +56,10 @@ export function AgentEffortControl({ disabled = false, value = "balanced", onCha
   return <section className="agent-effort-panel" aria-label="分析投入设置">
     <header>
       <span className="effort-control-spacer" aria-hidden="true" />
-      <button type="button" className="effort-model-menu" aria-label="打开模型选择" onClick={onModelMenu}><span className="effort-active-label"><AnimatePresence initial={false} mode="popLayout"><motion.strong key={active.id} initial={{ opacity: 0, y: 3 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -3 }} transition={{ duration: .2, ease: [.23, 1, .32, 1] }}>{active.label}</motion.strong></AnimatePresence></span><span className="effort-model-name">{model}<ChevronDown size={12}/></span></button>
+      <button type="button" className="effort-model-menu" aria-label="打开模型选择" onClick={onModelMenu}><span className="effort-active-label"><AnimatePresence initial={false}><motion.strong key={active.id} initial={enter(motionTokens.distanceSubtle)} animate={{ opacity: 1, y: 0 }} exit={{ ...exit(), transition: transition("exit") }} transition={transition("micro")}>{active.label}</motion.strong></AnimatePresence></span><span className="effort-model-name">{model}<ChevronDown size={12}/></span></button>
       <button type="button" className="effort-help" aria-label="分析投入说明" aria-expanded={showHelp} onClick={() => setShowHelp((current) => !current)}><HelpCircle size={15} /></button>
     </header>
-    <AnimatePresence initial={false}>{showHelp && <motion.p className="effort-help-copy" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}>仅影响下一条消息的分析投入，不会切换模型，也不会改变事实、权限或审批边界。</motion.p>}</AnimatePresence>
+    <AnimatedCollapse open={showHelp}><p className="effort-help-copy">仅影响下一条消息的分析投入，不会切换模型，也不会改变事实、权限或审批边界。</p></AnimatedCollapse>
     <div className="effort-track-shell" style={{ "--effort-position": `${(level / (AGENT_EFFORT_LEVELS.length - 1)) * 100}%` }}>
       <div className="effort-track-cells" aria-hidden="true">{AGENT_EFFORT_LEVELS.map((item, index) => <i key={item.id} className={index <= level ? "active" : ""} />)}</div>
       <input ref={range} type="range" min="0" max={AGENT_EFFORT_LEVELS.length - 1} step="1" value={level} disabled={disabled} onChange={(event) => update(Number(event.target.value))} aria-label="分析投入" aria-valuetext={`${active.label}：${active.description}`} />

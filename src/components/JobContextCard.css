@@ -1,0 +1,35 @@
+.job-context-editor { border:1px solid var(--line); border-radius:9px; padding:10px 12px 12px; margin:0 0 14px; min-width:0; }
+.job-context-editor legend { color:var(--ink); font-size:12px; font-weight:600; padding:0 5px; }
+.job-context-editor > p { color:var(--muted); font-size:11px; line-height:1.6; margin:0 0 10px; }
+.job-context-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); column-gap:14px; row-gap:10px; }
+.job-context-field { min-width:0; }
+.job-modal .job-context-field label { gap:5px; margin:0; font-size:11px; font-weight:400; }
+.job-context-field label > span { display:flex; align-items:center; justify-content:space-between; gap:6px; }
+.job-modal .job-context-field input, .job-modal .job-context-field select { height:32px; font-size:12px; }
+.job-context-basis { flex-shrink:0; color:var(--muted); font-size:10px; font-weight:400; }
+.job-context-basis.basis-inferred { color:var(--coral-dark); }
+.job-context-basis.basis-user_confirmed { color:var(--ink); }
+.job-context-confirm { padding:3px 0 0; border:0; background:transparent; color:var(--muted); font-size:10px; text-decoration:underline; cursor:pointer; }
+.job-context-evidence { margin-top:4px; font-size:10px; line-height:1.6; color:var(--muted); }
+.job-context-evidence summary { cursor:pointer; }
+.job-context-evidence blockquote { margin:5px 0 0; padding-left:8px; border-left:2px solid var(--line-strong); white-space:pre-wrap; overflow-wrap:anywhere; }
+.job-context-summary { margin:11px 0 0; padding-top:10px; border-top:1px solid var(--line); font-size:11px; }
+.job-context-summary > summary { display:flex; align-items:center; justify-content:space-between; gap:12px; cursor:pointer; color:var(--ink); }
+.job-context-summary > summary > span:last-child { color:var(--muted); font-size:10px; }
+.job-context-summary dl { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px 18px; margin:13px 0; }
+.job-context-summary dl > div { min-width:0; }
+.job-context-summary dt { color:var(--muted); font-size:10px; margin-bottom:3px; }
+.job-context-summary dd { margin:0; overflow-wrap:anywhere; }
+.job-context-summary dd > small { margin-left:8px; }
+.job-context-summary > button { padding:5px 9px; border:1px solid var(--line); border-radius:6px; background:transparent; color:var(--ink); font-size:11px; cursor:pointer; }
+.job-context-source { color:var(--muted); margin:5px 0; font-size:10px; line-height:1.6; overflow-wrap:anywhere; }
+.job-context-source a { color:inherit; }
+.proposal-relevance-stale { font-size:12px; line-height:1.7; color:var(--muted); padding:9px 12px; border-left:2px solid var(--line-strong); background:var(--paper); }
+.job-input-stale { flex-shrink:0; margin:10px auto 0; width:calc(100% - 48px); max-width:840px; box-sizing:border-box; padding:9px 13px; border:1px solid var(--line-strong); border-radius:8px; background:var(--paper); color:var(--ink); font-size:12px; line-height:1.7; }
+.job-input-stale strong { font-weight:500; margin-right:8px; }
+.app-shell .modal-layer:has(> .job-context-modal) { z-index:45; isolation:isolate; backdrop-filter:blur(3px); }
+.app-shell .job-modal.job-context-modal { max-height:calc(100dvh - var(--ui-titlebar-height,44px) - 24px); box-sizing:border-box; overflow-y:auto; overscroll-behavior:contain; scroll-padding-bottom:70px; background:var(--ui-surface,var(--canvas)); }
+.job-context-modal > .modal-actions { position:sticky; bottom:0; z-index:1; padding:10px 0; margin-top:8px; border-top:1px solid var(--line); background:var(--ui-surface,var(--canvas)); }
+.job-modal > p.jd-preview-notice:not(.eyebrow) { font-size:11px; line-height:1.6; color:var(--muted); margin:0 0 12px; }
+.jd-web-preview.preview-warning { color:var(--coral-dark); }
+@media(max-width:560px) { .job-context-fields,.job-context-summary dl { grid-template-columns:1fr; } .job-modal { padding:20px; } .job-input-stale { width:calc(100% - 28px); } }

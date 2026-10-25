@@ -1,3 +1,4 @@
+import { resolveElectronRuntime } from "../scripts/electron-runtime.mjs";
 import {spawn} from 'node:child_process';
 import {mkdir,writeFile,readFile} from 'node:fs/promises';
 import path from 'node:path';
@@ -7,6 +8,7 @@ import {storageFixture} from './helpers/storage-fixture.mjs';
 import {prepareWorkspaceCopy} from '../packages/storage/prepare-workspace.mjs';
 import {WorkspaceManifestWriter} from '../packages/storage/workspace-manifest.mjs';
 
+const electronRuntime = await resolveElectronRuntime({ projectRoot: path.resolve(import.meta.dirname, "..") });
 const root=process.env.M1_ALLOWED_DELETE_ROOT;
 const {db:unused,source,dir}=await storageFixture('utility');unused.close();
 const recoveryRoot=path.join(dir,'recovery'),destinationRoot=path.join(dir,'copies');await mkdir(recoveryRoot);await mkdir(destinationRoot);
@@ -18,7 +20,7 @@ try {await owner.publish({workspaceId,database:'archive.db',blobRoot:'blobs',exp
 await writeFile(path.join(root,'input.json'),JSON.stringify({workspaceRoot,workspaceId,scope:{conversationId:c.id,candidateId:c.candidate_id,jobId:c.job_id}}),{flag:'wx'});
 const env=Object.fromEntries(Object.entries(process.env).filter(([key])=>!['NODE_OPTIONS','ELECTRON_RUN_AS_NODE'].includes(key)));
 await new Promise((resolve,reject)=>{
-  const child=spawn(path.resolve('node_modules/electron/dist/electron.exe'),[path.resolve('tests/fixtures/electron-storage-app.cjs')],{env,stdio:'inherit',windowsHide:true});
+  const child=spawn(electronRuntime.executable,[path.resolve('tests/fixtures/electron-storage-app.cjs')],{env,stdio:'inherit',windowsHide:true});
   const timer=setTimeout(()=>{child.kill();reject(Error('utility test timeout'));},70000);
   child.on('error',error=>{clearTimeout(timer);reject(error);});child.on('exit',code=>{clearTimeout(timer);code===0?resolve():reject(Error(`utility exited ${code}`));});
 });

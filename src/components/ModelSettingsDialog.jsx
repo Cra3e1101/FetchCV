@@ -1,10 +1,12 @@
-import {ModelParameters} from "./ModelParameters";
+import {ProviderConnectionForm} from "./ProviderConnectionForm";
+import {ProviderPresetPicker} from "./ProviderPresetPicker";
+import {createProviderDraft, PROVIDER_PRESETS} from "../../shared/provider-presets.mjs";
 import "../ui/settings.css";
 import {InterfaceThemePicker} from "../ui/InterfaceThemePicker";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  BookOpen, Check, CheckCircle2, Clipboard, Eye, EyeOff, FolderLock, Globe2,
-  KeyRound, LoaderCircle, LockKeyhole, Plus, RefreshCw, Search, Server, Settings2,
+  BookOpen, CheckCircle2,
+  LoaderCircle, LockKeyhole, Plus, RefreshCw, Server, Settings2,
   ShieldCheck, SlidersHorizontal, Trash2, X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -12,16 +14,7 @@ import { api } from "../lib/api";
 import { applyAppearance, DEFAULT_APPEARANCE } from "../lib/appearance";
 import { useModalFocusTrap } from "../lib/modal-focus";
 
-const empty = {
-  id: "", providerName: "", protocol: "openai", baseUrl: "", model: "", apiKey: "", hasApiKey: false,
-  modelsUrlOverride: "", modelsEndpoint: "", availableModels: [], modelProfiles: {}, health: "unknown", latencyMs: null, lastTestedAt: "",
-};
-
-const presets = [
-  { name: "DeepSeek", protocol: "openai", baseUrl: "https://api.deepseek.com", model: "deepseek-v4-flash" },
-  { name: "OpenAI-compatible", protocol: "openai", baseUrl: "", model: "" },
-  { name: "Anthropic-compatible", protocol: "anthropic", baseUrl: "", model: "" },
-];
+const empty = createProviderDraft();
 
 const emptyMcpForm = {
   name: "", transport: "stdio", command: "", args: [""], envKeys: [""], cwd: "",
@@ -61,9 +54,9 @@ function McpServerRow({ server, busy, onConnect, onDisable, onToggleRead, onAppr
   const updateDraft = (tool, patch) => setDrafts((current) => ({ ...current, [tool.name]: { ...draftFor(tool), ...patch } }));
   return <div className="mcp-server-row">
     <div className="mcp-server-head"><span><strong>{server.name}</strong><small>{server.status} · {(server.allowed_tools || []).length} 只读 · {Object.keys(server.tool_policies || {}).length} 写入</small></span>{server.enabled ? <button type="button" onClick={() => onDisable(server)}>停用</button> : <button type="button" disabled={busy} onClick={() => onConnect(server)}>批准并连接</button>}</div>
-    {!!readTools.length && <div className="mcp-read-tools"><small>Server 声明为只读；仍需逐项授权</small>{readTools.map((tool) => {
+    {!!readTools.length && <div className="mcp-read-tools"><small>只读工具</small>{readTools.map((tool) => {
       const allowed = (server.allowed_tools || []).includes(tool.name);
-      return <button type="button" key={tool.name} aria-pressed={allowed} disabled={busy || !server.enabled} onClick={() => onToggleRead(server, tool, !allowed)}><span><strong>{tool.name}</strong><small>{tool.description || "未提供能力说明"}</small></span><i /></button>;
+      return <button type="button" key={tool.name} aria-pressed={allowed} disabled={busy || !server.enabled} onClick={() => onToggleRead(server, tool, !allowed)}><span><strong>{tool.name}</strong>{tool.description && <small title={tool.description}>{tool.description}</small>}</span><i /></button>;
     })}</div>}
     {!!writeTools.length && <div className="mcp-write-tools">{writeTools.map((tool) => {
       const policy = server.tool_policies?.[tool.name];
@@ -82,6 +75,9 @@ export function ModelSettingsDialog({ open, user, runtime, stats = {}, onClose, 
   const [busy, setBusy] = useState(false);
   const [fetchingModels, setFetchingModels] = useState(false);
   const [modelQuery, setModelQuery] = useState("");
+  const [providerDraftValid, setProviderDraftValid] = useState(true);
+  const [selectedPresetId, setSelectedPresetId] = useState('custom');
+  const [draftRevision, setDraftRevision] = useState(0);
   const [activeSection, setActiveSection] = useState("general");
   const [settingsQuery, setSettingsQuery] = useState("");
   const [skills, setSkills] = useState([]);
@@ -93,9 +89,13 @@ export function ModelSettingsDialog({ open, user, runtime, stats = {}, onClose, 
   const [generalSettings, setGeneralSettings] = useState(DEFAULT_APPEARANCE);
   const statusTimer = useRef(null);
   const dialog = useRef(null);
+  const inFlight = useRef(false);
+  useEffect(()=>{inFlight.current=busy || fetchingModels;},[busy,fetchingModels]);
   useModalFocusTrap(dialog, open);
 
   const load = async () => {
+    setSelectedPresetId('custom');
+    setDraftRevision(current => current + 1);
     const store = await window.appRuntime?.listModelProviders?.();
     if (store) {
       setProfiles(store.profiles || []);
@@ -115,7 +115,7 @@ export function ModelSettingsDialog({ open, user, runtime, stats = {}, onClose, 
     Promise.all([api.skills(), api.mcpServers(), api.permissionSettings(), api.generalSettings()]).then(([nextSkills, nextServers, nextPermissions, nextGeneral]) => {
       setSkills(nextSkills); setMcpServers(nextServers); setPermissionSettings(nextPermissions); setGeneralSettings(nextGeneral); publishAppearance(nextGeneral);
     }).catch((error) => setStatus({ type: "error", message: error.message }));
-    const escape = (event) => { if (event.key === "Escape" && !busy && !fetchingModels) onClose(); };
+    const escape = (event) => { if (event.key === "Escape" && !inFlight.current) onClose(); };
     window.addEventListener("keydown", escape);
     return () => { window.removeEventListener("keydown", escape); window.clearTimeout(statusTimer.current); };
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -124,13 +124,18 @@ export function ModelSettingsDialog({ open, user, runtime, stats = {}, onClose, 
     setForm((current) => ({
       ...current,
       [field]: value,
+      ...(field === "model" && value !== current.model ? {displayName:""} : {}),
       ...(["baseUrl", "protocol", "modelsUrlOverride"].includes(field) ? { availableModels: [], modelsEndpoint: "" } : {}),
     }));
     setStatus(null);
   };
-  const choosePreset = (preset) => {
-    setForm({ ...empty, ...preset, providerName: preset.name });
-    setStatus(null); setModelQuery("");
+  const choosePreset = (presetId) => {
+    setForm(createProviderDraft(presetId));
+    setSelectedPresetId(presetId);
+    // Remount local JSON editors too: invalid/unapplied text can contain secrets.
+    setDraftRevision(current => current + 1);
+    setProviderDraftValid(true);
+    setShowKey(false); setStatus(null); setModelQuery("");
   };
   const applyClipboardText = (value) => {
     const text = String(value || "").trim();
@@ -160,6 +165,7 @@ export function ModelSettingsDialog({ open, user, runtime, stats = {}, onClose, 
     id: form.id, providerName: form.providerName, protocol: form.protocol, baseUrl: form.baseUrl,
     model: form.model, apiKey: form.apiKey, modelsUrlOverride: form.modelsUrlOverride,
     modelsEndpoint: form.modelsEndpoint, availableModels: form.availableModels, modelProfiles: form.modelProfiles,
+    notes:form.notes, website:form.website, displayName:form.displayName, authMode:form.authMode, userAgent:form.userAgent, requestHeaders:form.requestHeaders, requestBody:form.requestBody,
   });
   const discoverModels = async () => {
     setFetchingModels(true); setStatus({ type: "testing", message: "正在读取服务提供的模型…" });
@@ -183,15 +189,15 @@ export function ModelSettingsDialog({ open, user, runtime, stats = {}, onClose, 
       setStatus({ type: "success", message: `${result.message || "连接成功"} · ${result.model} · ${result.latencyMs} ms` });
     } catch (error) { setStatus({ type: "error", message: error.message }); } finally { setBusy(false); }
   };
-  const save = async () => {
+  const save = async (activate = true) => {
     setBusy(true); setStatus({ type: "testing", message: "正在验证并安全保存…" });
     try {
-      const result = await window.appRuntime.saveModelProvider(payload());
-      setStatus({ type: "success", message: "连接已保存并设为当前模型。" });
+      const result = await window.appRuntime.saveModelProvider({...payload(),activate});
+      setStatus({ type: "success", message: activate ? "连接已保存并设为当前模型。" : "连接已保存，当前模型未切换。" });
       setProfiles(result.store?.profiles || []); setActiveId(result.activeId || result.store?.activeId || "");
-      const saved = result.store?.profiles?.find((item) => item.id === result.activeId);
-      setForm((current) => ({ ...current, ...saved, id: result.activeId || current.id, apiKey: "", hasApiKey: true }));
-      onSaved?.(result.runtime);
+      const saved = result.provider || result.store?.profiles?.find((item) => item.id === (result.savedId || result.activeId));
+      setForm((current) => ({ ...current, ...saved, id: result.savedId || saved?.id || result.activeId || current.id, apiKey: "", hasApiKey: true }));
+      if (result.runtime) onSaved?.(result.runtime);
     } catch (error) { setStatus({ type: "error", message: error.message }); } finally { setBusy(false); }
   };
   const activate = async (profile) => {
@@ -202,6 +208,7 @@ export function ModelSettingsDialog({ open, user, runtime, stats = {}, onClose, 
     } catch (error) { setStatus({ type: "error", message: error.message }); } finally { setBusy(false); }
   };
   const remove = async (id) => {
+    setBusy(true);
     try {
       const store = await window.appRuntime.deleteModelProvider(id);
       setProfiles(store.profiles || []); setActiveId(store.activeId || "");
@@ -210,27 +217,32 @@ export function ModelSettingsDialog({ open, user, runtime, stats = {}, onClose, 
         const next = store.profiles?.find((item) => item.id === store.activeId) || store.profiles?.[0];
         setForm(next ? { ...empty, ...next, apiKey: "" } : empty);
       }
-    } catch (error) { setStatus({ type: "error", message: error.message }); }
+    } catch (error) { setStatus({ type: "error", message: error.message }); } finally {setBusy(false);}
   };
 
   const modelOptions = useMemo(() => {
     const query = modelQuery.trim().toLowerCase();
     return (form.availableModels || []).filter((item) => !query || item.id.toLowerCase().includes(query)).slice(0, 60);
   }, [form.availableModels, modelQuery]);
-  const valid = form.providerName && form.baseUrl && form.model && (form.apiKey || form.hasApiKey);
-  const canDiscover = form.baseUrl && (form.apiKey || form.hasApiKey);
+  const valid = providerDraftValid && form.providerName && form.baseUrl && form.model && (form.apiKey || form.hasApiKey);
+  const canDiscover = providerDraftValid && form.baseUrl && (form.apiKey || form.hasApiKey);
   const refreshExtensions = async () => {
-    const [nextSkills, nextServers] = await Promise.all([api.reloadSkills(), api.mcpServers()]);
-    setSkills(nextSkills); setMcpServers(nextServers);
+    setBusy(true); setStatus(null);
+    try {
+      setSkills(await api.reloadSkills());
+    } catch (error) {
+      setStatus({ type: "error", message: error.message || "扫描失败，请重试。" });
+    } finally { setBusy(false); }
   };
   const toggleSkill = async (skill) => {
     setBusy(true);
     setStatus(null);
     try {
-      const updated = await api.updateSkill(skill.id, !skill.enabled);
+      const updated = await api.updateSkill(skill.id, !skill.enabled, skill.content_hash);
       setSkills((items) => items.map((item) => item.id === updated.id ? updated : item));
     } catch (error) {
-      setStatus({type:"error",message:error.message || "设置未保存，请重试。"});
+      const messages = { skill_content_changed: "Skill 内容已变化，请重新扫描并确认后启用。", skill_shadowed: "该 Skill 已被同名来源替代，请重新扫描。", skill_file_unavailable: "Skill 文件已不可用，请重新扫描。" };
+      setStatus({type:"error",message:messages[error.message] || error.message || "设置未保存，请重试。"});
     } finally { setBusy(false); }
   };
   const updateMcpField = (field, value) => setMcpForm((current) => ({ ...current, [field]: value }));
@@ -341,9 +353,9 @@ export function ModelSettingsDialog({ open, user, runtime, stats = {}, onClose, 
         </div>
         <nav aria-label="设置分类">{["个人", "集成", "安全"].map((group) => {
           const items = visibleSections.filter((item) => item.group === group);
-          return items.length ? <section key={group}><small>{group}</small>{items.map((item) => { const Icon = item.icon; return <button type="button" key={item.id} className={activeSection === item.id ? "active" : ""} aria-current={activeSection === item.id ? "page" : undefined} onClick={() => { setActiveSection(item.id); setStatus(null); }}><Icon size={16} /><span>{item.label}</span>{item.id === "models" && <i className={runtime?.configured ? "online" : ""} />}</button>; })}</section> : null;
+          return items.length ? <section key={group}>{items.map((item) => { const Icon = item.icon; return <button type="button" key={item.id} className={activeSection === item.id ? "active" : ""} aria-current={activeSection === item.id ? "page" : undefined} onClick={() => { setActiveSection(item.id); setStatus(null); }}><Icon size={16} /><span>{item.label}</span>{item.id === "models" && <i className={runtime?.configured ? "online" : ""} />}</button>; })}</section> : null;
         })}{!visibleSections.length && <p className="settings-search-empty">没有匹配的设置</p>}</nav>
-        <button type="button" className="settings-back" onClick={onClose} disabled={busy || fetchingModels} aria-label="关闭">返回应用</button><div className="settings-sidebar-profile"><span>{(user?.name || "本").trim().slice(0, 1)}</span><div><strong>{user?.name || "本地用户"}</strong><small>本地工作区</small></div></div>
+        <button type="button" className="settings-back" onClick={onClose} disabled={busy || fetchingModels} aria-label="关闭">返回应用</button><div className="settings-sidebar-profile"><span>{(user?.name || "本").trim().slice(0, 1)}</span><div><strong>{user?.name || "本地用户"}</strong></div></div>
       </aside>
 
       <main className="settings-content">
@@ -357,66 +369,60 @@ export function ModelSettingsDialog({ open, user, runtime, stats = {}, onClose, 
         </section>}
 
         {activeSection === "models" && <section className="settings-pane provider-manager" aria-labelledby="settings-model-title">
-          <header><p>集成</p><h2 id="settings-model-title">模型 API</h2><span>连接兼容 OpenAI 或 Anthropic 协议的模型服务。</span></header>
-          {!profiles.length && <div className="settings-current-status"><span className={`provider-status-dot ${runtime?.configured ? "online" : ""}`} /><div><strong>{activeProfile?.providerName || runtime?.provider_name || "尚未连接模型"}</strong><small>{activeProfile?.model || runtime?.model || "Agent 需要模型连接后才能执行任务"}</small></div><b>{runtime?.configured ? "当前" : "未连接"}</b></div>}
-          {profiles.length > 0 && <section className="provider-list-section"><div className="provider-section-label"><span>已保存</span><small>{profiles.length} 个连接</small></div><div className="provider-list">{profiles.map((profile) => <div role="button" tabIndex={0} className={`provider-row ${profile.id === activeId ? "active" : ""}`} key={profile.id} onClick={() => !busy && activate(profile)} onKeyDown={(event) => event.key === "Enter" && !busy && activate(profile)}><span className={`provider-health ${profile.health}`}><Server size={13} /></span><div><strong>{profile.providerName}</strong><small>{profile.model} · {(profile.availableModels || []).length ? `${profile.availableModels.length} 个模型` : profile.protocol}</small></div><em>{profile.id === activeId ? "当前" : healthCopy(profile)}</em><button type="button" className="provider-delete" onClick={(event) => { event.stopPropagation(); remove(profile.id); }} aria-label={`删除 ${profile.providerName} 连接`}><Trash2 size={13} /></button></div>)}</div></section>}
-          <div className="provider-form-head"><strong>{form.id ? "编辑连接" : "添加连接"}</strong><button type="button" onClick={() => { setForm(empty); setStatus(null); setModelQuery(""); }}><Plus size={13} />新连接</button></div>
-          <div className="provider-presets">{presets.map((preset) => <button type="button" key={preset.name} onClick={() => choosePreset(preset)} className={form.providerName === preset.name && form.protocol === preset.protocol ? "active" : ""}><span>{preset.name}</span><small>{preset.protocol === "anthropic" ? "Anthropic 协议" : "OpenAI 协议"}</small></button>)}</div>
-          <div className="model-form">
-            <label><span>连接名称</span><input aria-label="连接名称" value={form.providerName} onChange={(event) => update("providerName", event.target.value)} placeholder="例如 DeepSeek / OpenRouter" /></label>
-            <fieldset className="protocol-field"><legend>兼容协议</legend><div className="protocol-segments"><button type="button" aria-pressed={form.protocol === "openai"} className={form.protocol === "openai" ? "active" : ""} onClick={() => update("protocol", "openai")}>OpenAI</button><button type="button" aria-pressed={form.protocol === "anthropic"} className={form.protocol === "anthropic" ? "active" : ""} onClick={() => update("protocol", "anthropic")}>Anthropic</button></div></fieldset>
-            <label className="full"><span>Base URL</span><input aria-label="Base URL" value={form.baseUrl} onChange={(event) => update("baseUrl", event.target.value)} placeholder="https://api.example.com" /></label>
-            <label className="model-name-field"><span>模型名称</span><div className="model-input-row"><input aria-label="模型名称" value={form.model} onChange={(event) => update("model", event.target.value)} placeholder="provider-model-name" /><button type="button" disabled={!canDiscover || fetchingModels} onClick={discoverModels}>{fetchingModels ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}读取模型</button></div></label>
-            <label><span>API Key</span><div className="secret-input"><KeyRound size={13} /><input aria-label="API Key" type={showKey ? "text" : "password"} autoComplete="off" value={form.apiKey} onKeyDown={handleKeyPaste} onPaste={handlePaste} onChange={(event) => update("apiKey", event.target.value)} placeholder={form.hasApiKey ? "已安全保存；留空继续使用" : "粘贴 API Key"} /><div className="secret-actions"><button type="button" onClick={pasteApiKey} aria-label="粘贴 API Key" title="从系统剪贴板粘贴"><Clipboard size={14} /></button><button type="button" onClick={() => setShowKey((value) => !value)} aria-label={showKey ? "隐藏 API Key" : "显示 API Key"} title={showKey ? "隐藏 API Key" : "显示 API Key"}>{showKey ? <EyeOff size={14} /> : <Eye size={14} />}</button></div></div></label>
-          </div>
-          <details className="settings-advanced"><summary>高级连接设置</summary><label><span>模型列表地址 <small>自动发现失败时填写</small></span><input aria-label="Models URL" value={form.modelsUrlOverride} onChange={(event) => update("modelsUrlOverride", event.target.value)} placeholder="自动从 Base URL 推导" /></label></details>
-          {form.model && <ModelParameters provider={form} onChange={modelProfiles=>update("modelProfiles",modelProfiles)}/>}
-          {!!form.availableModels?.length && <section className="model-catalog"><header><div><strong>服务提供的模型</strong><small>{form.availableModels.length} 个</small></div><label><Search size={13} /><input aria-label="搜索模型" value={modelQuery} onChange={(event) => setModelQuery(event.target.value)} placeholder="搜索模型" /></label></header><div>{modelOptions.map((item) => <button type="button" key={item.id} className={form.model === item.id ? "active" : ""} onClick={() => update("model", item.id)}><span>{item.id}</span>{item.ownedBy && <small>{item.ownedBy}</small>}{form.model === item.id && <Check size={13} />}</button>)}</div>{modelQuery && !modelOptions.length && <p>没有匹配的模型</p>}</section>}
-          <div className="provider-privacy"><ShieldCheck size={14} /><p>密钥在本机加密保存。</p></div>
+          <header className="settings-page-heading"><h2 id="settings-model-title">模型 API</h2><button type="button" disabled={busy || fetchingModels} onClick={() => choosePreset('custom')}><Plus size={13} />新连接</button></header>
+          {!profiles.length && <div className="settings-current-status"><span className={`provider-status-dot ${runtime?.configured ? "online" : ""}`} /><div><strong>{activeProfile?.providerName || runtime?.provider_name || "尚未连接模型"}</strong>{(activeProfile?.model || runtime?.model) && <small>{activeProfile?.model || runtime?.model}</small>}</div></div>}
+          {profiles.length > 0 && <section className="provider-list-section"><div className="provider-section-label"><span>连接</span></div><div className="provider-list">{profiles.map(profile=><div className={`provider-row ${profile.id===activeId?'active':''} ${profile.id===form.id?'editing':''}`} key={profile.id}>
+            <button type="button" className="provider-edit" aria-label={`编辑 ${profile.providerName}`} disabled={busy || fetchingModels} onClick={()=>{setForm({...empty,...profile,apiKey:""});setShowKey(false);setStatus(null);setModelQuery("");}}><Server size={16}/><span><strong>{profile.providerName}</strong><small>{profile.notes || profile.displayName || profile.model}</small></span></button>
+            <em>{healthCopy(profile)}</em><button type="button" className="provider-enable" disabled={busy || fetchingModels || profile.id===activeId} onClick={()=>activate(profile)}>{profile.id===activeId?'当前使用':'启用'}</button>
+            <button type="button" className="provider-delete" disabled={busy || fetchingModels} aria-label={`删除 ${profile.providerName} 连接`} onClick={()=>remove(profile.id)}><Trash2 size={14}/></button>
+          </div>)}</div></section>}
+
+          {!form.id && <ProviderPresetPicker selectedId={selectedPresetId} disabled={busy || fetchingModels} onSelect={choosePreset}/>}
+          <ProviderConnectionForm key={form.id || `new-${draftRevision}`} form={form} setForm={setForm} update={update} busy={busy || fetchingModels} showKey={showKey} setShowKey={setShowKey} pasteApiKey={pasteApiKey} handleKeyPaste={handleKeyPaste} handlePaste={handlePaste} canDiscover={canDiscover} fetchingModels={fetchingModels} discoverModels={discoverModels} modelQuery={modelQuery} setModelQuery={setModelQuery} modelOptions={modelOptions} onValidityChange={setProviderDraftValid} modelHint={!form.id ? PROVIDER_PRESETS.find(preset => preset.id === selectedPresetId)?.modelHint : undefined}/>
           {status && <div role="status" className={`provider-status ${status.type}`}>{status.type === "testing" ? <LoaderCircle className="spin" size={14} /> : status.type === "success" ? <CheckCircle2 size={14} /> : <X size={14} />}<span>{status.message}</span></div>}
-          <footer className="settings-actions"><button className="text-button" onClick={test} disabled={busy || fetchingModels || !valid}>{busy ? "正在连接" : "测试连接"}</button><button className="primary-button" onClick={save} disabled={busy || fetchingModels || !valid}>{busy ? <LoaderCircle className="spin" size={15} /> : <Server size={15} />}保存并启用</button></footer>
+          <footer className="settings-actions"><button className="text-button" onClick={test} disabled={busy || fetchingModels || !valid}>{busy ? "正在连接" : "测试连接"}</button>{form.id !== activeId && <button className="text-button" onClick={()=>save(false)} disabled={busy || fetchingModels || !valid}>仅保存</button>}<button className="primary-button" onClick={()=>save(true)} disabled={busy || fetchingModels || !valid}>{busy ? <LoaderCircle className="spin" size={15} /> : <Server size={15} />}保存并启用</button></footer>
         </section>}
 
         {activeSection === "skills" && <section className="settings-pane" aria-labelledby="settings-skills-title">
-          <header><p>集成</p><h2 id="settings-skills-title">Skills</h2><span>加载可复用的工作说明，让 Agent 按指定流程处理任务。</span></header>
-          <div className="settings-section-toolbar"><span><strong>{enabledSkills} 个已启用</strong><small>从项目目录与用户目录读取 SKILL.md</small></span><button type="button" onClick={refreshExtensions}><RefreshCw size={13} />重新扫描</button></div>
+          <header><h2 id="settings-skills-title">Skills</h2></header>
+          <div className="settings-section-toolbar"><span><strong>{enabledSkills} 个已启用</strong></span><button type="button" disabled={busy} onClick={refreshExtensions}><RefreshCw size={13} />{busy ? "处理中…" : "重新扫描"}</button></div>
           {status && <p className="settings-inline-status" role="alert">{status.message}</p>}
-          <div className="skill-switches settings-skill-list">{skills.map((skill) => <button type="button" key={skill.id} role="switch" disabled={busy} aria-checked={skill.enabled} aria-pressed={skill.enabled} onClick={() => toggleSkill(skill)}><span><strong>{skill.name}</strong><small>{skill.description || "只读工作说明"}</small></span><i /></button>)}{!skills.length && <p>未在项目或用户目录发现 SKILL.md</p>}</div>
+          <div className="skill-switches settings-skill-list">{skills.map((skill) => <button type="button" key={skill.id} role="switch" disabled={busy} aria-checked={skill.enabled} aria-pressed={skill.enabled} onClick={() => toggleSkill(skill)}><span><strong title={[skill.path, ...(skill.metadata_json?.shadowed_paths || []).map((path) => `已覆盖：${path}`)].filter(Boolean).join("\n")}>{skill.name}</strong>{skill.description && <small title={skill.description}>{skill.description}</small>}{skill.metadata_json?.change_reason && <small className="skill-change-reason">{skill.metadata_json.change_reason}</small>}</span><i /></button>)}{!skills.length && <p>未发现可用的 SKILL.md</p>}</div>
         </section>}
 
         {activeSection === "mcp" && <section className="settings-pane" aria-labelledby="settings-mcp-title">
-          <header><p>集成</p><h2 id="settings-mcp-title">MCP Servers</h2><span>连接外部工具。只读能力可单独启用，写入能力仍需逐次批准。</span></header>
-          <div className="settings-section-toolbar"><span><strong>{enabledMcp} 个已连接</strong><small>{mcpServers.length} 个已保存的服务器</small></span></div>
-          <div className="mcp-list settings-mcp-list">{mcpServers.map((server) => <McpServerRow key={server.id} server={server} busy={busy} onConnect={approveAndEnableMcp} onDisable={disableMcp} onToggleRead={toggleMcpRead} onApproveWrite={approveMcpWrite} onRevokeWrite={revokeMcpWrite} />)}{!mcpServers.length && <p className="settings-empty-state">还没有 MCP Server。添加后会先验证配置，再请求连接批准。</p>}</div>
+          <header><h2 id="settings-mcp-title">MCP Servers</h2></header>
+          {!!mcpServers.length && <div className="settings-section-toolbar"><span><strong>{enabledMcp} 个已连接</strong></span></div>}
+          <div className="mcp-list settings-mcp-list">{mcpServers.map((server) => <McpServerRow key={server.id} server={server} busy={busy} onConnect={approveAndEnableMcp} onDisable={disableMcp} onToggleRead={toggleMcpRead} onApproveWrite={approveMcpWrite} onRevokeWrite={revokeMcpWrite} />)}</div>
           <form className="mcp-config-form" onSubmit={(event) => { event.preventDefault(); addMcp(); }}>
-            <div className="mcp-form-title"><span><strong>连接自定义 MCP</strong><small>添加后先验证配置，再由你批准启动与工具权限。</small></span></div>
+            <div className="mcp-form-title"><span><strong>添加服务器</strong></span></div>
             <section className="mcp-form-section mcp-identity-section">
-              <label><span>名称</span><input aria-label="MCP 名称" value={mcpForm.name} onChange={(event) => updateMcpField("name", event.target.value)} placeholder="例如 notion 或 local_tools" />{mcpForm.name && !validMcpName && <small>只可使用字母、数字、短横线和下划线</small>}</label>
+              <label><span>名称</span><input aria-label="MCP 名称" value={mcpForm.name} onChange={(event) => updateMcpField("name", event.target.value)} placeholder="例如 local_tools" />{mcpForm.name && !validMcpName && <small>只可使用字母、数字、短横线和下划线</small>}</label>
               <div className="mcp-transport-row"><strong>类型</strong><div className="mcp-transport-switch" role="group" aria-label="MCP 连接类型"><button type="button" className={mcpForm.transport === "stdio" ? "active" : ""} aria-pressed={mcpForm.transport === "stdio"} onClick={() => updateMcpField("transport", "stdio")}>STDIO</button><button type="button" className={mcpForm.transport === "streamable_http" ? "active" : ""} aria-pressed={mcpForm.transport === "streamable_http"} onClick={() => updateMcpField("transport", "streamable_http")}>流式 HTTP</button></div></div>
             </section>
             <section className="mcp-form-section">
-              <label><span>{mcpForm.transport === "stdio" ? "启动命令" : "服务器 URL"}</span><input aria-label={mcpForm.transport === "stdio" ? "MCP 可执行文件" : "MCP 服务器 URL"} value={mcpForm.command} onChange={(event) => updateMcpField("command", event.target.value)} placeholder={mcpForm.transport === "stdio" ? "可执行文件绝对路径，例如 /opt/homebrew/bin/npx" : "https://mcp.example.com/mcp"} /></label>
-              {mcpForm.transport === "stdio" && <div className="mcp-repeat-field"><div className="mcp-field-label"><strong>参数</strong><small>每项作为一个独立参数传入</small></div>{mcpForm.args.map((argument, index) => <div className="mcp-repeat-row" key={`argument-${index}`}><input aria-label={`MCP 参数 ${index + 1}`} value={argument} onChange={(event) => updateMcpListField("args", index, event.target.value)} placeholder={index === 0 ? "例如 -y" : "参数"} /><button type="button" onClick={() => removeMcpListField("args", index)} aria-label={`删除 MCP 参数 ${index + 1}`}><Trash2 size={14} /></button></div>)}<button type="button" className="mcp-add-row" onClick={() => addMcpListField("args")}><Plus size={14} />添加参数</button></div>}
+              <label><span>{mcpForm.transport === "stdio" ? "启动命令" : "服务器 URL"}</span><input aria-label={mcpForm.transport === "stdio" ? "MCP 可执行文件" : "MCP 服务器 URL"} value={mcpForm.command} onChange={(event) => updateMcpField("command", event.target.value)} placeholder={mcpForm.transport === "stdio" ? "可执行文件的绝对路径" : "https://mcp.example.com/mcp"} /></label>
+              {mcpForm.transport === "stdio" && <div className="mcp-repeat-field"><div className="mcp-field-label"><strong>参数</strong></div>{mcpForm.args.map((argument, index) => <div className="mcp-repeat-row" key={`argument-${index}`}><input aria-label={`MCP 参数 ${index + 1}`} value={argument} onChange={(event) => updateMcpListField("args", index, event.target.value)} placeholder={index === 0 ? "例如 -y" : "参数"} /><button type="button" onClick={() => removeMcpListField("args", index)} aria-label={`删除 MCP 参数 ${index + 1}`}><Trash2 size={14} /></button></div>)}<button type="button" className="mcp-add-row" onClick={() => addMcpListField("args")}><Plus size={14} />添加参数</button></div>}
             </section>
             {mcpForm.transport === "stdio" && <section className="mcp-form-section">
-              <div className="mcp-repeat-field"><div className="mcp-field-label"><strong>环境变量传递</strong><small>只填写变量名；值从 FetchCV 启动时的系统环境读取，不保存密钥</small></div>{mcpForm.envKeys.map((envKey, index) => <div className="mcp-repeat-row" key={`environment-${index}`}><input aria-label={`MCP 环境变量 ${index + 1}`} value={envKey} onChange={(event) => updateMcpListField("envKeys", index, event.target.value)} placeholder={index === 0 ? "例如 GITHUB_TOKEN" : "环境变量名"} /><button type="button" onClick={() => removeMcpListField("envKeys", index)} aria-label={`删除 MCP 环境变量 ${index + 1}`}><Trash2 size={14} /></button></div>)}<button type="button" className="mcp-add-row" onClick={() => addMcpListField("envKeys")}><Plus size={14} />添加环境变量</button></div>
-              <label><span>工作目录 <em>可选</em></span><input aria-label="MCP 工作目录" value={mcpForm.cwd} onChange={(event) => updateMcpField("cwd", event.target.value)} placeholder="绝对路径，例如 /Users/name/code" /></label>
+              <div className="mcp-repeat-field"><div className="mcp-field-label"><strong>环境变量名</strong><small>值从系统环境读取</small></div>{mcpForm.envKeys.map((envKey, index) => <div className="mcp-repeat-row" key={`environment-${index}`}><input aria-label={`MCP 环境变量 ${index + 1}`} value={envKey} onChange={(event) => updateMcpListField("envKeys", index, event.target.value)} placeholder={index === 0 ? "例如 GITHUB_TOKEN" : "环境变量名"} /><button type="button" onClick={() => removeMcpListField("envKeys", index)} aria-label={`删除 MCP 环境变量 ${index + 1}`}><Trash2 size={14} /></button></div>)}<button type="button" className="mcp-add-row" onClick={() => addMcpListField("envKeys")}><Plus size={14} />添加环境变量</button></div>
+              <label><span>工作目录</span><input aria-label="MCP 工作目录" value={mcpForm.cwd} onChange={(event) => updateMcpField("cwd", event.target.value)} placeholder="绝对路径（可选）" /></label>
             </section>}
-            <footer><span><ShieldCheck size={14} />保存配置不会自动启动 Server</span><button type="submit" disabled={!validMcp || busy}>{busy ? <LoaderCircle className="spin" size={14} /> : <Plus size={14} />}添加 Server</button></footer>
+            <footer><button type="submit" disabled={!validMcp || busy}>{busy ? <LoaderCircle className="spin" size={14} /> : <Plus size={14} />}添加 Server</button></footer>
           </form>
           {status && <div role="status" className={`provider-status ${status.type}`}>{status.type === "testing" ? <LoaderCircle className="spin" size={14} /> : status.type === "success" ? <CheckCircle2 size={14} /> : <X size={14} />}<span>{status.message}</span></div>}
         </section>}
 
         {activeSection === "permissions" && <section className="settings-pane" aria-labelledby="settings-permissions-title">
-          <header><p>安全</p><h2 id="settings-permissions-title">权限与浏览器</h2><span>查看 Agent 能访问的范围，以及哪些操作必须由你确认。</span></header>
+          <header><h2 id="settings-permissions-title">权限与浏览器</h2></header>
           <div className="settings-capabilities">
-            <div><Globe2 size={17} /><span><strong>网页搜索与读取</strong><small>公开 HTTPS 页面在 Agent 内部读取，不会自动打开外部窗口。</small></span><select aria-label="网页访问权限" value={permissionSettings.web_access} onChange={(event) => updatePermission({ web_access: event.target.value })}><option value="allow">允许</option><option value="ask">每次询问</option><option value="deny">关闭</option></select></div>
-            <div><FolderLock size={17} /><span><strong>本地资料读取</strong><small>只读取 FetchCV 隔离工作区中的简历、作品和岗位资料。</small></span><select aria-label="本地资料读取权限" value={permissionSettings.workspace_read} onChange={(event) => updatePermission({ workspace_read: event.target.value })}><option value="allow">允许</option><option value="ask">每次询问</option><option value="deny">关闭</option></select></div>
-            <div><ShieldCheck size={17} /><span><strong>写入与移动文件</strong><small>即使允许，具体文件操作也必须逐次审批；关闭后 Agent 只能读取。</small></span><select aria-label="文件写入权限" value={permissionSettings.workspace_write} onChange={(event) => updatePermission({ workspace_write: event.target.value })}><option value="ask">每次询问</option><option value="deny">始终拒绝</option></select></div>
-            <div><Trash2 size={17} /><span><strong>删除文件</strong><small>删除会先创建可恢复备份，并在执行前请求批准。</small></span><select aria-label="文件删除权限" value={permissionSettings.file_delete} onChange={(event) => updatePermission({ file_delete: event.target.value })}><option value="ask">每次询问</option><option value="deny">始终拒绝</option></select></div>
-            <div><Globe2 size={17} /><span><strong>受控浏览器</strong><small>默认在 Agent 内后台读取网页；涉及登录态或敏感页面时仍受权限控制。</small></span><select aria-label="受控浏览器权限" value={permissionSettings.browser_bridge} onChange={(event) => updatePermission({ browser_bridge: event.target.value })}><option value="allow">允许</option><option value="ask">每次询问</option><option value="deny">关闭</option></select></div>
-            {status && <div className="settings-inline-status" role="status">{status.message}</div>}
+            <div><label htmlFor="permission-web-access"><strong>网页搜索与读取</strong></label><select id="permission-web-access" aria-label="网页访问权限" value={permissionSettings.web_access} onChange={(event) => updatePermission({ web_access: event.target.value })}><option value="allow">允许</option><option value="ask">每次询问</option><option value="deny">关闭</option></select></div>
+            <div><label htmlFor="permission-workspace-read"><strong>读取工作区资料</strong></label><select id="permission-workspace-read" aria-label="本地资料读取权限" value={permissionSettings.workspace_read} onChange={(event) => updatePermission({ workspace_read: event.target.value })}><option value="allow">允许</option><option value="ask">每次询问</option><option value="deny">关闭</option></select></div>
+            <div><label htmlFor="permission-workspace-write"><strong>写入与移动文件</strong></label><select id="permission-workspace-write" aria-label="文件写入权限" value={permissionSettings.workspace_write} onChange={(event) => updatePermission({ workspace_write: event.target.value })}><option value="ask">每次询问</option><option value="deny">始终拒绝</option></select></div>
+            <div><label htmlFor="permission-file-delete"><strong>删除文件</strong></label><select id="permission-file-delete" aria-label="文件删除权限" value={permissionSettings.file_delete} onChange={(event) => updatePermission({ file_delete: event.target.value })}><option value="ask">每次询问</option><option value="deny">始终拒绝</option></select></div>
+            <div><label htmlFor="permission-browser"><strong>受控浏览器</strong></label><select id="permission-browser" aria-label="受控浏览器权限" value={permissionSettings.browser_bridge} onChange={(event) => updatePermission({ browser_bridge: event.target.value })}><option value="allow">允许</option><option value="ask">每次询问</option><option value="deny">关闭</option></select></div>
           </div>
+          {status && <div className="settings-inline-status" role="status">{status.message}</div>}
         </section>}
       </main>
     </motion.section>

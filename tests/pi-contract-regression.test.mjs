@@ -48,7 +48,7 @@ for (const [suffix, expected] of [
 });
 
 for (const refresh of ['inline', 'fallback', 'failure']) test(`real host task-tool refresh: ${refresh}`, async()=>{
-  const contexts=[], records=[], requests=[], checkpoints=[];
+  const contexts=[], records=[], requests=[], checkpoints=[], receipts=[];
   const toolA={name:'stage_a',description:'Stage A',input_schema:{type:'object',properties:{}},side_effect:true};
   const toolB={name:'stage_b',description:'Stage B',input_schema:{type:'object',properties:{evidence:{type:'string'}}}};
   const streamSimple=(model,context,options)=>{
@@ -73,7 +73,10 @@ for (const refresh of ['inline', 'fallback', 'failure']) test(`real host task-to
     request:async(_base,_token,url,options={})=>{
       requests.push(url);
       if(url.endsWith('/checkpoint'))checkpoints.push(JSON.parse(options.body));
-      if(url.endsWith('/task-tools/stage_a'))return {result:{stage:'b',summary:'advanced'},...(refresh==='inline'?{tools:[toolB]}:{})};
+    if(url.endsWith('/task-tools/stage_a')){
+      assert.equal(receipts.at(-1)?.status,'running','real SDK emits the live receipt before executing the backend tool');
+      return {result:{stage:'b',summary:'advanced'},...(refresh==='inline'?{tools:[toolB]}:{})};
+    }
       if(url.endsWith('/task-tools')){
         if(refresh==='failure')throw new Error('Synthetic backend unavailable');
         return {tools:[toolB]};
@@ -86,16 +89,21 @@ for (const refresh of ['inline', 'fallback', 'failure']) test(`real host task-to
   });
   const running = runtime.run({requestId:'real-host-tools',mode:'task',bootstrap:{
     run_id:'r',task_id:'t',session_id:'refresh',system_prompt:'Use available tools',
-    system_prompt_sections:[{text:'A-POLICY',requires_all:['stage_a']},{text:'B-POLICY',requires_all:['stage_b']}],prompt:'Advance once',tools:[toolA]}},()=>{});
+    system_prompt_sections:[{text:'A-POLICY',requires_all:['stage_a']},{text:'B-POLICY',requires_all:['stage_b']}],prompt:'Advance once',tools:[toolA]}},(name,payload)=>{if(name==='tool_receipt')receipts.push(payload.receipt);});
   if(refresh==='failure'){
     await assert.rejects(running,{code:'tool_refresh_failed'});
     assert(checkpoints.some(cp=>cp.tool_receipts?.some(r=>r.status==='completed_refresh_failed')));
+    assert.equal(receipts.at(-1).status,'completed_refresh_failed','SDK tool error must preserve the successful backend operation');
+    assert.equal(receipts.at(-1).summary,'advanced');
+    assert.equal(receipts.some(receipt=>receipt.status==='failed'),false);
     assert.equal(contexts.length,1,'No model request may proceed with stale tools');
     assert.equal(requests.filter(p=>p.endsWith('/task-tools/stage_a')).length,1,'No side-effect retry');
     assert.equal(requests.filter(p=>p.endsWith('/complete')).length,0);
     return;
   }
   await running;
+  assert.equal(receipts.at(-1).status,'completed');
+  assert.equal(receipts.at(-1).summary,'advanced');
   assert.equal(requests.filter(p=>p.endsWith('/task-tools/stage_a')).length,1);
   assert.equal(contexts.length,2);
   assert.deepEqual(contexts[1].tools.map(t=>t.name),['stage_b']);

@@ -83,6 +83,54 @@ test("xiaohongshu access cache never lets a canonical URL erase an in-memory acc
   assert.equal(cache.resolve(canonical), accessUrl);
 });
 
+test("share and search aliases reuse one note grant without changing canonical URLs", () => {
+  const noteId = "6a5b612a000000000503ba9f";
+  const accessUrl = `https://www.xiaohongshu.com/discovery/item/${noteId}?xsec_token=share-token&xsec_source=pc_share`;
+  const searchCanonical = `https://xiaohongshu.com/explore/${noteId}`;
+  const cache = createXiaohongshuAccessCache({ maxEntries: 1 });
+  cache.remember(accessUrl);
+  assert.equal(cache.resolve(searchCanonical), accessUrl);
+  assert.equal(cache.resolve(`${searchCanonical}/`), accessUrl);
+  assert.equal(cache.remember(searchCanonical), searchCanonical);
+  assert.equal(cache.entries().length, 1);
+  assert.equal(cache.entries()[0].canonical, searchCanonical);
+  assert.equal(cache.resolve(searchCanonical), accessUrl);
+  const restored = createXiaohongshuAccessCache({ initialEntries: cache.entries() });
+  assert.equal(restored.resolve(`https://www.xiaohongshu.com/explore/${noteId}`), accessUrl);
+  assert.equal(restored.resolve(`https://www.xiaohongshu.com/explore/different-note`), "https://www.xiaohongshu.com/explore/different-note");
+});
+
+test("tokenless cache reads do not extend or resurrect expiring access grants", () => {
+  let now = 1000;
+  const canonical = "https://www.xiaohongshu.com/explore/expiring-note";
+  const accessUrl = `${canonical}?xsec_token=expires`;
+  const cache = createXiaohongshuAccessCache({ ttlMs: 100, clock: () => now });
+  cache.remember(accessUrl);
+  now = 1050;
+  cache.remember(canonical);
+  assert.equal(cache.entries()[0].expiresAt, 1100);
+  assert.equal(cache.resolve(canonical), accessUrl);
+  now = 1101;
+  cache.remember(canonical);
+  assert.equal(cache.resolve(canonical), canonical);
+});
+
+test("legacy cache aliases preserve live grants and discard expired or invalid records", () => {
+  const noteId = "6a5b612a000000000503ba9f";
+  const canonical = `https://www.xiaohongshu.com/explore/${noteId}`;
+  const share = `https://www.xiaohongshu.com/discovery/item/${noteId}`;
+  const accessUrl = `${share}?xsec_token=live`;
+  const cache = createXiaohongshuAccessCache({ clock: () => 1000, initialEntries: [
+    { canonical: share, url: accessUrl, expiresAt: 2000 },
+    { canonical, url: canonical, expiresAt: 3000 },
+    { canonical, url: `${canonical}?xsec_token=expired`, expiresAt: 999 },
+    { canonical, url: `${canonical}?xsec_token=invalid`, expiresAt: "not-a-date" },
+  ] });
+  assert.equal(cache.resolve(canonical), accessUrl);
+  assert.equal(cache.entries().length, 1);
+  assert.equal(cache.entries()[0].expiresAt, 2000);
+});
+
 test("old Xiaohongshu sources use bounded recovery queries", () => {
   assert.deepEqual(
     xiaohongshuRecoveryQueries({

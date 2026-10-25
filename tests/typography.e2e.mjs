@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { _electron as electron } from "playwright";
 import { findFreePort, isFetchCVHealthy } from "../electron/sidecar.mjs";
+import { resolveElectronRuntime } from "../scripts/electron-runtime.mjs";
 
 const projectRoot = path.resolve(import.meta.dirname, "..");
 const sourceUserData = path.join(process.env.APPDATA || "", "fetchcv-desktop");
@@ -19,6 +20,7 @@ const port = await findFreePort();
 const screenshotPath = path.join(os.tmpdir(), "fetchcv-readable-typography.png");
 const conversationScreenshotPath = path.join(os.tmpdir(), "fetchcv-readable-conversation.png");
 const application = await electron.launch({
+  executablePath: (await resolveElectronRuntime({ projectRoot })).executable,
   args: [projectRoot],
   cwd: projectRoot,
   env: {

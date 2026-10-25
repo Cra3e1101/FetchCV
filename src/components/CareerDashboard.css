@@ -80,8 +80,6 @@
 .career-empty h3 { margin: 13px 0 0; color: var(--ink); font-size: 14px; font-weight: 500; }
 .career-empty p { font-size: 12px; line-height: 1.7; }
 .career-footer { margin-top: 26px; display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 10px; }
-.workspace-recovery { grid-column: 2 / -1; padding: 32px; display: grid; place-content: center; justify-items: center; gap: 14px; text-align: center; }
-.workspace-recovery p { max-width: 460px; color: var(--muted); overflow-wrap: anywhere; }
 
 [data-theme="dark"] .career-dashboard,
 [data-theme="dark"] .career-topbar,

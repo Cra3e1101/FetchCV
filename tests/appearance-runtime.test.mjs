@@ -53,3 +53,16 @@ test("runtime state distinguishes model streaming from real tool execution", () 
   assert.equal(resolveAgentRuntimeState({ activity: { kind: "chat", label: "正在形成回答", events: [] } }).id, "streaming");
   assert.equal(resolveAgentRuntimeState({}).id, "idle");
 });
+
+test("stop and terminal delivery immediately suppress stale active checkpoints", () => {
+  const activity = { kind: "chat", events: [{ kind: "tool", status: "active", label: "读取文件" }] };
+  for (const [flags, id] of [
+    [{ stopping: true }, "stopping"],
+    [{ finished: true }, "completed"],
+    [{ finished: true, failed: true }, "error"],
+  ]) {
+    const state = resolveAgentRuntimeState({ activity: { ...activity, ...flags }, task: { status: "running" } });
+    assert.equal(state.id, id);
+    assert.equal(state.active, false);
+  }
+});

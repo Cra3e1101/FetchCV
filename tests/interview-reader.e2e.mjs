@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { _electron as electron } from "playwright";
 import { findFreePort } from "../electron/sidecar.mjs";
+import { resolveElectronRuntime } from "../scripts/electron-runtime.mjs";
 
 const projectRoot = path.resolve(import.meta.dirname, "..");
 const sourceUserData = process.env.FETCHCV_PROBE_SOURCE_USER_DATA
@@ -35,6 +36,7 @@ if (!liveUserData) {
 
 const port = await findFreePort();
 const application = await electron.launch({
+  executablePath: (await resolveElectronRuntime({ projectRoot })).executable,
   args: [projectRoot],
   cwd: projectRoot,
   env: {
@@ -91,7 +93,7 @@ try {
 
   const reader = window.getByRole("dialog", { name: /面经原文/ });
   await reader.waitFor({ state: "visible", timeout: 12000 });
-  await reader.getByText("本地证据快照", { exact: false }).waitFor({ state: "visible" });
+  await reader.getByText("本地备份", { exact: false }).waitFor({ state: "visible" });
   await reader.locator(".interview-reader-raw").waitFor({ state: "visible", timeout: 12000 });
   await reader.locator(".interview-reader-loading").waitFor({ state: "detached", timeout: 12000 });
   const readerText = await reader.innerText();

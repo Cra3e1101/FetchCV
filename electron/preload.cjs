@@ -20,6 +20,12 @@ contextBridge.exposeInMainWorld("appRuntime", {
   apiToken: tokenArg ? tokenArg.slice("--fetchcv-api-token=".length) : "",
   startupError: errorArg ? decodeURIComponent(errorArg.slice("--fetchcv-api-error=".length)) : "",
   getBackendStatus: () => ipcRenderer.invoke("backend:get-status"),
+  onBackendStatus: (callback) => {
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on("backend:state", listener);
+    return () => ipcRenderer.removeListener("backend:state", listener);
+  },
+  reportStartupMilestone: (name) => ipcRenderer.send("startup:milestone", name),
   streamPiMessage: async (input, onEvent) => {
     const requestId = String(input?.requestId || "");
     const channel = `runtime:event:${requestId}`;
@@ -57,7 +63,7 @@ contextBridge.exposeInMainWorld("appRuntime", {
   beginXiaohongshuLogin: () => ipcRenderer.invoke("xiaohongshu:begin-login"),
   finishXiaohongshuLogin: () => ipcRenderer.invoke("xiaohongshu:finish-login"),
   getResumeSnapshot: (resumeId) => ipcRenderer.invoke("resume:get-snapshot", resumeId),
-  renderResumePdf: (resumeId) => ipcRenderer.invoke("resume:render-pdf", resumeId),
+  renderResumePdf: (resumeId, expectedHash) => ipcRenderer.invoke("resume:render-pdf", resumeId, expectedHash),
 });
 
 contextBridge.exposeInMainWorld("desktopWindow", {

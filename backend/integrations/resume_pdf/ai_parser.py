@@ -199,16 +199,16 @@ def _coalesce_skill_items(items: list[dict]) -> list[dict]:
     return merged
 
 
-SYSTEM_PROMPT = """你是简历文档结构解析器。你的任务仅是识别原文结构，不是改写、润色或推断。
-必须遵守：
-1. 每个字段只能摘录自输入文本；不确定就留空。
-2. 保持章节和条目的原始顺序。
-3. 每个条目必须提供 source_quotes，且逐字复制足以支撑该条目的原文片段。
-4. 不合并不同学校、公司或项目，也不把教育期间的奖项拆成独立教育经历。同一个技能章节下的数据分析、统计知识、综合能力等小标题必须保留在一个 skill 条目中。
-5. 日期统一为 YYYY-MM；原文为“至今”时 end_date 填“至今”。
-6. education 的 organization=学校，role=专业/学历；experience 的 organization=公司，role=岗位；project 的 title=项目名，role 可放奖项/角色。
-7. 输入中的 <PERSON_1>、<PHONE_1> 等是本地隐私占位符，必须原样保留，禁止猜测真实值。
-8. 不输出输入中没有的事实。"""
+SYSTEM_PROMPT = """You parse resume document structure. Extract the original structure without rewriting, polishing, translating, or inferring facts.
+Rules:
+1. Extract each field from the input text only; leave uncertain fields empty.
+2. Preserve the original section and item order.
+3. Every item must include source_quotes copied verbatim from enough source text to support that item.
+4. Do not merge different schools, companies, or projects, or split education awards into separate education entries. Keep all subheadings within one skills section, such as data analysis, statistics, and general abilities, in a single skill item.
+5. Normalize dates to YYYY-MM. When the source says "至今", set end_date to "至今".
+6. For education, organization is the school and role is the major/degree. For experience, organization is the company and role is the position. For project, title is the project name and role may contain the award/role.
+7. Preserve local privacy placeholders such as <PERSON_1> and <PHONE_1> exactly. Never guess their original values.
+8. Do not output facts absent from the input. Preserve the source language of extracted content and quotations; write explanatory warnings in Simplified Chinese."""
 
 
 def parse_resume_with_model(
@@ -228,7 +228,7 @@ def parse_resume_with_model(
     try:
         output, runtime_result = (runtime or build_runtime(settings)).generate(
             agent_name="resume_structure_parser",
-            prompt=f"请解析以下已在本地脱敏的简历文本：\n<resume>\n{prompt_text}\n</resume>",
+            prompt=f"Parse the following resume text, which has been redacted locally:\n<resume>\n{prompt_text}\n</resume>",
             system_prompt=SYSTEM_PROMPT,
             output_model=AiResumeStructure,
             mock_data={"sections": [], "warnings": []},

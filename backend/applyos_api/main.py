@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from .startup_trace import mark_python_entry, mark_startup
+
+mark_python_entry()
+
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -20,13 +24,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.inspection import inspect
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from applyos_agent.config import AgentSettings, RuntimeMode
 from applyos_agent.schemas import JobPostingExtraction
 from applyos_agent.model_protocol import strip_model_protocol
+from applyos_agent.interview_source_hints import (
+    current_source_hints, invalidate_source_hint_edges, read_source_hints, refresh_source_hints,
+)
+from applyos_domain.knowledge_search import search_knowledge, source_metadata
 from applyos_domain.database import Database, get_database
 from applyos_domain.enums import FactSourceType, QualityStatus
 from applyos_domain.models import AgentMessage, AgentRun, AgentRunStep, AgentSkill, AgentTask, Application, Approval, Candidate, Experience, Fact, InterviewBrief, InterviewSource, Job, JobProfile, MaterialAsset, McpServerConfig, PortfolioVersion, QualityReport, QueuedAgentMessage, ResumeVersion, RewriteProposal, ToolInvocation, VersionSnapshot
@@ -39,8 +47,10 @@ from applyos_harness.permissions import ToolPermission
 from applyos_harness.policy import general_settings, permission_settings, save_general_settings, save_permission_settings, granted_permissions
 from applyos_harness.state_machine import PipelineStage, RunStateMachine
 from applyos_harness.trace import TraceService
-from applyos_harness.versioning import VersionService
+from applyos_harness.versioning import VersionService, canonical_hash
+from applyos_harness.gates import require_resume_exportable, require_pdf_text_matches_resume, resume_semantic_payload
 
+from .evidence_review import EvidenceReviewInput, review_source, refresh_briefs
 from .deps import get_session
 from .pi_bridge import router as pi_agent_router
 from .conversations import router as conversations_router
@@ -85,10 +95,13 @@ from .schemas import (
     PortfolioVersionRead,
     ProviderRuntimeConfig,
     ProposalReviewRequest,
+    ProposalRewriteRequest,
+    ProposalRewriteCancelRequest,
     ResumeVersionRead,
     ResumeEditorUpdate,
     RunBoundAction,
     RuntimeStatusRead,
+    StartupReadyRequest,
     QueuedMessageRead,
     AgentSkillRead,
     SkillStateUpdate,
@@ -171,9 +184,10 @@ def _web_client():
 
 
 def _job_posting_importer(session: Session):
-    from integrations.web import JobPostingImporter
+    from integrations.web import FirecrawlClient, JobPostingImporter
 
-    return JobPostingImporter(session)
+    web = _web_client()
+    return JobPostingImporter(session, web_client=web, firecrawl_client=FirecrawlClient(web_client=web), browser_client=_browser_bridge())
 
 
 def _looks_like_job_content(text: str) -> bool:
@@ -187,7 +201,7 @@ def create_app(database: Database | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):
-        db.create_schema()
+        db.create_schema(on_stage=mark_startup)
         # Legacy snapshot repair is maintenance, not a prerequisite for serving
         # the workspace. Run it after the API is available so pypdf does not
         # block every cold launch.
@@ -204,6 +218,7 @@ def create_app(database: Database | None = None) -> FastAPI:
         repair_timer.daemon = True
         repair_timer.start()
         try:
+            mark_startup("python.lifespan_ready")
             yield
         finally:
             repair_timer.cancel()
@@ -213,13 +228,16 @@ def create_app(database: Database | None = None) -> FastAPI:
     app.include_router(conversations_router)
     app.state.database = db
     control_token = os.getenv("FETCHCV_CONTROL_TOKEN", "").strip()
+    instance_nonce = os.getenv("FETCHCV_INSTANCE_NONCE", "")
+    app.state.agent_ready = os.getenv("FETCHCV_DESKTOP_STARTUP_GATE", "") != "1"
+    startup_routes = {"/api/runtime/configure", "/api/pi/hosts/reconcile", "/api/runtime/startup-ready"}
     configured_origins = [item.strip() for item in os.getenv("FETCHCV_ALLOWED_ORIGINS", "null,http://127.0.0.1:4173").split(",") if item.strip()]
     app.add_middleware(
         CORSMiddleware,
         allow_origins=configured_origins,
         allow_credentials=False,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type", "Idempotency-Key", "X-FetchCV-Control-Token", "X-FetchCV-Page-Count"],
+        allow_headers=["Content-Type", "Idempotency-Key", "X-FetchCV-Control-Token", "X-FetchCV-Page-Count", "X-FetchCV-Resume-Hash"],
     )
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "testserver"])
 
@@ -229,11 +247,25 @@ def create_app(database: Database | None = None) -> FastAPI:
             return await call_next(request)
         if not control_token and database is None:
             return JSONResponse(status_code=503, content={"detail": "desktop_control_token_required"})
-        if not control_token:
-            return await call_next(request)
-        provided = request.headers.get("x-fetchcv-control-token") or request.query_params.get("fetchcv_token") or ""
-        if not hmac.compare_digest(control_token, provided):
-            return JSONResponse(status_code=403, content={"detail": "desktop_session_forbidden"})
+        if control_token:
+            provided = request.headers.get("x-fetchcv-control-token") or request.query_params.get("fetchcv_token") or ""
+            if not hmac.compare_digest(control_token, provided):
+                return JSONResponse(status_code=403, content={"detail": "desktop_session_forbidden"})
+        if request.url.path.startswith("/artifacts/"):
+            # Static files otherwise bypass every resume PDF/DOCX gate. Use
+            # resolved Windows paths, including case/backslash aliases.
+            try:
+                artifact_path = (artifact_root() / request.url.path[len("/artifacts/"):]).resolve()
+                is_resume_artifact = artifact_path.is_relative_to((artifact_root() / "resumes").resolve())
+            except (ValueError, OSError):
+                is_resume_artifact = True
+            if is_resume_artifact:
+                return JSONResponse(status_code=403, content={"detail": "resume_artifact_requires_verified_api", "message": "简历产物请通过已核验的 PDF 或 DOCX 接口读取"})
+        if not app.state.agent_ready:
+            is_startup_request = request.method == "POST" and request.url.path in startup_routes
+            is_export = bool(re.fullmatch(r"/api/resumes/[^/]+/docx/?", request.url.path))
+            if is_export or (request.method not in {"GET", "HEAD"} and not is_startup_request):
+                return JSONResponse(status_code=503, content={"detail": "agent_startup_pending"}, headers={"Retry-After": "1"})
         return await call_next(request)
 
     artifacts = artifact_root()
@@ -245,7 +277,8 @@ def create_app(database: Database | None = None) -> FastAPI:
             code = 404
         elif "permission" in exc.code or "approval_required" in exc.code:
             code = 403
-        elif exc.code in {"illegal_state_transition", "terminal_state", "idempotency_conflict", "approval_revision_conflict"}:
+        elif exc.code in {"illegal_state_transition", "terminal_state", "idempotency_conflict", "approval_revision_conflict",
+                          "approval_target_changed", "approval_already_decided", "proposal_rewrite_pending", "proposal_rewrite_request_changed"}:
             code = 409
         else:
             code = 422
@@ -254,6 +287,15 @@ def create_app(database: Database | None = None) -> FastAPI:
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok", "service": "fetchcv-api", "database": "ready", "instance_nonce": os.getenv("FETCHCV_INSTANCE_NONCE", "")}
+
+    @app.post("/api/runtime/startup-ready")
+    def startup_ready(payload: StartupReadyRequest, x_fetchcv_control_token: Annotated[str | None, Header()] = None):
+        if not control_token or not x_fetchcv_control_token or not hmac.compare_digest(control_token, x_fetchcv_control_token):
+            raise HTTPException(status_code=403, detail="runtime_configuration_forbidden")
+        if not instance_nonce or not hmac.compare_digest(instance_nonce.encode(), payload.instance_nonce.encode()):
+            raise HTTPException(status_code=403, detail="startup_instance_mismatch")
+        app.state.agent_ready = True
+        return {"agent_ready": True}
 
     @app.get("/api/runtime/status", response_model=RuntimeStatusRead)
     def runtime_status():
@@ -284,6 +326,11 @@ def create_app(database: Database | None = None) -> FastAPI:
             raise HTTPException(status_code=422, detail="provider_base_url_must_use_https")
         if not payload.api_key.strip() or not payload.model.strip():
             raise HTTPException(status_code=422, detail="provider_credentials_incomplete")
+        from applyos_agent.provider_options import validate_request_options
+        try:
+            request_options = validate_request_options(payload.request_options, protocol)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         os.environ.update(
             {
                 "FETCHCV_AGENT_RUNTIME": "compatible",
@@ -292,6 +339,7 @@ def create_app(database: Database | None = None) -> FastAPI:
                 "FETCHCV_PROVIDER_BASE_URL": base_url,
                 "FETCHCV_PROVIDER_API_KEY": payload.api_key.strip(),
                 "FETCHCV_PROVIDER_MODEL": payload.model.strip(),
+                "FETCHCV_PROVIDER_REQUEST_OPTIONS": json.dumps(request_options),
             }
         )
         return runtime_status()
@@ -307,6 +355,7 @@ def create_app(database: Database | None = None) -> FastAPI:
             "FETCHCV_PROVIDER_BASE_URL",
             "FETCHCV_PROVIDER_API_KEY",
             "FETCHCV_PROVIDER_MODEL",
+            "FETCHCV_PROVIDER_REQUEST_OPTIONS",
         ):
             os.environ.pop(key, None)
         os.environ["FETCHCV_AGENT_RUNTIME"] = "mock"
@@ -314,6 +363,8 @@ def create_app(database: Database | None = None) -> FastAPI:
 
     @app.get("/api/skills", response_model=list[AgentSkillRead])
     def list_skills(session: SessionDep):
+        if not app.state.agent_ready:
+            return _skill_loader(session, AgentSettings.from_env().workspace_root).visible()
         loader = _skill_loader(session, AgentSettings.from_env().workspace_root)
         return loader.sync()
 
@@ -334,6 +385,13 @@ def create_app(database: Database | None = None) -> FastAPI:
         skill = session.get(AgentSkill, skill_id)
         if skill is None:
             raise HTTPException(status_code=404, detail="skill_not_found")
+        if payload.enabled:
+            expected_hash = payload.content_hash or skill.content_hash
+            _skill_loader(session, AgentSettings.from_env().workspace_root).sync()
+            if (skill.metadata_json or {}).get("shadowed_by"):
+                raise HTTPException(status_code=409, detail="skill_shadowed")
+            if skill.content_hash != expected_hash:
+                raise HTTPException(status_code=409, detail="skill_content_changed")
         if not (skill.metadata_json or {}).get("available", True) and payload.enabled:
             raise HTTPException(status_code=409, detail="skill_file_unavailable")
         skill.enabled = payload.enabled
@@ -513,11 +571,21 @@ def create_app(database: Database | None = None) -> FastAPI:
     def create_job(payload: JobCreate, session: SessionDep) -> Job:
         if CandidateRepository(session).get(payload.candidate_id) is None:
             raise HTTPException(status_code=404, detail="candidate_not_found")
-        return JobRepository(session).add(Job(**payload.model_dump()))
+        from applyos_domain.job_context import normalize_context, normalize_provenance
+        from integrations.web import WebClient
+        values = payload.model_dump()
+        values["jd_raw"] = str(values.get("jd_raw") or "").strip() or None
+        values["source_url"] = WebClient.redact_url(values["source_url"]) if values.get("source_url") else None
+        values["context_json"] = normalize_context(values["context_json"], values["jd_raw"] or "")
+        values["jd_provenance"] = normalize_provenance(values["jd_provenance"], values["jd_raw"] or "", values["source_url"])
+        return JobRepository(session).add(Job(**values))
 
     @app.patch("/api/jobs/{job_id}", response_model=JobRead)
     def update_job(job_id: str, payload: JobUpdate, session: SessionDep):
+        from applyos_domain.job_context import normalize_context, normalize_provenance, job_input_signature, mark_job_analyses_stale
+        from integrations.web import WebClient
         job = _require_job(session, job_id)
+        previous = job_input_signature(job)
         if payload.company is not None:
             job.company = payload.company.strip()
         if payload.role is not None:
@@ -529,8 +597,15 @@ def create_app(database: Database | None = None) -> FastAPI:
         if payload.source_type is not None:
             job.source_type = payload.source_type.strip() or "manual"
         if payload.source_url is not None:
-            job.source_url = payload.source_url.strip() or None
+            job.source_url = WebClient.redact_url(payload.source_url.strip()) or None
+        job.context_json = normalize_context(payload.context_json.model_dump() if payload.context_json is not None else job.context_json, job.jd_raw or "")
+        job.jd_provenance = normalize_provenance(payload.jd_provenance if payload.jd_provenance is not None else job.jd_provenance,
+                                               job.jd_raw or "", job.source_url)
+        if previous != job_input_signature(job):
+            mark_job_analyses_stale(session, job, reason="job_input_changed")
         session.flush()
+        if payload.jd_raw is not None:
+            refresh_briefs(session, job.candidate_id)
         return job
 
     @app.post("/api/web/search")
@@ -560,99 +635,8 @@ def create_app(database: Database | None = None) -> FastAPI:
     def preview_job_posting(payload: JobPostingPreviewRequest, session: SessionDep):
         if permission_settings(session).get("web_access") == "deny":
             raise HTTPException(status_code=403, detail="web_access_disabled")
-        from integrations.web import FirecrawlClient, WebClient
-
         posting = _job_posting_importer(session).preview(payload.url, allow_insufficient=True)
-        firecrawl = FirecrawlClient()
-        browser_warning = ""
-        if firecrawl.configured and not _looks_like_job_content(posting.description):
-            try:
-                crawled = firecrawl.scrape(payload.url)
-                if _looks_like_job_content(crawled.text):
-                    posting = {
-                        **posting.as_dict(),
-                        "source_url": crawled.source_url or posting.source_url,
-                        "title": crawled.title or posting.title,
-                        "description": crawled.text[:40000],
-                        "structured_data": False,
-                        "content_sha256": hashlib.sha256(crawled.text.encode("utf-8")).hexdigest(),
-                        "page_title": crawled.title or posting.page_title,
-                    }
-                else:
-                    browser_warning = "Firecrawl 已返回页面，但内容仍不像岗位正文。"
-            except HarnessError:
-                browser_warning = "Firecrawl 抓取未完成，已继续使用本地网页读取。"
-        # Some recruitment sites return only a JavaScript shell to the HTTP
-        # reader. In the desktop app, use the already-isolated hidden browser
-        # bridge as a second pass; it never opens a user-facing window.
-        bridge = _browser_bridge()
-        posting_text = posting.get("description", "") if isinstance(posting, dict) else posting.description
-        if bridge.configured and (len(posting_text) < 1200 or not _looks_like_job_content(posting_text)):
-            try:
-                state = bridge.open(payload.url)
-                if state.get("login_required"):
-                    raise HTTPException(status_code=409, detail="job_page_requires_user_login")
-                text = str(state.get("text") or "").strip()
-                if _looks_like_job_content(text) and (len(text) > len(posting_text) or not _looks_like_job_content(posting_text)):
-                    posting = {
-                        **posting.as_dict(),
-                        # Keep SPA route fragments (the job id lives after #)
-                        # while removing sensitive query/fragment values before
-                        # persisting the source URL.
-                        "source_url": WebClient.redact_url(str(state.get("url") or posting.source_url)),
-                        "title": str(state.get("title") or posting.title)[:240],
-                        "description": text[:40000],
-                        "structured_data": False,
-                        "content_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
-                        "page_title": str(state.get("title") or posting.page_title)[:500],
-                    }
-                elif not _looks_like_job_content(text):
-                    browser_warning = "页面已打开，但只返回招聘网站导航或宣传文案，未得到可用岗位正文。"
-            except HTTPException:
-                raise
-            except HarnessError:
-                # The static reader still produced a bounded, sanitized
-                # response. Keep it usable and make the limitation explicit;
-                # a transient browser/resource failure must not block import.
-                browser_warning = "动态网页增强读取未完成，已保留静态正文；可稍后重试或手动修正。"
-        raw_text = posting["description"] if isinstance(posting, dict) else posting.description
-        page_title = posting.get("page_title", "") if isinstance(posting, dict) else posting.page_title
-        source_url = posting.get("source_url", "") if isinstance(posting, dict) else posting.source_url
-        # A static request cannot observe a SPA fragment, but the fragment is
-        # still the user's canonical job route. Keep it in the form response
-        # so the next retry does not silently fall back to the site homepage.
-        if "#" in payload.url and "#" not in source_url:
-            source_url = WebClient.redact_url(payload.url)
-        extraction_settings = AgentSettings.from_env()
-        model_structured = extraction_settings.runtime != RuntimeMode.MOCK and extraction_settings.api_key_configured
-        used_model = False
-        try:
-            if not model_structured:
-                raise HarnessError("model_required", "当前未连接模型，暂不进行模型语义清洗")
-            from applyos_agent.agents import AgentSuite
-
-            extracted, _ = AgentSuite(settings=extraction_settings).extract_job_posting(raw_text, page_title=page_title)
-            used_model = True
-        except Exception as error:
-            extracted = JobPostingExtraction(
-                title=posting.get("title", "") if isinstance(posting, dict) else posting.title,
-                company=posting.get("company", "") if isinstance(posting, dict) else posting.company,
-                location=posting.get("location", "") if isinstance(posting, dict) else posting.location,
-                description=raw_text,
-                confidence=0.2,
-                warnings=["当前未连接模型，已保留网页正文；连接模型后可再次读取并进行语义清洗。"] if isinstance(error, HarnessError) and error.code == "model_required" else [f"模型结构化暂不可用，已保留网页正文（{type(error).__name__}）。"],
-            )
-        result = extracted.model_dump(mode="json")
-        if browser_warning and browser_warning not in result["warnings"]:
-            result["warnings"].append(browser_warning)
-        result.update({
-            "source_url": source_url,
-            "page_title": page_title,
-            "structured_data": used_model,
-            "raw_chars": len(raw_text),
-            "content_sha256": posting.get("content_sha256", "") if isinstance(posting, dict) else posting.content_sha256,
-        })
-        return result
+        return posting.as_dict()
 
     @app.get("/api/settings/permissions", response_model=PermissionSettingsRead)
     def get_permission_settings(session: SessionDep):
@@ -674,11 +658,14 @@ def create_app(database: Database | None = None) -> FastAPI:
     def import_job_from_web(job_id: str, payload: JobPageImportRequest, session: SessionDep):
         if permission_settings(session).get("web_access") == "deny":
             raise HTTPException(status_code=403, detail="web_access_disabled")
-        return _job_posting_importer(session).import_into_job(
-            _require_job(session, job_id),
+        job = _require_job(session, job_id)
+        result = _job_posting_importer(session).import_into_job(
+            job,
             url=payload.url,
             overwrite=payload.overwrite,
         )
+        refresh_briefs(session, job.candidate_id)
+        return result
 
     @app.delete("/api/jobs/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
     def delete_job(job_id: str, session: SessionDep):
@@ -718,7 +705,8 @@ def create_app(database: Database | None = None) -> FastAPI:
         candidate = CandidateRepository(session).get(candidate_id)
         if candidate is None:
             raise HTTPException(status_code=404, detail="candidate_not_found")
-        _backfill_candidate_experiences(session, candidate_id)
+        if app.state.agent_ready:
+            _backfill_candidate_experiences(session, candidate_id)
         facts = list(session.scalars(select(Fact).where(Fact.candidate_id == candidate_id).order_by(Fact.updated_at.desc())).all())
         experiences = list(session.scalars(select(Experience).where(Experience.candidate_id == candidate_id).order_by(Experience.sort_order, Experience.updated_at.desc())).all())
         materials = list(session.scalars(select(MaterialAsset).where(MaterialAsset.candidate_id == candidate_id).order_by(MaterialAsset.updated_at.desc())).all())
@@ -728,30 +716,33 @@ def create_app(database: Database | None = None) -> FastAPI:
         return {"candidate": _row(candidate), "facts": [_row(item) for item in facts], "experiences": [_row(item) for item in experiences], "materials": [_row(item) for item in materials], "resumes": [_row(item) for item in resumes], "interview_sources": [_interview_source_row(item) for item in interview_sources], "interview_briefs": [_row(item) for item in interview_briefs]}
 
     @app.get("/api/interview-knowledge")
-    def all_interview_knowledge(session: SessionDep):
-        sources = session.scalars(select(InterviewSource).order_by(InterviewSource.updated_at.desc()))
-        briefs = session.scalars(select(InterviewBrief).order_by(InterviewBrief.updated_at.desc()))
-        return {"sources": [_interview_source_row(item) for item in sources], "briefs": [_row(item) for item in briefs]}
+    def all_interview_knowledge(session: SessionDep, q: str = Query(default="", max_length=500)):
+        sources = search_knowledge(session, query=q, limit=None)
+        briefs = search_knowledge(session, query=q, kind="brief", limit=None)
+        return {"sources": [_interview_hit_metadata(hit) for hit in sources], "briefs": [_row(hit.item) for hit in briefs]}
 
     @app.get("/api/candidates/{candidate_id}/interview-knowledge")
     def get_interview_knowledge(candidate_id: str, session: SessionDep, q: str = Query(default="", max_length=500)):
-        candidate = CandidateRepository(session).get(candidate_id)
-        if candidate is None:
+        if CandidateRepository(session).get(candidate_id) is None:
             raise HTTPException(status_code=404, detail="candidate_not_found")
-        sources = list(session.scalars(select(InterviewSource).where(InterviewSource.candidate_id == candidate_id).order_by(InterviewSource.updated_at.desc())).all())
-        briefs = list(session.scalars(select(InterviewBrief).where(InterviewBrief.candidate_id == candidate_id).order_by(InterviewBrief.updated_at.desc())).all())
-        query_tokens = [item for item in " ".join(q.split()).casefold().split(" ") if item]
-        if query_tokens:
-            sources = [item for item in sources if all(token in " ".join([item.company, item.role, item.business_unit or "", item.title, item.summary, " ".join(item.tags or [])]).casefold() for token in query_tokens)]
-            briefs = [item for item in briefs if all(token in " ".join([item.company, item.role, item.business_unit or "", item.summary]).casefold() for token in query_tokens)]
-        return {"sources": [_interview_source_row(item) for item in sources], "briefs": [_row(item) for item in briefs], "query": q}
+        sources = search_knowledge(session, query=q, candidate_id=candidate_id, limit=None)
+        briefs = search_knowledge(session, query=q, candidate_id=candidate_id, kind="brief", limit=None)
+        return {"sources": [_interview_hit_metadata(hit) for hit in sources], "briefs": [_row(hit.item) for hit in briefs], "query": q}
 
     @app.get("/api/interview-sources/{source_id}")
     def get_interview_source(source_id: str, session: SessionDep):
         source = session.get(InterviewSource, source_id)
         if source is None:
             raise HTTPException(status_code=404, detail="interview_source_not_found")
-        return _row(source)
+        return _interview_source_detail(source, session)
+
+    @app.post("/api/interview-sources/{source_id}/review")
+    def review_interview_source(source_id: str, payload: EvidenceReviewInput, session: SessionDep):
+        source = session.get(InterviewSource, source_id)
+        if source is None:
+            raise HTTPException(status_code=404, detail="interview_source_not_found")
+        review_source(session, source, payload)
+        return _interview_source_detail(source, session)
 
     @app.post("/api/interview-sources/{source_id}/confirm-ocr")
     def confirm_interview_ocr(source_id: str, payload: dict, session: SessionDep):
@@ -770,35 +761,27 @@ def create_app(database: Database | None = None) -> FastAPI:
         source.status = "captured"
         source.metadata_json = {**metadata, "ocr_reviewed": True, "ocr_reviewed_hash": sha256(text.encode()).hexdigest(), "ocr_reviewed_at": datetime.now(timezone.utc).isoformat()}
         session.flush()
-        return _row(source)
+        refresh_source_hints(session, source)
+        refresh_briefs(session, source.candidate_id)
+        return _interview_source_detail(source, session)
 
     @app.delete("/api/interview-sources/{source_id}", status_code=status.HTTP_204_NO_CONTENT)
     def delete_interview_source(source_id: str, session: SessionDep):
+        from applyos_agent.interview_evidence import evidence_summary, evidence_status
         source = session.get(InterviewSource, source_id)
         if source is None:
             raise HTTPException(status_code=404, detail="interview_source_not_found")
-        briefs = list(session.scalars(select(InterviewBrief).where(InterviewBrief.candidate_id == source.candidate_id)).all())
+        candidate_id = source.candidate_id
+        invalidate_source_hint_edges(session, candidate_id, source.id)
+        briefs = list(session.scalars(select(InterviewBrief).where(InterviewBrief.candidate_id == candidate_id)))
         for brief in briefs:
-            if source_id not in (brief.source_ids or []):
-                continue
-            brief.source_ids = [item for item in brief.source_ids if item != source_id]
-            questions = []
-            for question in brief.common_questions or []:
-                remaining_ids = [item for item in question.get("source_ids", []) if item != source_id]
-                if not remaining_ids:
-                    continue
-                questions.append({
-                    **question,
-                    "source_ids": remaining_ids,
-                    "frequency": len(remaining_ids),
-                    "confidence": "recurring" if len(remaining_ids) >= 2 else "single_source",
-                })
-            brief.common_questions = questions
-            brief.metadata_json = {
-                **(brief.metadata_json or {}),
-                "recurring_question_count": sum(1 for item in questions if item["frequency"] >= 2),
-            }
+            if source_id in (brief.source_ids or []):
+                brief.source_ids = [i for i in brief.source_ids if i != source_id]
+                brief.common_questions = [{**q, "source_ids":[i for i in q.get("source_ids", []) if i != source_id]}
+                    for q in brief.common_questions or [] if any(i != source_id for i in q.get("source_ids", []))]
         session.delete(source)
+        session.flush()
+        refresh_briefs(session, candidate_id)
 
     @app.delete("/api/interview-briefs/{brief_id}", status_code=status.HTTP_204_NO_CONTENT)
     def delete_interview_brief(brief_id: str, session: SessionDep):
@@ -831,13 +814,17 @@ def create_app(database: Database | None = None) -> FastAPI:
 
     @app.get("/api/jobs/{job_id}/workspace")
     def get_job_workspace(job_id: str, session: SessionDep):
+        from applyos_agent.ats import AtsReadinessInputs
+        from applyos_agent.context import PinnedContextInputs
+        from applyos_agent.evaluation import RunEvaluationInputs
+
         job = _require_job(session, job_id)
         candidate = session.get(Candidate, job.candidate_id)
-        run = session.scalar(select(AgentRun).where(AgentRun.job_id == job.id).order_by(AgentRun.created_at.desc()))
+        run = session.scalar(select(AgentRun).where(AgentRun.job_id == job.id).order_by(AgentRun.created_at.desc()).limit(1))
         steps = [] if run is None else list(session.scalars(select(AgentRunStep).where(AgentRunStep.run_id == run.id).order_by(AgentRunStep.sequence)).all())
         proposals = [] if run is None else list(session.scalars(select(RewriteProposal).where(RewriteProposal.run_id == run.id).order_by(RewriteProposal.created_at)).all())
         approvals = [] if run is None else list(session.scalars(select(Approval).where(Approval.run_id == run.id).order_by(Approval.created_at)).all())
-        resumes = list(session.scalars(select(ResumeVersion).where(ResumeVersion.job_id == job.id).order_by(ResumeVersion.updated_at.desc())).all())
+        resumes = list(session.scalars(select(ResumeVersion).where(ResumeVersion.job_id == job.id).order_by(ResumeVersion.updated_at.desc(), ResumeVersion.id.desc())).all())
         base_resumes = list(
             session.scalars(
                 select(ResumeVersion)
@@ -868,16 +855,18 @@ def create_app(database: Database | None = None) -> FastAPI:
             ).all()
         )
         queued_messages = list(session.scalars(select(QueuedAgentMessage).where(QueuedAgentMessage.job_id == job.id).order_by(QueuedAgentMessage.sequence)).all())
-        interview_sources = list(session.scalars(select(InterviewSource).where(InterviewSource.job_id == job.id).order_by(InterviewSource.updated_at.desc())).all())
+        interview_sources = _job_interview_source_summaries(session, job.id)
         interview_briefs = list(session.scalars(select(InterviewBrief).where(InterviewBrief.job_id == job.id).order_by(InterviewBrief.updated_at.desc())).all())
         profile = session.scalar(select(JobProfile).where(JobProfile.job_id == job.id))
-        _backfill_candidate_experiences(session, job.candidate_id)
+        if app.state.agent_ready:
+            _backfill_candidate_experiences(session, job.candidate_id)
         facts = list(session.scalars(select(Fact).where(Fact.candidate_id == job.candidate_id).order_by(Fact.verified.desc(), Fact.updated_at.desc())).all())
         experiences = list(session.scalars(select(Experience).where(Experience.candidate_id == job.candidate_id).order_by(Experience.sort_order, Experience.updated_at.desc())).all())
+        from applyos_domain.job_context import artifact_job_relevance
         return {
             "job": _row(job), "candidate": _row(candidate), "profile": _row(profile), "facts": [_row(item) for item in facts], "experiences": [_row(item) for item in experiences],
-            "run": _row(run), "steps": [_row(item) for item in steps], "proposals": [_row(item) for item in proposals],
-            "approvals": [_row(item) for item in approvals], "resumes": [_row(item) for item in resumes],
+            "run": _row(run), "steps": [_row(item) for item in steps], "proposals": [{**_row(item), "job_relevance": artifact_job_relevance(profile, item.id, "proposal", job.input_revision)} for item in proposals],
+            "approvals": [_row(item) for item in approvals], "resumes": [{**_row(item), "job_relevance": artifact_job_relevance(profile, item.id, "resume", job.input_revision)} for item in resumes],
             "base_resumes": [_row(item) for item in base_resumes],
             "portfolios": [_row(item) for item in portfolios], "applications": [_row(item) for item in applications],
             "quality_reports": [_row(item) for item in quality],
@@ -886,13 +875,26 @@ def create_app(database: Database | None = None) -> FastAPI:
             "tasks": [_row(item) for item in tasks],
             "tool_invocations": [_row(item) for item in tool_invocations],
             "queued_messages": [_row(item) for item in queued_messages],
-            "interview_sources": [_interview_source_row(item) for item in interview_sources],
+            "interview_sources": interview_sources,
             "interview_briefs": [_row(item) for item in interview_briefs],
-            "run_evaluation": _agent_run_evaluator(session).evaluate(job=job, run=run),
+            "run_evaluation": _agent_run_evaluator(session).evaluate(
+                job=job,
+                run=run,
+                inputs=RunEvaluationInputs(
+                    steps=steps, tasks=tasks, approvals=approvals, reports=quality,
+                    profile=profile, resume=resumes[0] if resumes else None, messages=messages,
+                    pinned_inputs=PinnedContextInputs(
+                        job_id=job.id, candidate_id=job.candidate_id,
+                        base_resumes=base_resumes, job_resumes=resumes, facts=facts,
+                        materials=materials, messages=messages,
+                    ),
+                ),
+            ),
             "ats_readiness": _ats_readiness_evaluator(session).evaluate(
                 job=job,
                 run=run,
                 resume=resumes[0] if resumes else (base_resumes[0] if base_resumes else None),
+                inputs=AtsReadinessInputs(profile=profile, reports=quality),
             ),
         }
 
@@ -1100,7 +1102,10 @@ def create_app(database: Database | None = None) -> FastAPI:
         return ApprovalService(session).approve_action(
             approval_id=approval.id,
             approved_by=payload.approved_by,
-            payload={"fact_ids": fact_ids},
+            payload={"fact_ids": fact_ids, "fact_snapshots": [
+                {"fact_id": fact.id, "fact_version": fact.version,
+                 "content_hash": canonical_hash(fact.content)} for fact in facts
+            ]},
         )
 
     @app.post("/api/agent-runs/{run_id}/proposals/review", response_model=ApprovalRead)
@@ -1115,7 +1120,28 @@ def create_app(database: Database | None = None) -> FastAPI:
             approval_id=approval.id,
             decisions=[item.model_dump() for item in payload.decisions],
             approved_by=payload.approved_by,
+            expected_revision=payload.expected_revision,
+            expected_target_content_hash=payload.expected_target_content_hash,
         )
+
+    def require_pending_proposal_review(session: Session, run_id: str, approval_id: str):
+        run = _require_run(session, run_id)
+        approval = session.get(Approval, approval_id)
+        if run.current_stage != "awaiting_user_review":
+            raise HarnessError("illegal_state_transition", "当前阶段不能修订待审建议", run_id=run.id, stage=run.current_stage)
+        if approval is None or approval.run_id != run.id or approval.action_type != "apply_resume_changes":
+            raise HarnessError("approval_not_found", "修改建议审批不存在", run_id=run.id)
+        return run, approval
+
+    @app.post("/api/agent-runs/{run_id}/proposals/rewrite", response_model=ApprovalRead)
+    def request_proposal_rewrite(run_id: str, payload: ProposalRewriteRequest, session: SessionDep):
+        require_pending_proposal_review(session, run_id, payload.approval_id)
+        return ApprovalService(session).request_rewrite(**payload.model_dump())
+
+    @app.post("/api/agent-runs/{run_id}/proposals/rewrite/cancel", response_model=ApprovalRead)
+    def cancel_proposal_rewrite(run_id: str, payload: ProposalRewriteCancelRequest, session: SessionDep):
+        require_pending_proposal_review(session, run_id, payload.approval_id)
+        return ApprovalService(session).cancel_rewrite(**payload.model_dump())
 
     @app.patch("/api/agent-runs/{run_id}/approvals/{approval_id}/draft", response_model=ApprovalRead)
     def save_approval_draft(run_id: str, approval_id: str, payload: ApprovalDraftRequest, session: SessionDep):
@@ -1125,25 +1151,7 @@ def create_app(database: Database | None = None) -> FastAPI:
             raise HarnessError("approval_not_found", "修改建议审批不存在", run_id=run.id)
         if getattr(approval.status, "value", approval.status) != "pending":
             raise HarnessError("approval_already_decided", "审批已经完成，不能再修改草稿", run_id=run.id)
-        current_payload = dict(approval.decision_payload or {})
-        current_draft = dict(current_payload.get("draft") or {})
-        current_revision = int(current_draft.get("revision") or 0)
-        if payload.base_revision != current_revision:
-            raise HarnessError(
-                "approval_revision_conflict",
-                "审批草稿已在其他窗口更新，请刷新后继续",
-                run_id=run.id,
-                details={"current_revision": current_revision},
-            )
-        current_payload["draft"] = {
-            "revision": current_revision + 1,
-            "decisions": payload.decisions,
-            "edited_by": payload.edited_by,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
-        approval.decision_payload = current_payload
-        session.flush()
-        return approval
+        return ApprovalService(session).save_review_draft(approval_id=approval.id, **payload.model_dump())
 
     @app.post("/api/agent-runs/{run_id}/publish-approval", response_model=ApprovalRead)
     def approve_run_publish(run_id: str, payload: ActionApprovalRequest, session: SessionDep):
@@ -1250,6 +1258,7 @@ def create_app(database: Database | None = None) -> FastAPI:
         run = _require_run(session, payload.run_id)
         resume = _require_resume(session, resume_id)
         _assert_run_asset_scope(run, resume.candidate_id, resume.job_id)
+        require_resume_exportable(session, resume)
         from integrations.resume.renderer import ResumeRenderer
 
         result = ResumeRenderer(session).render(resume, run_id=run.id)
@@ -1268,13 +1277,19 @@ def create_app(database: Database | None = None) -> FastAPI:
         if str(resume.status) == "frozen":
             raise HarnessError("asset_frozen", "已冻结的历史快照不能编辑")
         content = dict(resume.content_json or {})
+        previous_semantics = canonical_hash(resume_semantic_payload(content))
         content["editor_snapshot"] = payload.editor_snapshot
+        if canonical_hash(resume_semantic_payload(content)) != previous_semantics:
+            content["verification_status"] = "unverified"
+            content["verification_issues"] = [{"code": "manual_content_changed", "message": "人工正文修改尚未绑定当前事实版本，需重新核验"}]
         content["editor_source"] = "resume-editor-prototype"
         content.pop("source_pdf_fidelity", None)
         content.pop("page_count", None)
+        content.pop("pdf_semantic_hash", None)
+        content.pop("pdf_sha256", None)
         resume.content_json = content
         resume.pdf_path = None
-        resume.content_hash = None
+        resume.content_hash = canonical_hash(content)
         for report in session.scalars(select(QualityReport).where(
             QualityReport.target_type == "resume_version", QualityReport.target_id == resume.id
         )):
@@ -1288,10 +1303,14 @@ def create_app(database: Database | None = None) -> FastAPI:
     @app.get("/api/resumes/{resume_id}/pdf")
     def get_resume_pdf(resume_id: str, session: SessionDep):
         resume = _require_resume(session, resume_id)
+        require_resume_exportable(session, resume)
         pdf_path = Path(resume.pdf_path).resolve() if resume.pdf_path else None
         resume_root = (artifact_root() / "resumes").resolve()
         if pdf_path is None or not pdf_path.is_relative_to(resume_root) or not pdf_path.is_file():
             raise HarnessError("resume_pdf_not_found", "简历 PDF 尚未生成")
+        if (resume.content_json.get("pdf_semantic_hash") != canonical_hash(resume_semantic_payload(resume.content_json))
+                or resume.content_json.get("pdf_sha256") != hashlib.sha256(pdf_path.read_bytes()).hexdigest()):
+            raise HarnessError("resume_pdf_unverified", "PDF 未绑定当前已核验正文，请重新生成")
         return FileResponse(
             pdf_path,
             media_type="application/pdf",
@@ -1303,6 +1322,7 @@ def create_app(database: Database | None = None) -> FastAPI:
     def get_resume_docx(resume_id: str, session: SessionDep):
         """Export a parser-friendly Word copy without replacing the canonical PDF."""
         resume = _require_resume(session, resume_id)
+        require_resume_exportable(session, resume)
         from integrations.resume.docx_export import DOCX_MIME, render_resume_docx
 
         target = (artifact_root() / "resumes" / resume.id / "resume-ats.docx").resolve()
@@ -1328,6 +1348,10 @@ def create_app(database: Database | None = None) -> FastAPI:
         resume = _require_resume(session, resume_id)
         if str(resume.status) == "frozen":
             raise HarnessError("asset_frozen", "已冻结的历史快照不能覆盖")
+        require_resume_exportable(session, resume)
+        expected_hash = request.headers.get("X-FetchCV-Resume-Hash")
+        if not expected_hash or expected_hash != canonical_hash(resume.content_json):
+            raise HarnessError("resume_pdf_revision_mismatch", "PDF 对应的简历正文版本已变化或未提供，请重新生成")
         payload = await request.body()
         if not payload.startswith(b"%PDF"):
             raise HarnessError("resume_pdf_invalid", "上传内容不是有效的 PDF")
@@ -1342,8 +1366,17 @@ def create_app(database: Database | None = None) -> FastAPI:
             page_count = len(reader.pages)
             if page_count < 1:
                 raise ValueError("empty")
+            extracted_text = "\n".join(page.extract_text() or "" for page in reader.pages)
         except Exception:
             raise HarnessError("resume_pdf_invalid", "无法解析 PDF 的实际页数，请重新导出") from None
+        # request.body() yields to concurrent editor saves. Re-read the exact
+        # revision before attaching bytes so a stale render cannot win the race.
+        session.expire_all()
+        session.refresh(resume)
+        require_resume_exportable(session, resume)
+        if expected_hash != canonical_hash(resume.content_json):
+            raise HarnessError("resume_pdf_revision_mismatch", "PDF 渲染期间正文已变化，请重新生成")
+        require_pdf_text_matches_resume(resume, extracted_text)
         target = (artifact_root() / "resumes" / resume.id).resolve()
         resume_root = (artifact_root() / "resumes").resolve()
         if not target.is_relative_to(resume_root):
@@ -1358,11 +1391,13 @@ def create_app(database: Database | None = None) -> FastAPI:
         content = dict(resume.content_json or {})
         content["page_count"] = page_count
         content["pdf_renderer"] = "resume-editor-prototype"
+        content["pdf_semantic_hash"] = canonical_hash(resume_semantic_payload(content))
+        content["pdf_sha256"] = hashlib.sha256(payload).hexdigest()
         content["pdf_renderer_version"] = 2
         resume.content_json = content
+        resume.content_hash = canonical_hash(content)
         resume.pdf_path = str(pdf_path)
         from applyos_harness.gates import PublishGate
-        from applyos_harness.versioning import canonical_hash
         run = session.scalar(select(AgentRun).where(
             AgentRun.candidate_id == resume.candidate_id, AgentRun.job_id == resume.job_id
         ).order_by(AgentRun.created_at.desc()))
@@ -1512,6 +1547,11 @@ def _backfill_candidate_experiences(session: Session, candidate_id: str) -> None
 def _row(entity):
     if entity is None:
         return None
+    if isinstance(entity, MaterialAsset) and entity.kind == "interview_answer":
+        from applyos_agent.application_tools import refresh_interview_answer_evidence
+        bound_session = object_session(entity)
+        if bound_session is not None:
+            refresh_interview_answer_evidence(bound_session, entity)
     output = {}
     for column in inspect(entity).mapper.column_attrs:
         value = getattr(entity, column.key)
@@ -1521,18 +1561,61 @@ def _row(entity):
             value = value.isoformat()
         elif isinstance(entity, AgentMessage) and column.key == "content" and entity.role == "assistant":
             value = strip_model_protocol(value)
+        elif isinstance(entity, InterviewSource) and column.key == "metadata_json":
+            value = _public_interview_metadata(value)
         output[column.key] = value
     return output
 
 
-def _interview_source_row(source: InterviewSource) -> dict:
+def _public_interview_metadata(metadata) -> dict:
+    output = dict(metadata or {})
+    output.pop("classification_v1", None)
+    output.pop("similarity_v1", None)
+    return output
+
+
+def _interview_hit_metadata(hit) -> dict:
+    # Library projections intentionally avoid loading every complete body.
+    output = source_metadata(hit)
+    output["metadata_json"] = _public_interview_metadata(output.get("metadata_json"))
+    return output
+
+
+def _interview_source_detail(source: InterviewSource, session: Session) -> dict:
+    return {**_row(source), "review_content_hash": hashlib.sha256((source.raw_text or "").encode()).hexdigest(),
+            "source_hints": read_source_hints(session, source)}
+
+
+def _interview_source_row(source: InterviewSource, *, session=None) -> dict:
     """Return list-safe source metadata; full captured text is opt-in by ID."""
     output = _row(source)
     raw_text = output.pop("raw_text", "")
     output.pop("content_hash", None)
     output.pop("url_hash", None)
     output["text_preview"] = raw_text[:800]
+    output["source_hints"] = read_source_hints(session, source) if session is not None else current_source_hints(source, None)
+    return output
+
+
+def _job_interview_source_summaries(session: Session, job_id: str) -> list[dict]:
+    # A workspace needs the preview, not every captured article's full body.
+    # Project in SQL so long sources are never materialized in Python here.
+    columns = [
+        column for column in InterviewSource.__table__.columns
+        if column.name not in {"raw_text", "content_hash", "url_hash"}
+    ]
+    rows = session.execute(
+        select(*columns, func.substr(InterviewSource.raw_text, 1, 800).label("text_preview"))
+        .where(InterviewSource.job_id == job_id)
+        .order_by(InterviewSource.updated_at.desc())
+    ).mappings()
+    output = []
+    for row in rows:
+        item = {key: value.isoformat() if isinstance(value, datetime) else value for key, value in row.items()}
+        item["metadata_json"] = _public_interview_metadata(item.get("metadata_json"))
+        output.append(item)
     return output
 
 
 app = create_app()
+mark_startup("python.imports_complete")

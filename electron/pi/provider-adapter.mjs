@@ -1,5 +1,6 @@
 import {resolveModelProfile} from '../../shared/model-profile.mjs';
 import {resolveProviderEndpoint} from '../../shared/provider-endpoint.mjs';
+import {providerRequestHeaders} from '../../shared/provider-settings.mjs';
 export const THINKING_LEVEL = { fast: "low", balanced: "medium", deep: "high" };
 
 const ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
@@ -38,7 +39,7 @@ export function createProviderAdapter(provider, aiModule, openAiModule, anthropi
   const contextWindow = profile.contextWindow, maxTokens = profile.maxOutputTokens;
   const model = {
     id: provider.model,
-    name: provider.model,
+    name: provider.displayName || provider.model,
     api,
     provider: providerId,
     baseUrl: resolveProviderEndpoint(provider.baseUrl, protocol).sdkBaseUrl,
@@ -57,7 +58,7 @@ export function createProviderAdapter(provider, aiModule, openAiModule, anthropi
   const providerApi = typeof streams.streamSimple === "function" ? {
     ...streams,
     streamSimple: (requestModel, context, options) => streams.streamSimple(
-      requestModel, context, {...options, ...thinkingOptions(requestModel)},
+      requestModel, context, {...options, ...thinkingOptions(requestModel), headers:{...options?.headers,...providerRequestHeaders(provider,{sdk:true})}},
     ),
   } : streams;
   const models = aiModule.createModels({ credentials: createCredentialStore(providerId, provider.apiKey) });

@@ -1,8 +1,9 @@
 import { createHttpClient } from "./http-client";
+import { requireAgentReady, withBackendReadiness } from "./backend-readiness.js";
 export const API_BASE = window.appRuntime?.apiBase || import.meta.env.VITE_FETCHCV_API || "http://127.0.0.1:8766";
 const API_TOKEN = window.appRuntime?.apiToken || "";
 
-const request = createHttpClient({ baseUrl: API_BASE, token: API_TOKEN });
+const request = withBackendReadiness(createHttpClient({ baseUrl: API_BASE, token: API_TOKEN }));
 
 function desktopAgentRequired() {
   const error = new Error("当前环境不支持 Agent 执行，请在 FetchCV 桌面应用中操作");
@@ -10,13 +11,15 @@ function desktopAgentRequired() {
   return error;
 }
 
-function startPiTask(runId, kind) {
-  if (!runId || !window.appRuntime?.startPiTask) return Promise.reject(desktopAgentRequired());
+async function startPiTask(runId, kind) {
+  if (!runId || !window.appRuntime?.startPiTask) throw desktopAgentRequired();
+  await requireAgentReady();
   return window.appRuntime.startPiTask(runId, kind);
 }
 
 async function streamPiMessage(jobId, content, options = {}) {
   if (!window.appRuntime?.streamPiMessage) throw desktopAgentRequired();
+  await requireAgentReady();
   const requestId = crypto.randomUUID();
   const cancel = () => window.appRuntime.cancelPiMessage?.(requestId);
   if (options.signal?.aborted) {
@@ -74,13 +77,14 @@ export const api = {
   deleteConversation: (id) => request(`/api/conversations/${id}`, {method: "DELETE"}),
   linkConversation: (id, jobId) => request(`/api/conversations/${id}`, json("PATCH", {job_id: jobId || null})),
   streamConversation: (id, content, options = {}) => streamPiMessage(null, content, {...options, conversationId: id}),
-  allInterviewKnowledge: () => request("/api/interview-knowledge"),
+  allInterviewKnowledge: (query = "") => request(`/api/interview-knowledge?q=${encodeURIComponent(query)}`),
   health: () => request("/health"),
   runtime: () => request("/api/runtime/status"),
   workspace: () => request("/api/workspace"),
   candidateLibrary: (candidateId) => request(`/api/candidates/${candidateId}/library`),
   interviewKnowledge: (candidateId, query = "") => request(`/api/candidates/${candidateId}/interview-knowledge?q=${encodeURIComponent(query)}`),
   confirmInterviewOcr: (sourceId, reviewedText) => request(`/api/interview-sources/${sourceId}/confirm-ocr`, { method: "POST", body: JSON.stringify({ confirmed: true, reviewed_text: reviewedText }) }),
+  reviewInterviewSource: (sourceId, review) => request(`/api/interview-sources/${sourceId}/review`, { method: "POST", body: JSON.stringify(review) }),
   interviewSource: (sourceId) => request(`/api/interview-sources/${sourceId}`),
   deleteInterviewSource: (sourceId) => request(`/api/interview-sources/${sourceId}`, { method: "DELETE" }),
   deleteInterviewBrief: (briefId) => request(`/api/interview-briefs/${briefId}`, { method: "DELETE" }),
@@ -96,7 +100,7 @@ export const api = {
   deleteJob: (jobId) => request(`/api/jobs/${jobId}`, { method: "DELETE" }),
   searchWeb: (query, maxResults = 5) => request("/api/web/search", json("POST", { query, max_results: maxResults })),
   readWebPage: (url, maxChars = 20000) => request("/api/web/read", json("POST", { url, max_chars: maxChars })),
-  previewJobPosting: (url) => request("/api/web/job-posting/preview", json("POST", { url })),
+  previewJobPosting: (url, options = {}) => request("/api/web/job-posting/preview", { ...json("POST", { url }), signal: options.signal }),
   importJobPage: (jobId, url, overwrite = false) => request(`/api/jobs/${jobId}/import-web`, json("POST", { url, overwrite })),
   permissionSettings: () => request("/api/settings/permissions"),
   updatePermissionSettings: (body) => request("/api/settings/permissions", json("PATCH", body)),
@@ -112,12 +116,14 @@ export const api = {
   cancelTask: (taskId) => request(`/api/agent-tasks/${taskId}/cancel`, json("POST", {})),
   followRunEvents: (runId, options = {}) => followEvents(`/api/agent-runs/${runId}/events?follow=true&after_sequence=${options.afterSequence || 0}`, options),
   cancelQueuedMessage: (messageId) => request(`/api/queued-messages/${messageId}`, { method: "DELETE" }),
-  steerTask: (runId, content, options = {}) => window.appRuntime?.steerPiTask
-    ? window.appRuntime.steerPiTask(runId, { content, attachmentPaths: options.attachmentPaths || [], quote: options.quote || null })
-    : Promise.reject(desktopAgentRequired()),
+  steerTask: async (runId, content, options = {}) => {
+    if (!window.appRuntime?.steerPiTask) throw desktopAgentRequired();
+    await requireAgentReady();
+    return window.appRuntime.steerPiTask(runId, { content, attachmentPaths: options.attachmentPaths || [], quote: options.quote || null });
+  },
   skills: () => request("/api/skills"),
   reloadSkills: () => request("/api/skills/reload", json("POST", {})),
-  updateSkill: (skillId, enabled) => request(`/api/skills/${skillId}`, json("PATCH", { enabled })),
+  updateSkill: (skillId, enabled, contentHash) => request(`/api/skills/${skillId}`, json("PATCH", { enabled, content_hash: contentHash })),
   mcpServers: () => request("/api/mcp/servers"),
   createMcpServer: (body) => request("/api/mcp/servers", json("POST", body)),
   approveMcpServer: (serverId) => request(`/api/mcp/servers/${serverId}/approve`, json("POST", {})),
@@ -130,6 +136,8 @@ export const api = {
   retryRun: (runId) => startPiTask(runId, "retry"),
   cancelRun: (runId) => request(`/api/agent-runs/${runId}/cancel`, json("POST", {})),
   review: (runId, body) => request(`/api/agent-runs/${runId}/proposals/review`, json("POST", body)),
+  rewriteProposals: (runId, body) => request(`/api/agent-runs/${runId}/proposals/rewrite`, json("POST", body)),
+  cancelProposalRewrite: (runId, body) => request(`/api/agent-runs/${runId}/proposals/rewrite/cancel`, json("POST", body)),
   saveApprovalDraft: (runId, approvalId, body) => request(`/api/agent-runs/${runId}/approvals/${approvalId}/draft`, json("PATCH", body)),
   reviewFacts: (runId, body) => request(`/api/agent-runs/${runId}/facts/review`, json("POST", body)),
   approvePublish: (runId, body) => request(`/api/agent-runs/${runId}/publish-approval`, json("POST", body)),

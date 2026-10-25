@@ -7,6 +7,8 @@ inspect.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from collections.abc import Sequence
 from typing import Any
 
 from sqlalchemy import select
@@ -26,14 +28,28 @@ from applyos_domain.models import (
     ResumeVersion,
 )
 
-from .context import ContextManager
+from .context import ContextManager, PinnedContextInputs
+
+
+@dataclass(frozen=True)
+class RunEvaluationInputs:
+    """Rows already read for a workspace; empty/None values are authoritative."""
+
+    steps: Sequence[AgentRunStep]
+    tasks: Sequence[AgentTask]
+    approvals: Sequence[Approval]
+    reports: Sequence[QualityReport]
+    profile: JobProfile | None
+    resume: ResumeVersion | None
+    messages: Sequence[AgentMessage]
+    pinned_inputs: PinnedContextInputs | None = None
 
 
 class AgentRunEvaluator:
     def __init__(self, session: Session):
         self.session = session
 
-    def evaluate(self, *, job: Job, run: AgentRun | None) -> dict[str, Any]:
+    def evaluate(self, *, job: Job, run: AgentRun | None, inputs: RunEvaluationInputs | None = None) -> dict[str, Any]:
         if run is None:
             return {
                 "status": "not_started",
@@ -43,31 +59,42 @@ class AgentRunEvaluator:
                 "total": 0,
             }
 
-        steps = list(self.session.scalars(select(AgentRunStep).where(AgentRunStep.run_id == run.id)).all())
-        tasks = list(self.session.scalars(select(AgentTask).where(AgentTask.run_id == run.id).order_by(AgentTask.updated_at.desc())).all())
-        approvals = list(self.session.scalars(select(Approval).where(Approval.run_id == run.id)).all())
-        reports = list(self.session.scalars(select(QualityReport).where(QualityReport.run_id == run.id)).all())
-        profile = self.session.scalar(select(JobProfile).where(JobProfile.job_id == job.id))
-        resume = self.session.scalar(
-            select(ResumeVersion).where(ResumeVersion.job_id == job.id).order_by(ResumeVersion.updated_at.desc())
-        )
-        failed_messages = list(
-            self.session.scalars(
-                select(AgentMessage).where(AgentMessage.job_id == job.id, AgentMessage.role == "user")
-            ).all()
-        )
-        failed_messages = [
-            item for item in failed_messages
-            if (item.metadata_json or {}).get("delivery_status") == "failed"
-        ]
+        if inputs is None:
+            inputs = RunEvaluationInputs(
+                steps=self.session.scalars(select(AgentRunStep).where(AgentRunStep.run_id == run.id)).all(),
+                tasks=self.session.scalars(select(AgentTask).where(AgentTask.run_id == run.id)).all(),
+                approvals=self.session.scalars(select(Approval).where(Approval.run_id == run.id)).all(),
+                reports=self.session.scalars(select(QualityReport).where(QualityReport.run_id == run.id)).all(),
+                profile=self.session.scalar(select(JobProfile).where(JobProfile.job_id == job.id).limit(1)),
+                resume=self.session.scalar(
+                    select(ResumeVersion).where(ResumeVersion.job_id == job.id)
+                    .order_by(ResumeVersion.updated_at.desc(), ResumeVersion.id.desc()).limit(1)
+                ),
+                messages=self.session.scalars(
+                    select(AgentMessage).where(AgentMessage.job_id == job.id, AgentMessage.role == "user")
+                ).all(),
+            )
+        steps = inputs.steps
+        # The workspace sorts tasks by creation time and reports newest first.
+        # Define evidence order here so both read paths produce the same result.
+        tasks = sorted(inputs.tasks, key=lambda item: (item.updated_at, item.id), reverse=True)
+        approvals = sorted(inputs.approvals, key=lambda item: (item.created_at, item.id))
+        reports = sorted(inputs.reports, key=lambda item: (item.created_at, item.id))
+        profile, resume = inputs.profile, inputs.resume
+        failed_messages = sorted((
+            item for item in inputs.messages
+            if item.role == "user" and (item.metadata_json or {}).get("delivery_status") == "failed"
+        ), key=lambda item: (item.created_at, item.id))
 
-        latest_snapshot = self.session.scalar(
-            select(AgentContextSnapshot)
+        latest_snapshot = self.session.execute(
+            select(AgentContextSnapshot.id, AgentContextSnapshot.pinned_context["source_fingerprint"].as_string().label("source_fingerprint"))
             .where(AgentContextSnapshot.job_id == job.id, AgentContextSnapshot.run_id == run.id)
-            .order_by(AgentContextSnapshot.version.desc())
+            .order_by(AgentContextSnapshot.version.desc()).limit(1)
+        ).first()
+        context_options = {"inputs": inputs.pinned_inputs} if inputs.pinned_inputs is not None else {}
+        context_current = latest_snapshot is None or (
+            latest_snapshot.source_fingerprint == ContextManager(self.session).pinned(job, **context_options)["source_fingerprint"]
         )
-        current_fingerprint = ContextManager(self.session).pinned(job)["source_fingerprint"]
-        context_current = latest_snapshot is None or latest_snapshot.pinned_context.get("source_fingerprint") == current_fingerprint
 
         runtime_events = [
             event

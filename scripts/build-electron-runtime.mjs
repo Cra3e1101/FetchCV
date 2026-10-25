@@ -12,8 +12,12 @@ await mkdir(outputRoot, { recursive: true });
 
 await build({
   entryPoints: [path.join(projectRoot, "electron", "main.mjs")],
-  outfile: path.join(outputRoot, "main.mjs"),
+  outdir: outputRoot,
+  outExtension: { ".js": ".mjs" },
+  chunkNames: "chunks/[name]-[hash]",
   bundle: true,
+  // Preserve the SDK's lazy imports so opening a window does not parse every provider.
+  splitting: true,
   platform: "node",
   format: "esm",
   target: "node22",

@@ -1,3 +1,4 @@
+import { resolveElectronRuntime } from "../scripts/electron-runtime.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import http from "node:http";
@@ -55,6 +56,7 @@ const provider = http.createServer((request, response) => {
 });
 await new Promise((resolve) => provider.listen(providerPort, "127.0.0.1", resolve));
 const application = await electron.launch({
+  executablePath: (await resolveElectronRuntime({ projectRoot })).executable,
   args: [projectRoot],
   cwd: projectRoot,
   env: {

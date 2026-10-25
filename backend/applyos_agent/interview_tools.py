@@ -11,17 +11,26 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
 from applyos_domain.models import InterviewBrief, InterviewSource, Job
+from applyos_domain.knowledge_search import search_knowledge as retrieve_knowledge
+from applyos_domain.interview_ranking import rank_interviews, POLICY_VERSION, role_family, engineering_specialty
+from applyos_domain.interview_queries import jd_query_plan, jd_topic_coverage
+from applyos_domain.job_context import normalize_context, context_value, current_analysis_marker
 from applyos_harness.errors import HarnessError
 from applyos_harness.permissions import ToolContext, ToolGateway, ToolPermission, ToolSpec
 from applyos_harness.state_machine import PipelineStage
+from applyos_harness.versioning import canonical_hash
 from integrations.web import FirecrawlClient, WebClient, WebSearchResult
 from integrations.web.nowcoder import canonical_nowcoder_url
 
 from .browser_tools import BrowserBridgeClient
 from .tools import PipelineToolResult
+from .knowledge_read import ReadKnowledgeSourceInput, read_source
 
 
+from .interview_evidence import (evidence_receipt, question_evidence_summary, refresh_briefs,
+                                 current_source_questions, analysis_reusable, source_ready)
 from .interview_evidence import PRIMARY_PLATFORM as PRIMARY_INTERVIEW_PLATFORM, MINIMUM_SOURCES as INTERVIEW_SOURCE_MINIMUM, evidence_status as interview_evidence_status
+from .interview_source_hints import NORMALIZER_VERSION, current_source_hints, read_source_hints, refresh_source_hints
 SUPPLEMENTAL_INTERVIEW_PLATFORMS = {"nowcoder", "zhihu", "csdn"}
 
 
@@ -33,12 +42,15 @@ class SearchInterviewKnowledgeInput(InterviewToolInput):
     company: str = Field(min_length=1, max_length=240)
     role: str = Field(min_length=1, max_length=240)
     business_unit: str = Field(default="", max_length=240)
+    recruitment_type: Literal["", "internship", "campus", "social"] = ""
+    jd_text: str = Field(default="", max_length=30000)
     query: str = Field(default="", max_length=500)
+    include_other_companies: bool = Field(default=False, description="Enable only when general role-preparation material is needed. Sources from other companies are reference material and do not count as interview evidence for the target company.")
     max_results: int | None = Field(
         default=None,
         ge=1,
         le=200,
-        description="可选的用户指定上限；省略时返回全部相关知识，不使用固定条数截断。",
+        description="Optional result limit explicitly requested by the user. Omit to return all relevant knowledge without a fixed count cutoff.",
     )
 
 
@@ -46,19 +58,21 @@ class DiscoverInterviewSourcesInput(InterviewToolInput):
     company: str = Field(min_length=1, max_length=240)
     role: str = Field(min_length=1, max_length=240)
     business_unit: str = Field(default="", max_length=240)
+    recruitment_type: Literal["", "internship", "campus", "social"] = ""
+    jd_text: str = Field(default="", max_length=30000)
     query_terms: list[str] = Field(default_factory=list, max_length=12)
     platforms: list[Literal["xiaohongshu", "nowcoder", "zhihu", "csdn"]] = Field(
         default_factory=lambda: ["xiaohongshu", "nowcoder", "zhihu", "csdn"], min_length=1,
-        description="可指定只检索牛客：['nowcoder']。默认检索所有支持的平台。",
+        description="Platforms to search. Set ['nowcoder'] to search only Nowcoder. Defaults to all supported platforms.",
     )
-    nowcoder_start_page: int = Field(default=1, ge=1, le=100)
-    nowcoder_query: str = Field(default="", max_length=500, description="续查时原样传入 nowcoder_continuations 中的 query，避免重复扩展关键词。")
-    nowcoder_page_limit: int = Field(default=3, ge=1, le=10, description="每组牛客关键词本轮最多读取的页数；未完成时返回 continuation，不代表来源耗尽。")
+    nowcoder_start_page: int = Field(default=1, ge=1, le=100, description="Starting Nowcoder page. When continuing, use the page from the matching nowcoder_continuations entry.")
+    nowcoder_query: str = Field(default="", max_length=500, description="When continuing, pass the query from nowcoder_continuations unchanged to avoid expanding the same keywords again.")
+    nowcoder_page_limit: int = Field(default=3, ge=1, le=10, description="Maximum pages to read per Nowcoder query in this call. Unfinished searches return a continuation; reaching this limit does not mean sources are exhausted.")
     max_results: int | None = Field(
         default=None,
         ge=1,
         le=200,
-        description="已弃用的兼容字段；来源发现不会再按固定总条数截断。",
+        description="Deprecated compatibility field. Source discovery no longer stops at a fixed total result count.",
     )
 
 
@@ -74,12 +88,13 @@ class InterviewQuestionInput(BaseModel):
     question: str = Field(min_length=2, max_length=1000)
     category: str = Field(default="综合", max_length=120)
     round: str = Field(default="未注明", max_length=120)
-    evidence_quote: str = Field(min_length=2, max_length=1200)
+    evidence_quote: str = Field(min_length=2, max_length=1200, description="Verbatim evidence from the saved source text. Preserve its original language and wording; do not translate or paraphrase the quotation.")
 
 
 class AnalyzeInterviewSourceInput(InterviewToolInput):
     source_id: str = Field(min_length=1, max_length=80)
-    summary: str = Field(min_length=2, max_length=5000)
+    mode: Literal["reuse_or_repair", "replace"] = Field(default="reuse_or_repair", description="Default: reuse complete analysis or merge verified repair questions. Use replace only when the user requests reanalysis or correction; it rebuilds the question set, and an empty list explicitly clears it. Both modes share the source-body repair budget.")
+    summary: str = Field(min_length=2, max_length=5000, description="User-facing summary grounded in the saved source. Use Simplified Chinese unless the user requests another language.")
     questions: list[InterviewQuestionInput] = Field(default_factory=list, max_length=40)
     tags: list[str] = Field(default_factory=list, max_length=30)
 
@@ -96,12 +111,12 @@ class CommonInterviewQuestionInput(BaseModel):
     why_it_matters: str = Field(
         min_length=2,
         max_length=2000,
-        description="结合当前岗位说明面试官为什么会用这道题判断候选人。",
+        description="Explain, in the context of the current role, why an interviewer would use this question to assess a candidate. Use Simplified Chinese unless the user requests another language.",
     )
     preparation: str = Field(
         min_length=2,
         max_length=3000,
-        description="给候选人的可执行准备方法，不得只复述题目。",
+        description="Give the candidate actionable preparation steps rather than merely restating the question. Use Simplified Chinese unless the user requests another language.",
     )
 
 
@@ -116,7 +131,7 @@ class BuildInterviewBriefInput(InterviewToolInput):
     company: str = Field(min_length=1, max_length=240)
     role: str = Field(min_length=1, max_length=240)
     business_unit: str = Field(default="", max_length=240)
-    summary: str = Field(min_length=2, max_length=8000)
+    summary: str = Field(min_length=2, max_length=8000, description="User-facing brief grounded in the analyzed sources, with evidence and coverage limits made explicit. Use Simplified Chinese unless the user requests another language.")
     source_ids: list[str] = Field(min_length=1, max_length=200)
     common_questions: list[CommonInterviewQuestionInput] = Field(default_factory=list, max_length=40)
     recommendations: list[InterviewRecommendationInput] = Field(default_factory=list, max_length=30)
@@ -243,6 +258,13 @@ def _canonical_interview_url(web: WebClient, value: str) -> str:
     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, parsed.query, ""))
 
 
+def _interview_url_identity(value: str) -> str:
+    """A note has the same identity on desktop and public share routes."""
+    if _is_xiaohongshu_note_url(value):
+        return f"xiaohongshu:{urlsplit(value).path.rstrip('/').rsplit('/', 1)[-1]}"
+    return value
+
+
 def _source_timestamp(source: InterviewSource) -> int:
     published = _normalized(source.published_at or "")
     if published:
@@ -264,6 +286,8 @@ def _role_search_variants(role: str, supplied: list[str] | None = None) -> list[
         variants.extend([parts[-1], exact, parts[0]])
     else:
         variants.append(exact)
+    if "算法" in exact:
+        variants.append("算法实习" if "实习" in exact else "算法")
     variants.extend(_normalized(item) for item in (supplied or []))
     compact = re.sub(r"\s+", "", parts[-1] if parts else exact)
     if "产品" in compact:
@@ -379,6 +403,8 @@ def _candidate_relevance(
     """
 
     haystack = _normalized(f"{title} {snippet}").casefold()
+    if re.search(r"^(?:求|求助|求分享).{0,24}面经", _normalized(title)):
+        return False
     if not haystack or any(marker.casefold() in haystack for marker in _DISCOVERY_NEGATIVE_SIGNALS):
         return False
     if not any(marker.casefold() in haystack for marker in _INTERVIEW_SIGNALS):
@@ -428,6 +454,13 @@ def _candidate_relevance(
         )
     elif "数据分析" in compact_role or "数据科学" in compact_role:
         function_match = any(marker in role_haystack for marker in ("数据分析", "数据科学", "数分", "商业分析"))
+    elif role_family(role_exact) == "engineering":
+        # Full official titles rarely appear verbatim in interview cards.
+        # Match the function first; unknown specialization remains a candidate.
+        target_specialty = engineering_specialty(role_exact)
+        source_specialty = engineering_specialty(title) or engineering_specialty(snippet)
+        function_match = role_family(haystack) == "engineering" and (
+            not target_specialty or not source_specialty or target_specialty == source_specialty)
     elif "ai产品" in compact_role or "人工智能产品" in compact_role:
         function_match = any(marker in role_haystack for marker in ("ai产品", "人工智能产品", "产品经理"))
     elif "产品" in compact_role:
@@ -462,25 +495,45 @@ def _interview_content_score(title: str, text: str) -> int:
     return score
 
 
-def _usable_interview_content(title: str, text: str, *, trusted_note: bool = False) -> bool:
-    normalized = _normalized(text)
-    blocked_page = _normalized(f"{title} {normalized}").casefold()
+def _blocked_interview_page(title: str, text: str) -> bool:
+    normalized_title = _normalized(title).casefold()
+    normalized_text = _normalized(text).casefold()
+    blocked_page = f"{normalized_title} {normalized_text}"
     if any(marker in blocked_page for marker in (
         "你访问的页面不见了",
         "当前笔记暂时无法浏览",
         "页面不存在",
         "error_msg=",
         "redirectpath=",
-        "扫码登录",
-        "登录后查看",
     )):
+        return True
+    # Product and security interviews can discuss login or verification. The
+    # browser's explicit access state is authoritative for those long notes;
+    # text alone identifies only a short wall or a dedicated gate-page title.
+    gate_markers = ("扫码登录", "登录后查看", "安全验证", "访问过于频繁")
+    if len(normalized_text) < 120 and any(marker in blocked_page for marker in gate_markers):
+        return True
+    return bool(re.fullmatch(
+        r"(?:小红书\s*[-—|:]\s*)?(?:扫码登录|登录后查看|安全验证|访问过于频繁)(?:\s*[-—|:]\s*小红书)?",
+        normalized_title,
+    ))
+
+
+def _usable_interview_content(title: str, text: str, *, trusted_note: bool = False) -> bool:
+    normalized = _normalized(text)
+    if _blocked_interview_page(title, normalized):
         return False
     if len(normalized) < 120:
         return False
     return trusted_note or _interview_content_score(title, normalized) >= 3
 
 
-def _source_payload(source: InterviewSource, *, include_text: bool = False) -> dict[str, Any]:
+def _source_payload(source: InterviewSource, *, include_text: bool = False, text_preview: str | None = None,
+                    session=None) -> dict[str, Any]:
+    metadata = dict(source.metadata_json or {})
+    # Persisted hints are not a current receipt until both endpoints validate.
+    metadata.pop("classification_v1", None)
+    metadata.pop("similarity_v1", None)
     payload = {
         "id": source.id,
         "job_id": source.job_id,
@@ -496,15 +549,69 @@ def _source_payload(source: InterviewSource, *, include_text: bool = False) -> d
         "questions": source.extracted_questions,
         "tags": source.tags,
         "status": source.status,
-        "metadata_json": source.metadata_json or {},
+        "metadata_json": metadata,
+        "source_hints": read_source_hints(session, source) if session is not None else current_source_hints(source, None),
         "created_at": source.created_at.isoformat(),
         "updated_at": source.updated_at.isoformat(),
     }
     if include_text:
         payload["raw_text"] = source.raw_text
     else:
-        payload["text_preview"] = source.raw_text[:800]
+        payload["text_preview"] = source.raw_text[:800] if text_preview is None else text_preview
     return payload
+
+
+def _refresh_missing_source_hints(session, source):
+    view = current_source_hints(source, None)
+    similarity = (source.metadata_json or {}).get("similarity_v1")
+    expected_headers = {"schema_version": 1, "normalizer_version": NORMALIZER_VERSION,
+                        "method": "char_shingle_exact", "mode": "review_candidates_only",
+                        "input_body_hash": view["classification_v1"]["input_body_hash"],
+                        "coverage": "bounded_candidates"}
+    # A missing peer snapshot only hides that edge at read time; it must not
+    # invalidate unchanged incoming edges by triggering a metadata refresh.
+    headers_current = isinstance(similarity, dict) and all(
+        similarity.get(key) == value for key, value in expected_headers.items())
+    if (view["classification_v1"].get("status") != "current"
+            or not headers_current):
+        refresh_source_hints(session, source)
+
+
+def _current_source_questions(source: InterviewSource) -> list[dict[str, Any]]:
+    return current_source_questions(source)
+
+
+def _analysis_reusable(source: InterviewSource) -> bool:
+    return analysis_reusable(source)
+
+
+def _source_ready(source: InterviewSource) -> bool:
+    return source_ready(source)
+
+
+def _analysis_operation_scope(context: ToolContext, payload: AnalyzeInterviewSourceInput) -> dict[str, str] | None:
+    source = context.session.get(InterviewSource, payload.source_id, populate_existing=True, with_for_update=True)
+    if source is None or source.candidate_id != context.run.candidate_id:
+        return None
+    return {"source_id": source.id, "content_hash": sha256((source.raw_text or "").encode("utf-8")).hexdigest(),
+            "analysis_revision": canonical_hash({"status": source.status, "questions": source.extracted_questions,
+                                                 "analysis_status": (source.metadata_json or {}).get("analysis_status")})}
+
+
+def _analysis_repair_scope(context: ToolContext, payload: AnalyzeInterviewSourceInput) -> dict[str, str] | None:
+    source = context.session.get(InterviewSource, payload.source_id)
+    if (source is None or source.candidate_id != context.run.candidate_id or source.status == "ocr_pending"
+            or (payload.mode == "reuse_or_repair" and _analysis_reusable(source))):
+        return None
+    scope = _analysis_operation_scope(context, payload)
+    return {key: scope[key] for key in ("source_id", "content_hash")}
+
+
+def _analysis_parameters_hash(payload: AnalyzeInterviewSourceInput) -> str:
+    return canonical_hash({"mode": payload.mode, "summary": _normalized(payload.summary),
+                           "questions": [{key: _normalized(value) for key, value in item.model_dump().items()}
+                                         for item in payload.questions],
+                           "tags": list(dict.fromkeys(_normalized(item)[:120] for item in payload.tags if _normalized(item)))})
 
 
 def register_interview_tools(
@@ -523,57 +630,96 @@ def register_interview_tools(
     del xhs_connector
     stages = set(PipelineStage) - {PipelineStage.FROZEN, PipelineStage.CANCELLED, PipelineStage.FAILED, PipelineStage.BLOCKED}
 
+    def query_plan(context, payload):
+        job = context.session.get(Job, context.run.job_id) if context.run.job_id else None
+        if job is not None and job.candidate_id != context.run.candidate_id:
+            job = None
+        # An explicit scope for a different company must not inherit another JD.
+        if job is not None and payload.company.casefold() not in job.company.casefold() and job.company.casefold() not in payload.company.casefold():
+            job = None
+        if job is not None and payload.jd_text and payload.jd_text.strip() != (job.jd_raw or "").strip():
+            job = None
+        saved = normalize_context(job.context_json, job.jd_raw or "") if job else normalize_context(None)
+        plan = jd_query_plan(payload.jd_text or (job.jd_raw if job else ""), job.role if job else payload.role,
+                             context_json=saved)
+        plan["origin"] = "explicit_jd" if payload.jd_text else "linked_job" if job else "no_jd"
+        kind = context_value(saved, "recruitment_type") or payload.recruitment_type
+        unit = context_value(saved, "business_unit") or payload.business_unit
+        plan["effective_scope"] = {"company": job.company if job else payload.company,
+                                   "role": job.role if job else payload.role,
+                                   "business_unit": unit, "recruitment_type": kind or "unknown",
+                                   "job_id": job.id if job else None,
+                                   "input_revision": job.input_revision if job else None}
+        plan["parameter_origins"] = {key: "linked_job_context" if context_value(saved, key) else "tool_payload" if getattr(payload, key, "") else "unknown"
+                                     for key in ("recruitment_type", "business_unit")}
+        if kind:
+            label = {"campus": "校招", "internship": "实习", "social": "社招"}[kind]
+            plan["terms"] = list(dict.fromkeys([label, *plan["terms"]]))
+        return plan
+
     def search_knowledge(context: ToolContext, payload: SearchInterviewKnowledgeInput) -> PipelineToolResult:
-        rows = list(context.session.scalars(
-            select(InterviewSource).where(
-                InterviewSource.candidate_id == context.run.candidate_id,
-            )
-        ).all())
-        needles = [item.casefold() for item in [payload.company, payload.role, payload.business_unit, payload.query] if _normalized(item)]
-
-        def score(item: InterviewSource) -> int:
-            searchable = " ".join([
-                item.company, item.role, item.business_unit or "", item.title, item.summary,
-                " ".join(item.tags or []),
-                " ".join(str(question.get("question") or "") for question in (item.extracted_questions or [])),
-            ]).casefold()
-            if not _candidate_relevance(payload.company, payload.business_unit, payload.role,
-                                        f"{item.company} {item.role} {item.title}", "面经"):
-                return 0
-            total = sum(3 if needle in {item.company.casefold(), item.role.casefold()} else 1 for needle in needles if needle in searchable)
-            if item.status == "analyzed":
-                total += 1
-            return total
-
-        ranked = sorted(
-            ((score(item), item) for item in rows),
-            key=lambda pair: (pair[0], _source_timestamp(pair[1]), pair[1].updated_at),
-            reverse=True,
-        )
-        matches = [item for item_score, item in ranked if item_score > 0]
+        from sqlalchemy import func
+        total = context.session.scalar(select(func.count()).select_from(InterviewSource).where(
+            InterviewSource.candidate_id == context.run.candidate_id))
+        # Explicit queries prefer strict phrases, with an observable lexical
+        # fallback for long Chinese questions only when strict recall is empty.
+        # Company/role hints use OR and keep the scoped business relevance check.
+        plan = query_plan(context, payload)
+        effective = plan["effective_scope"]
+        payload = payload.model_copy(update={name: effective[name] for name in ("company", "role", "business_unit")})
+        hints = [payload.company, payload.role, payload.business_unit, *_role_search_variants(payload.role), *plan["terms"]]
+        # Recall the same functional aliases accepted by _candidate_relevance.
+        # These are broad lexical candidates, still checked by that guard.
+        if "数据分析" in payload.role or "数据科学" in payload.role:
+            hints.extend(["数据分析", "数据科学", "数分", "商业分析"])
+        if "产品" in payload.role:
+            hints.append("产品")
+        if "运营" in payload.role:
+            hints.append("运营")
+        query = payload.query.strip() or " ".join(hints)
+        hits = retrieve_knowledge(context.session, query=query, candidate_id=context.run.candidate_id,
+                                  limit=None, any_terms=not bool(payload.query.strip()),
+                                  relax_if_empty=bool(payload.query.strip()))
+        ranked = rank_interviews(hits, company=payload.company, role=payload.role,
+                                business_unit=payload.business_unit,
+                                include_other_companies=payload.include_other_companies,
+                                recruitment_type_target=effective["recruitment_type"], target_context=plan["job_context"])
         if payload.max_results is not None:
-            matches = matches[:payload.max_results]
-        analyzed = [item for item in matches if item.status == "analyzed" and item.extracted_questions]
+            ranked = ranked[:payload.max_results]
+        matches = [item.hit.item for item in ranked]
+        analyzed = [item.hit.item for item in ranked if _source_ready(item.hit.item)
+                    and item.ranking['scope'] != 'other_company_role_reference_only']
         nowcoder_count = sum(1 for item in analyzed if item.platform == "nowcoder")
-        from .interview_evidence import ready_for_brief as brief_ready
-        ready_for_brief = brief_ready(analyzed)
+        receipt = evidence_receipt([item.hit.item for item in ranked
+                                    if item.ranking['scope'] != 'other_company_role_reference_only'])
+        ready_for_brief = receipt["limited_brief_ready"]
         return _result(
             context,
             (
                 f"已检索本地面试知识库，找到 {len(matches)} 篇相关来源，其中 {len(analyzed)} 篇已完成正文与引文核验。"
                 + (
-                    "已有可综合的已核验来源，请调用 build_interview_brief；按 evidence_status 说明覆盖限制，不要重复抓取。"
+                    f"已有 {receipt['usable_document_group_count']} 个可用文档组，可生成证据有限的简报；"
+                    f"已确认 {receipt['confirmed_origin_count']} 个来源 origin，另有 {receipt['unresolved_origin_count']} 个文档组待核对。"
+                    "复用已保存正文，勿重抓同一文档；可按证据缺口继续发现新来源，耗尽、重复或受保护时停止。"
                     if ready_for_brief
-                    else "本地证据不足，请继续发现并读取小红书主来源，再补充牛客等公开面经来源。"
+                    else "本地可用文档组尚未达到受限简报建议门槛；可继续发现新来源并核对待审 origin，"
+                         "无新证据、结果重复或访问受保护时说明局限并停止。"
                 )
             ),
             artifacts=[f"interview_source:{item.id}" for item in matches],
             data={
-                "sources": [_source_payload(item) for item in matches],
-                "total_library_sources": len(rows),
+                "sources": [{**_source_payload(item.hit.item, text_preview=item.hit.preview),
+                             "search_score": item.hit.score, "match_strategy": item.hit.match_strategy,
+                             "reference_ranking": item.ranking} for item in ranked],
+                "retrieval": "fts5_bm25",
+                "retrieval_notice": "lexical_relaxed 表示严格检索无命中后的部分词项匹配；须回读原文确认相关性，不代表语义匹配或事实核验。",
+                "query_plan": {**plan, "effective_query": query, "explicit_query": bool(payload.query.strip())},
+                "ranking_policy": POLICY_VERSION,
+                "total_library_sources": total,
                 "analyzed_source_count": len(analyzed),
                 "nowcoder_source_count": nowcoder_count,
-                "evidence_status": interview_evidence_status(analyzed),
+                **receipt,
+                "evidence_accounting": receipt,
                 "ready_source_ids": [item.id for item in analyzed],
                 "ready_for_brief": ready_for_brief,
                 "required_next_action": "build_interview_brief" if ready_for_brief else "discover_interview_sources",
@@ -582,13 +728,17 @@ def register_interview_tools(
 
     def discover_sources(context: ToolContext, payload: DiscoverInterviewSourcesInput) -> PipelineToolResult:
         platforms = set(payload.platforms)
+        plan = query_plan(context, payload)
+        effective = plan["effective_scope"]
+        payload = payload.model_copy(update={name: effective[name] for name in ("company", "role", "business_unit")})
         scope = " ".join(_normalized(item) for item in [payload.company, payload.business_unit] if _normalized(item))
-        role_variants = _role_search_variants(payload.role, payload.query_terms)
+        expanded_terms = list(dict.fromkeys([*payload.query_terms, *plan["terms"]]))[:12]
+        role_variants = _role_search_variants(payload.role, expanded_terms)
         site_search_plan = _xiaohongshu_search_plan(
             payload.company,
             payload.business_unit,
             payload.role,
-            payload.query_terms,
+            expanded_terms,
         )
         site_search_phrases = [item["query"] for item in site_search_plan]
         queries: list[str] = []
@@ -611,6 +761,7 @@ def register_interview_tools(
         observed_search_paths: list[str] = []
         account_session_used = False
         rejected_irrelevant_count = 0
+        rejected_candidate_examples = []
 
         result_scopes: dict[str, str] = {}
         result_platforms: dict[str, str] = {}
@@ -632,6 +783,14 @@ def register_interview_tools(
             coverage_scope: str,
         ) -> bool:
             nonlocal rejected_irrelevant_count
+            canonical = _canonical_interview_url(web, item.url)
+            # Search engines may ignore the site qualifier. Do not count a
+            # supplemental community result as a Xiaohongshu primary source.
+            if _interview_platform(canonical) != platform or not _is_supported_interview_candidate(canonical):
+                return False
+            identity = _interview_url_identity(canonical)
+            if identity in seen:
+                return False
             if not _candidate_relevance(
                 payload.company,
                 payload.business_unit,
@@ -640,13 +799,13 @@ def register_interview_tools(
                 item.snippet,
             ):
                 rejected_irrelevant_count += 1
-                return False
-            canonical = _canonical_interview_url(web, item.url)
-            if canonical in seen or not _is_supported_interview_candidate(canonical):
+                if len(rejected_candidate_examples) < 40:
+                    rejected_candidate_examples.append({"url": item.url, "title": item.title[:240],
+                        "snippet": item.snippet[:500], "reason": "discovery_scope_or_interview_signal_not_supported"})
                 return False
             if scope_limits is not None and scope_counts[coverage_scope] >= scope_limits[coverage_scope]:
                 return False
-            seen.add(canonical)
+            seen.add(identity)
             found.append(WebSearchResult(title=item.title, url=canonical, snippet=item.snippet))
             result_scopes[canonical] = coverage_scope
             result_platforms[canonical] = platform
@@ -673,7 +832,7 @@ def register_interview_tools(
                 except HarnessError as exc:
                     public_access_reason = exc.code
                     public_access_detail = exc.message
-                    if exc.code in {"xiaohongshu_public_access_cooldown", "xiaohongshu_public_access_limit", "browser_busy", "browser_bridge_failed"}:
+                    if exc.code in {"xiaohongshu_public_access_cooldown", "xiaohongshu_public_access_limit", "browser_busy", "browser_bridge_failed", "browser_runtime_unavailable"}:
                         public_access_stopped = True
                         break
                     continue
@@ -682,15 +841,18 @@ def register_interview_tools(
                 candidate_access_grants += max(0, int(state.get("candidate_access_grants") or 0))
                 observed_search_paths.extend(str(item) for item in (state.get("observed_search_paths") or []))
                 for item in candidates:
-                    url = web.redact_url(str(item.get("url") or "")) if isinstance(item, dict) else ""
+                    if not isinstance(item, dict):
+                        continue
+                    url = web.redact_url(str(item.get("url") or ""))
+                    snippet = str(item.get("snippet") or "")[:2000]
                     append_result(
-                        WebSearchResult(title=str(item.get("title") or url)[:500], url=url),
+                        WebSearchResult(title=str(item.get("title") or url)[:500], url=url, snippet=snippet),
                         platform=PRIMARY_INTERVIEW_PLATFORM,
                         coverage_scope=_coverage_scope(
                             payload.business_unit,
                             payload.role,
                             str(item.get("title") or ""),
-                            "",
+                            snippet,
                         ),
                     )
                     if at_result_limit():
@@ -830,6 +992,7 @@ def register_interview_tools(
                     if not next_url:
                         if site.get("extraction") == "unrecognized":
                             nowcoder_pages[-1]["status"] = "unrecognized_page"
+                            nowcoder_pages[-1]["failure_reason"] = site.get("failure_reason", "unsupported_search_state")
                             nowcoder_continuations.append({"query": normalized_term, "page": requested_page})
                         break
                     if offset == payload.nowcoder_page_limit - 1:
@@ -884,6 +1047,7 @@ def register_interview_tools(
         grouped_results = [
             {
                 "title": item.title,
+                "snippet": item.snippet,
                 "url": item.url,
                 "platform": result_platforms.get(item.url, _interview_platform(item.url)),
                 "scope": result_scopes.get(item.url, "company_role"),
@@ -907,6 +1071,7 @@ def register_interview_tools(
                 "business_unit": payload.business_unit,
                 "role": payload.role,
                 "role_variants": role_variants,
+                "query_plan": plan,
                 "queries": queries,
                 "site_searches": attempted_site_searches,
                 "supplemental_searches": attempted_supplemental_searches,
@@ -915,6 +1080,7 @@ def register_interview_tools(
                 "nowcoder_continuations": nowcoder_continuations,
                 "nowcoder_stop_reason": nowcoder_stop_reason,
                 "requested_platforms": payload.platforms,
+                "browser_availability": "not_requested" if PRIMARY_INTERVIEW_PLATFORM not in platforms else "not_configured" if not browser.configured else "unavailable" if public_access_reason == "browser_runtime_unavailable" else "configured_not_health_verified",
                 "nowcoder_site_source_count": direct_nowcoder_count,
                 "site_search_candidates": site_search_phrases,
                 "search_plan": site_search_plan,
@@ -923,6 +1089,7 @@ def register_interview_tools(
                 "providers": list(dict.fromkeys(providers)),
                 "results": [{
                     "title": item.title,
+                    "snippet": item.snippet,
                     "url": item.url,
                     "platform": result_platforms.get(item.url, _interview_platform(item.url)),
                     "scope": result_scopes.get(item.url, "company_role"),
@@ -941,7 +1108,11 @@ def register_interview_tools(
                 "primary_source_count": xhs_count,
                 "supplemental_source_count": supplemental_count,
                 "rejected_irrelevant_count": rejected_irrelevant_count,
+                "rejected_candidate_examples": rejected_candidate_examples,
+                "rejected_examples_truncated": rejected_irrelevant_count > len(rejected_candidate_examples),
                 "minimum_sufficient_sources": INTERVIEW_SOURCE_MINIMUM,
+                "minimum_documents_for_limited_brief": INTERVIEW_SOURCE_MINIMUM,
+                "deprecated_fields": {"minimum_sufficient_sources": "minimum_documents_for_limited_brief"},
                 "fallback": "继续扩展相邻岗位称谓；也可读取用户粘贴的公开分享链接" if not found else "",
             },
         )
@@ -984,7 +1155,8 @@ def register_interview_tools(
                     ),
                 }
                 context.session.flush()
-            return _result(context, "该面经已存在于本地知识库，直接复用已有内容。", artifacts=[f"interview_source:{existing.id}", f"url:{existing.source_url}"], data={"source": _source_payload(existing, include_text=True), "duplicate": True})
+            _refresh_missing_source_hints(context.session, existing)
+            return _result(context, "该面经已存在于本地知识库，直接复用已有内容。", artifacts=[f"interview_source:{existing.id}", f"url:{existing.source_url}"], data={"source": _source_payload(existing, include_text=True, session=context.session), "duplicate": True})
 
         title = ""
         text = ""
@@ -993,13 +1165,15 @@ def register_interview_tools(
             "submitted_url": submitted_url,
             "anonymous_public_mode": True,
             "account_session_used": False,
+            "scope_origin": "request_not_verified",
         }
         browser_login_required = False
+        ocr_capture_eligible = False
 
         # XHS has one shared admission boundary; do not bypass it with HTTP
         # or another crawler after a browser restriction.
         if is_xhs and not browser.configured:
-            raise HarnessError("interview_source_public_access_stopped", "小红书读取需要受控浏览器；已停止该来源，可继续使用牛客与本地知识库。")
+            raise HarnessError("browser_runtime_unavailable", "小红书读取需要受控浏览器；当前浏览器未启动，可继续使用牛客与本地知识库。", retryable=False)
         if not is_xhs:
             try:
                 page = web.read_page(target, max_chars=50000)
@@ -1018,8 +1192,12 @@ def register_interview_tools(
                 if _is_supported_interview_candidate(canonical) and _usable_interview_content(page.title, page.text):
                     title, text, provider = page.title, page.text, "built-in-public"
             except HarnessError as exc:
+                if exc.details.get("status") == 404:
+                    raise HarnessError("interview_source_not_found", "该公开面经返回 404；请继续其他来源，不重试该失效链接。",
+                                       details={"status": 404, "next_action": "continue_other_sources"}) from exc
                 if platform == "nowcoder" and exc.details.get("status") in {401, 403, 429}:
-                    raise HarnessError("interview_source_public_access_stopped", "牛客要求登录或限制访问，已停止读取该来源。", retryable=True) from exc
+                    raise HarnessError("interview_source_public_access_stopped", "牛客要求登录或限制访问，已停止读取该来源。",
+                                       details={"status": exc.details["status"], "next_action": "continue_other_sources_after_access_stop"}) from exc
 
         if not _usable_interview_content(title, text) and firecrawl.configured and not is_xhs and platform != "nowcoder":
             try:
@@ -1037,7 +1215,10 @@ def register_interview_tools(
         if not _usable_interview_content(title, text) and browser.configured:
             try:
                 state = browser.open(target)
-                browser_login_required = bool(state.get("login_required"))
+                browser_login_required = bool(
+                    state.get("login_required") or state.get("cooldown_until")
+                    or state.get("user_action") in {"login", "captcha", "rate_limited", "network_error"}
+                )
                 account_session_used = bool(state.get("account_session"))
                 rendered = str(state.get("text") or "").strip()
                 rendered_title = str(state.get("title") or "").strip()
@@ -1062,9 +1243,16 @@ def register_interview_tools(
                     "account_session_used": account_session_used,
                 })
                 trusted = bool(state.get("note_ready")) if is_xhs else False
-                if is_xhs and not browser_login_required and (len(metadata.get("ocr_text", "")) >= 80 or metadata.get("ocr_images_saved", 0) > 0):
+                valid_capture_url = _is_xiaohongshu_note_url(canonical) if is_xhs else _is_supported_interview_candidate(canonical)
+                ocr_capture_eligible = bool(
+                    is_xhs and valid_capture_url and not browser_login_required
+                    and not state.get("cooldown_until")
+                    and not _blocked_interview_page(rendered_title, rendered)
+                    and state.get("page_kind") in {None, "", "note"}
+                )
+                if ocr_capture_eligible and (len(metadata.get("ocr_text", "")) >= 80 or metadata.get("ocr_images_saved", 0) > 0):
                     title, text, provider = rendered_title, rendered, "xiaohongshu-browser-ocr-pending"
-                if _is_supported_interview_candidate(canonical) and not browser_login_required and _usable_interview_content(rendered_title, rendered, trusted_note=trusted):
+                if valid_capture_url and not browser_login_required and not state.get("cooldown_until") and _usable_interview_content(rendered_title, rendered, trusted_note=trusted):
                     title = rendered_title
                     text = rendered
                     provider = (
@@ -1078,7 +1266,7 @@ def register_interview_tools(
                     raise HarnessError("interview_source_public_access_stopped", "小红书访问已暂停；请复用已保存正文并继续读取牛客来源。", details={"reason": exc.code, **exc.details}) from exc
 
         text = _normalized(text)[:50000]
-        ocr_pending = not _usable_interview_content(title, text) and (len(metadata.get("ocr_text", "")) >= 80 or metadata.get("ocr_images_saved", 0) > 0)
+        ocr_pending = ocr_capture_eligible and not _usable_interview_content(title, text) and (len(metadata.get("ocr_text", "")) >= 80 or metadata.get("ocr_images_saved", 0) > 0)
         if not _usable_interview_content(title, text) and not ocr_pending:
             if browser_login_required:
                 raise HarnessError(
@@ -1110,7 +1298,8 @@ def register_interview_tools(
                         ),
                     }
                     context.session.flush()
-                return _result(context, "该面经已存在于本地知识库，直接复用已有内容。", artifacts=[f"interview_source:{canonical_existing.id}", f"url:{canonical_existing.source_url}"], data={"source": _source_payload(canonical_existing, include_text=True), "duplicate": True})
+                _refresh_missing_source_hints(context.session, canonical_existing)
+                return _result(context, "该面经已存在于本地知识库，直接复用已有内容。", artifacts=[f"interview_source:{canonical_existing.id}", f"url:{canonical_existing.source_url}"], data={"source": _source_payload(canonical_existing, include_text=True, session=context.session), "duplicate": True})
             url_hash = final_hash
 
         source = existing or InterviewSource(candidate_id=context.run.candidate_id, url_hash=url_hash)
@@ -1128,6 +1317,8 @@ def register_interview_tools(
             or (_xiaohongshu_note_published_at(canonical) if is_xhs else "")
             or None
         )
+        metadata['published_at_basis'] = ('page_metadata' if metadata.get('published_at') else
+                                         'note_id_inferred' if is_xhs and source.published_at else 'unknown')
         source.raw_text = text
         source.content_hash = sha256(text.encode("utf-8")).hexdigest()
         source.status = "ocr_pending" if ocr_pending else "captured"
@@ -1146,6 +1337,8 @@ def register_interview_tools(
         if existing is None:
             context.session.add(source)
         context.session.flush()
+        refresh_source_hints(context.session, source)
+        refresh_briefs(context.session, source.candidate_id)
         image_note = f"；另检测到 {metadata.get('image_count', 0)} 张图片，图片中的问题尚需 OCR 后才能作为引文" if metadata.get("image_count") else ""
         platform_label = {
             "xiaohongshu": "小红书",
@@ -1158,7 +1351,7 @@ def register_interview_tools(
             "已保存可见图片 OCR，需核对后才能作为面试问题证据。" if ocr_pending else f"已验证链接并保存一篇{platform_label}面试经验，等待提取具体问题{image_note}。",
             artifacts=[f"interview_source:{source.id}", f"url:{canonical}"],
             data={
-                "source": _source_payload(source, include_text=True),
+                "source": _source_payload(source, include_text=True, session=context.session),
                 "duplicate": False,
                 "image_evidence_pending": bool(metadata.get("image_evidence_pending")),
                 "image_count": int(metadata.get("image_count") or 0),
@@ -1180,42 +1373,75 @@ def register_interview_tools(
                          "ocr_text": "\n\n".join(f"[图片 {page['index']}]\n{page.get('text', '')}" for page in pages if page and page.get("text"))[:50000]})
         source.metadata_json = metadata
         context.session.flush()
-        return _result(context, "已读取本地 OCR 进度；识别文本仍需核对，未访问原站。", data={"source": _source_payload(source, include_text=True), "ocr_status": metadata["ocr_status"]})
+        return _result(context, "已读取本地 OCR 进度；识别文本仍需核对，未访问原站。", data={"source": _source_payload(source, include_text=True, session=context.session), "ocr_status": metadata["ocr_status"]})
 
     def analyze_source(context: ToolContext, payload: AnalyzeInterviewSourceInput) -> PipelineToolResult:
         source = context.session.get(InterviewSource, payload.source_id)
         if source is None or source.candidate_id != context.run.candidate_id:
-            raise HarnessError("interview_source_not_found", "面经来源不存在或不属于当前资料库")
+            raise HarnessError("interview_source_not_found", "面经来源不存在或不属于当前资料库",
+                               details={"source_id": payload.source_id, "next_action": "continue_other_sources"})
         if source.status == "ocr_pending":
-            raise HarnessError("interview_source_ocr_pending", "图片 OCR 尚未核对，不能自动作为已验证问题证据")
+            raise HarnessError("interview_source_ocr_pending", "图片 OCR 尚未核对，不能自动作为已验证问题证据",
+                               details={"source_id": source.id, "next_action": "await_user_ocr_review",
+                                        "recovery_hint": "继续其他来源；由用户核对 OCR 后再分析，不要重新抓取或绕过确认。"})
+        if payload.mode == "reuse_or_repair" and _analysis_reusable(source):
+            return _result(context, "已复用当前正文的完整分析，不重复覆盖已核验问题。",
+                           artifacts=[f"interview_source:{source.id}"],
+                           data={"source": _source_payload(source, session=context.session), "reused": True,
+                                 "analysis_status": (source.metadata_json or {}).get("analysis_status", "complete")})
         normalized_text = _normalized(source.raw_text)
         verified_questions = []
-        rejected = 0
-        for item in payload.questions:
+        rejected = []
+        for index, item in enumerate(payload.questions):
             quote_text = _normalized(item.evidence_quote)
-            if quote_text not in normalized_text:
-                rejected += 1
+            invalid_field = "question" if not _normalized(item.question) else "evidence_quote"
+            reason = ("question_empty" if invalid_field == "question" else
+                      "quote_too_short" if len(quote_text) < 2 else
+                      "quote_not_in_current_source" if quote_text not in normalized_text else "")
+            if reason:
+                rejected.append({"question_index": index, "field": invalid_field, "reason": reason})
                 continue
             verified_questions.append({**item.model_dump(mode="json"), "evidence_valid": True})
+        preserved = _current_source_questions(source)
+        digest = sha256((source.raw_text or "").encode("utf-8")).hexdigest()
+        if payload.questions and not verified_questions:
+            raise HarnessError("interview_analysis_quotes_invalid", "本次问题引文全部未匹配当前正文；请核对原文并修改对应条目，或继续其他来源。",
+                               retryable=True, details={"source_id": source.id, "content_hash": digest,
+                                                       "rejected_questions": rejected, "preserved_question_count": len(preserved)})
+        if not payload.questions and preserved and payload.mode != "replace":
+            raise HarnessError("interview_analysis_questions_required", "该来源已有有效问题；空列表不能代替对未通过条目的修复。",
+                               retryable=True, details={"source_id": source.id, "content_hash": digest,
+                                                       "preserved_question_count": len(preserved)})
+        merged = {}
+        for item in [*(preserved if payload.mode != "replace" else []), *verified_questions]:
+            key = (_normalized(item.get("question")).casefold(), _normalized(item.get("evidence_quote")))
+            merged[key] = item
+        analysis_status = "partial" if rejected else "complete" if merged else "no_questions"
         source.summary = _normalized(payload.summary)
-        source.extracted_questions = verified_questions
+        source.extracted_questions = list(merged.values())
         source.tags = list(dict.fromkeys(_normalized(item)[:120] for item in payload.tags if _normalized(item)))
         source.status = "analyzed"
-        source.metadata_json = {**(source.metadata_json or {}), "rejected_unverified_questions": rejected}
+        source.metadata_json = {**(source.metadata_json or {}), "rejected_unverified_questions": len(rejected),
+                                "analysis_content_hash": digest, "analysis_status": analysis_status,
+                                "rejected_questions": rejected}
         context.session.flush()
-        return _result(context, f"已从面经中提取 {len(verified_questions)} 个有原文依据的问题；{rejected} 个无对应引文的条目未入库。", artifacts=[f"interview_source:{source.id}"], data={"source": _source_payload(source), "rejected_count": rejected})
+        refresh_briefs(context.session, source.candidate_id)
+        repair = context.repair_state
+        remaining = max(0, repair.get("repair_attempt_limit", 2) - repair.get("repair_attempts_used", 0))
+        return _result(context, f"已保留 {len(merged)} 个有原文依据的问题；{len(rejected)} 个无对应引文的条目未入库。"
+                       + ("该来源分析尚不完整，仅已核验问题可用于有限证据简报。" if rejected else ""),
+                       artifacts=[f"interview_source:{source.id}"],
+                       data={"source": _source_payload(source, session=context.session), "analysis_status": analysis_status, "analysis_mode": payload.mode,
+                             "rejected_count": len(rejected), "rejected_questions": rejected,
+                             "repair_attempts_used": repair.get("repair_attempts_used", 0),
+                             "repair_attempt_limit": repair.get("repair_attempt_limit", 2), "repair_attempts_remaining": remaining,
+                             "next_action": "adjust_analysis_arguments" if rejected and remaining else "continue_other_sources",
+                             "coverage_limit": "仅保留通过当前正文引文校验的问题；未通过条目不能用于简报。" if rejected else ""})
 
     def build_brief(context: ToolContext, payload: BuildInterviewBriefInput) -> PipelineToolResult:
         unique_ids = list(dict.fromkeys(payload.source_ids))
         sources = list(context.session.scalars(select(InterviewSource).where(InterviewSource.id.in_(unique_ids), InterviewSource.candidate_id == context.run.candidate_id)).all())
         source_by_id = {item.id: item for item in sources}
-        if len(source_by_id) != len(unique_ids):
-            raise HarnessError("interview_brief_source_scope_invalid", "简报引用了不存在或不属于当前资料库的来源")
-        if any(item.status != "analyzed" for item in sources):
-            raise HarnessError(
-                "interview_brief_source_not_analyzed",
-                "生成简报前必须先读取面经正文并完成逐字引文校验",
-            )
         available_verified = [
             item
             for item in context.session.scalars(
@@ -1225,7 +1451,20 @@ def register_interview_tools(
                 )
             ).all()
             if _normalized(item.company).casefold() == _normalized(payload.company).casefold()
+            and _source_ready(item)
         ]
+        recovery = {**evidence_receipt(available_verified),
+                    "ready_source_ids": [item.id for item in available_verified],
+                    "next_action": "build_from_ready_sources" if available_verified else "continue_other_sources",
+                    "recovery_hint": "移除无效或尚未核验的来源；复用 ready_source_ids，保留主来源和覆盖门禁，按有限证据生成简报。"}
+        invalid_ids = [ident for ident in unique_ids if ident not in source_by_id]
+        if invalid_ids:
+            raise HarnessError("interview_brief_source_scope_invalid", "简报引用了不存在或不属于当前资料库的来源",
+                               retryable=True, details={**recovery, "invalid_source_ids": invalid_ids})
+        not_analyzed = [item.id for item in sources if not _source_ready(item)]
+        if not_analyzed:
+            raise HarnessError("interview_brief_source_not_analyzed", "生成简报前必须先读取面经正文并完成逐字引文校验；零有效问题的来源不能计入。",
+                               retryable=True, details={**recovery, "invalid_source_ids": not_analyzed})
         available_primary = [
             item for item in available_verified if item.platform == PRIMARY_INTERVIEW_PLATFORM
         ]
@@ -1237,6 +1476,7 @@ def register_interview_tools(
                 "interview_brief_primary_source_required",
                 "当前知识库已有已核验的小红书面经，本次简报必须把它们作为主来源；牛客等来源只能补充交叉验证。",
                 retryable=True,
+                details=recovery,
             )
         coverage_counts = {"same_business_role": 0, "company_role": 0}
         for source in sources:
@@ -1272,6 +1512,7 @@ def register_interview_tools(
                 "interview_brief_coverage_incomplete",
                 f"知识库同时存在两层可用来源，但本次简报缺少“{missing}”来源。请从 ready_source_ids 补入该层来源后重新生成。",
                 retryable=True,
+                details={**recovery, "missing_coverage": missing},
             )
         sources.sort(
             key=lambda item: (
@@ -1285,17 +1526,23 @@ def register_interview_tools(
             item for item in sources if item.platform != PRIMARY_INTERVIEW_PLATFORM
         ]
         evidence_status = interview_evidence_status(sources)
+        receipt = evidence_receipt(sources)
         questions = []
         for item in payload.common_questions:
             source_ids = [source_id for source_id in dict.fromkeys(item.source_ids) if source_id in source_by_id]
             if not source_ids:
                 continue
+            accounting = question_evidence_summary([source_by_id[sid] for sid in source_ids], item.question)
+            count = accounting['confirmed_independent_count']
             questions.append({
                 **item.model_dump(mode="json", exclude={"source_ids"}),
-                "source_ids": source_ids,
-                "frequency": len(source_ids),
-                "confidence": "recurring" if len(source_ids) >= 2 else "single_source",
+                "source_ids": source_ids, "cited_source_count": len(source_ids),
+                "frequency": count if accounting['independence_status'] == 'confirmed' else None,
+                "confidence": "recurring" if accounting['independence_status'] == 'confirmed' and count >= 2 else "independence_unverified",
+                "question_evidence": accounting,
             })
+        job = context.session.get(Job, context.run.job_id) if context.run.job_id else None
+        coverage_observations = jd_topic_coverage(job.jd_raw if job and job.candidate_id == context.run.candidate_id else "", sources)
         brief = InterviewBrief(
             candidate_id=context.run.candidate_id,
             job_id=context.run.job_id,
@@ -1309,19 +1556,24 @@ def register_interview_tools(
             source_ids=unique_ids,
             query_terms=list(dict.fromkeys(_normalized(item)[:160] for item in payload.query_terms if _normalized(item))),
             metadata_json={
-                "recurring_question_count": sum(1 for item in questions if item["frequency"] >= 2),
+                **(current_analysis_marker(job) if job and job.candidate_id == context.run.candidate_id else {}),
+                "recurring_question_count": sum(1 for item in questions if (item["frequency"] or 0) >= 2),
                 "primary_platform": PRIMARY_INTERVIEW_PLATFORM,
                 "primary_source_count": len(selected_primary),
                 "supplemental_source_count": len(supplemental_sources),
                 "source_count": len(sources),
                 "minimum_sufficient_sources": INTERVIEW_SOURCE_MINIMUM,
+                **receipt,
                 "evidence_status": evidence_status,
+                "evidence_accounting": receipt,
+                "jd_topic_coverage": coverage_observations,
                 "coverage_counts": coverage_counts,
+                "partial_source_ids": [item.id for item in sources if (item.metadata_json or {}).get("analysis_status") == "partial"],
             },
         )
         context.session.add(brief)
         context.session.flush()
-        coverage = "证据充分" if evidence_status == "sufficient" else f"证据有限，尚未达到 {INTERVIEW_SOURCE_MINIMUM} 篇最低交叉验证数量"
+        coverage = "证据充分" if evidence_status == "sufficient" else "证据有限，来源独立性或岗位覆盖尚未充分核验"
         return _result(
             context,
             (
@@ -1338,18 +1590,29 @@ def register_interview_tools(
                 "primary_source_count": len(selected_primary),
                 "supplemental_source_count": len(supplemental_sources),
                 "source_count": len(sources),
+                **receipt,
                 "evidence_status": evidence_status,
+                "evidence_accounting": receipt,
+                "jd_topic_coverage": coverage_observations,
                 "coverage_counts": coverage_counts,
+                "partial_source_ids": [item.id for item in sources if (item.metadata_json or {}).get("analysis_status") == "partial"],
             },
         )
 
+    def read_knowledge_source(context: ToolContext, payload: ReadKnowledgeSourceInput) -> PipelineToolResult:
+        data = read_source(context.session, payload, candidate_id=context.run.candidate_id)
+        source = context.session.get(InterviewSource, payload.source_id)
+        data["source_hints"] = read_source_hints(context.session, source)
+        return _result(context, "已读取原文片段，请据此核对引文。", artifacts=[f"interview_source:{payload.source_id}"], data=data)
+
     specs = (
-        ToolSpec(name="collect_interview_ocr", description="读取已下载面经图片的本地 OCR 结果并更新快照，不访问原站。先批量采集其他帖子，再收集结果；queued/running 不应忙轮询。OCR 未核对前不能当作原文问题证据。", input_model=CollectInterviewOcrInput, output_model=PipelineToolResult, permission=ToolPermission.DRAFT_WRITE, allowed_stages=stages, handler=collect_ocr, read_only=False, side_effect=True),
-        ToolSpec(name="search_interview_knowledge", description="先检索当前用户的本地面试知识库，复用同公司、业务线或相近岗位的已读面经与问题。开始任何面试调研前优先调用。", input_model=SearchInterviewKnowledgeInput, output_model=PipelineToolResult, permission=ToolPermission.READ, allowed_stages=stages, handler=search_knowledge, read_only=True),
-        ToolSpec(name="discover_interview_sources", description="围绕公司、业务线和岗位持续发现公开面经。默认检索小红书后补充牛客、知乎和 CSDN；platforms 可设为 [nowcoder] 独立检索牛客。牛客返回分页记录和续查位置，达到页数或时间预算不代表耗尽。只返回候选来源，必须继续读取后才能据此总结。", input_model=DiscoverInterviewSourcesInput, output_model=PipelineToolResult, permission=ToolPermission.NETWORK_READ, allowed_stages=stages, handler=discover_sources, read_only=True),
-        ToolSpec(name="capture_interview_source", description="读取一个小红书、牛客、知乎或 CSDN 的公开面经链接并将原文保存到本地知识库。重复链接会去重；404、登录、验证码或不可读页面不会伪装成成功。", input_model=CaptureInterviewSourceInput, output_model=PipelineToolResult, permission=ToolPermission.NETWORK_READ, allowed_stages=stages, handler=capture_source, read_only=False, side_effect=True),
-        ToolSpec(name="analyze_interview_source", description="把模型从已保存面经中识别的问题和原文引文写回知识库。没有逐字对应原文的条目会被拒绝。", input_model=AnalyzeInterviewSourceInput, output_model=PipelineToolResult, permission=ToolPermission.DRAFT_WRITE, allowed_stages=stages, handler=analyze_source, read_only=False, side_effect=True),
-        ToolSpec(name="build_interview_brief", description="根据已分析的面经生成岗位简报，小红书作为主来源、牛客等作为补充。每个问题必须声明来源 ID；系统按真实来源数计算频次，单一来源必须明确标记。", input_model=BuildInterviewBriefInput, output_model=PipelineToolResult, permission=ToolPermission.DRAFT_WRITE, allowed_stages=stages, handler=build_brief, read_only=False, side_effect=True),
+        ToolSpec(name="read_interview_source", description="Read paginated original interview text from the local library using a source ID returned by search. For continuation, pass the previous content_hash as expected_hash. Verify the original text before quoting it. This does not fetch the website again.", input_model=ReadKnowledgeSourceInput, output_model=PipelineToolResult, permission=ToolPermission.READ, allowed_stages=stages, handler=read_knowledge_source, read_only=True),
+        ToolSpec(name="collect_interview_ocr", description="Read local OCR results for downloaded interview images and update the snapshot without visiting the source website. Capture other posts in batches before collecting results; do not busy-poll queued or running jobs. Unverified OCR is not evidence of an original interview question.", input_model=CollectInterviewOcrInput, output_model=PipelineToolResult, permission=ToolPermission.DRAFT_WRITE, allowed_stages=stages, handler=collect_ocr, read_only=False, side_effect=True, effect_scope="local_with_read_cache"),
+        ToolSpec(name="search_interview_knowledge", description="Search the current user's local interview library first to reuse previously read accounts and questions for the same company, business unit, or related role. Call this before starting any interview research.", input_model=SearchInterviewKnowledgeInput, output_model=PipelineToolResult, permission=ToolPermission.READ, allowed_stages=stages, handler=search_knowledge, read_only=True),
+        ToolSpec(name="discover_interview_sources", description="Discover public interview accounts for the company, business unit, and role. By default, search Xiaohongshu first, then supplement with Nowcoder, Zhihu, and CSDN. Set platforms to ['nowcoder'] for a standalone Nowcoder search. Nowcoder returns page records and continuation positions; reaching a page or time budget does not mean sources are exhausted. Results are only candidate sources: read them before drawing conclusions.", input_model=DiscoverInterviewSourcesInput, output_model=PipelineToolResult, permission=ToolPermission.NETWORK_READ, allowed_stages=stages, handler=discover_sources, read_only=True),
+        ToolSpec(name="capture_interview_source", description="Read one public interview account from Xiaohongshu, Nowcoder, Zhihu, or CSDN and save the original text to the local library. Duplicate links are deduplicated. HTTP 404, login, CAPTCHA, and unreadable pages are not reported as successful captures.", input_model=CaptureInterviewSourceInput, output_model=PipelineToolResult, permission=ToolPermission.NETWORK_READ, allowed_stages=stages, handler=capture_source, read_only=False, side_effect=True, effect_scope="local_with_read_cache"),
+        ToolSpec(name="analyze_interview_source", description="Save questions with exact current-source quotations. Default reuse_or_repair reuses complete analyses and merges verified repair questions. Use replace only when the user requests reanalysis or correction: rebuild from the supplied verified questions; [] explicitly clears questions. Both modes share at most two actual attempts per source body per run. Ordinary failures use repair with changed arguments, then continue other sources. Partial results disclose rejected indices. Preserve quotations in their original language; write analysis in Simplified Chinese unless requested otherwise.", input_model=AnalyzeInterviewSourceInput, output_model=PipelineToolResult, permission=ToolPermission.DRAFT_WRITE, allowed_stages=stages, handler=analyze_source, read_only=False, side_effect=True, effect_scope="local_transactional", repair_scope_builder=_analysis_repair_scope, operation_scope_builder=_analysis_operation_scope, repair_arguments_builder=_analysis_parameters_hash, repair_attempt_limit=2, revision="3"),
+        ToolSpec(name="build_interview_brief", description="Build a role-specific limited brief from analyzed interview sources, using Xiaohongshu as the primary source and Nowcoder and other platforms as supplements. Every question must list its source IDs. Frequency requires the same extracted question with a current verbatim quote and user-confirmed independent origins; unknown independence is not zero frequency or a recurring pattern. Document readiness does not establish evidence sufficiency. Write user-facing content in Simplified Chinese unless the user requests another language.", input_model=BuildInterviewBriefInput, output_model=PipelineToolResult, permission=ToolPermission.DRAFT_WRITE, allowed_stages=stages, handler=build_brief, read_only=False, side_effect=True, effect_scope="local_transactional"),
     )
     for spec in specs:
         gateway.register(spec)

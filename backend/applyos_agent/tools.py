@@ -193,13 +193,13 @@ def register_pipeline_tools(gateway: ToolGateway, pipeline: MockPipeline) -> Too
             approval_action=approval_action,
         ))
 
-    add("validate_run_input", "校验当前候选人、岗位归属和 JD 是否足以开始任务。", ToolPermission.DRAFT_WRITE, {PipelineStage.CREATED, PipelineStage.INPUT_VALIDATING}, validate_run_input)
-    add("analyze_job", "调用岗位分析能力，从 JD 原文提取职责、硬要求、加分项和能力维度。", ToolPermission.DRAFT_WRITE, {PipelineStage.JD_ANALYZING}, analyze_job)
-    add("match_candidate_experiences", "根据岗位语义匹配候选人的完整经历并创建用户确认请求。", ToolPermission.DRAFT_WRITE, {PipelineStage.FACTS_MATCHING}, match_candidate_experiences)
-    add("generate_resume_strategy", "在用户确认真实经历后生成岗位化简历定位和内容策略。", ToolPermission.DRAFT_WRITE, {PipelineStage.AWAITING_FACT_REVIEW}, generate_resume_strategy, approval_action="confirm_relevant_facts")
-    add("propose_resume_rewrites", "以原简历为底稿生成逐条改写建议和新的岗位简历草稿。", ToolPermission.DRAFT_WRITE, {PipelineStage.DRAFT_GENERATING}, propose_resume_rewrites)
-    add("apply_approved_resume_changes", "只应用用户逐条批准的简历改写建议。", ToolPermission.CONFIRMED_WRITE, {PipelineStage.AWAITING_USER_REVIEW}, apply_approved_resume_changes, approval_action="apply_resume_changes")
-    add("validate_resume", "核验简历事实来源、角色强度和候选人范围。", ToolPermission.READ, {PipelineStage.FACT_VALIDATING}, validate_resume)
-    add("run_consistency_checks", "执行简历、作品材料和发布门禁的一致性检查。", ToolPermission.READ, {PipelineStage.CONSISTENCY_CHECKING}, run_consistency_checks)
-    add("inspect_job_context", "只读检查当前岗位、事实、材料、基础简历和岗位简历，不修改任何内容。", ToolPermission.READ, all_stages, inspect_job_context, read_only=True)
+    add("validate_run_input", "Validate that the current candidate, job ownership, and JD are sufficient to start the task.", ToolPermission.DRAFT_WRITE, {PipelineStage.CREATED, PipelineStage.INPUT_VALIDATING}, validate_run_input)
+    add("analyze_job", "Analyze the original JD to extract responsibilities, hard requirements, preferred qualifications, and competency dimensions.", ToolPermission.DRAFT_WRITE, {PipelineStage.JD_ANALYZING}, analyze_job)
+    add("match_candidate_experiences", "Match the candidate's complete experiences to the job semantically and create a user confirmation request.", ToolPermission.DRAFT_WRITE, {PipelineStage.FACTS_MATCHING}, match_candidate_experiences)
+    add("generate_resume_strategy", "Generate job-specific resume positioning and content strategy after the user confirms their actual experiences.", ToolPermission.DRAFT_WRITE, {PipelineStage.AWAITING_FACT_REVIEW}, generate_resume_strategy, approval_action="confirm_relevant_facts")
+    add("propose_resume_rewrites", "Use the original resume to generate individual rewrite proposals and a new job-specific resume draft.", ToolPermission.DRAFT_WRITE, {PipelineStage.DRAFT_GENERATING}, propose_resume_rewrites)
+    add("apply_approved_resume_changes", "Apply only the individual resume rewrite proposals approved by the user.", ToolPermission.CONFIRMED_WRITE, {PipelineStage.AWAITING_USER_REVIEW}, apply_approved_resume_changes, approval_action="apply_resume_changes")
+    add("validate_resume", "Verify resume fact sources, the strength of role claims, and candidate scope.", ToolPermission.READ, {PipelineStage.FACT_VALIDATING}, validate_resume)
+    add("run_consistency_checks", "Run consistency checks across the resume, portfolio materials, and publication gates.", ToolPermission.READ, {PipelineStage.CONSISTENCY_CHECKING}, run_consistency_checks)
+    add("inspect_job_context", "Inspect the current job, facts, materials, base resume, and job resume without modifying any content.", ToolPermission.READ, all_stages, inspect_job_context, read_only=True)
     return gateway

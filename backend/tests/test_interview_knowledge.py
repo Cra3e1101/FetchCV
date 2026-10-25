@@ -112,8 +112,9 @@ def test_interview_research_tools_capture_verify_deduplicate_and_build_brief(dat
             "recommendations": [{"title": "准备指标拆解", "action": "用北极星指标—驱动指标—诊断指标组织回答", "rationale": "来源中有明确追问"}],
             "query_terms": ["字节跳动", "TikTok", "数据分析实习", "面经"],
         }, granted_permissions=permissions, idempotency_key="brief")
-        assert brief["data"]["common_questions"][0]["frequency"] == 1
-        assert brief["data"]["common_questions"][0]["confidence"] == "single_source"
+        assert brief["data"]["common_questions"][0]["frequency"] is None
+        assert brief["data"]["common_questions"][0]["cited_source_count"] == 1
+        assert brief["data"]["common_questions"][0]["confidence"] == "independence_unverified"
         assert brief["data"]["primary_platform"] == "xiaohongshu"
         assert brief["data"]["primary_source_count"] == 1
         assert brief["data"]["supplemental_source_count"] == 0
@@ -234,7 +235,8 @@ def test_interview_brief_has_no_fixed_source_goal(database, tmp_path):
         )
 
         assert result["data"]["source_count"] == 9
-        assert result["data"]["evidence_status"] == "sufficient"
+        assert result["data"]["evidence_status"] == "limited"
+        assert result["data"]["evidence_accounting"]["source_group_count"] == 2
         assert "source_goal" not in result["data"]
         assert session.query(InterviewBrief).count() == 1
 
@@ -315,6 +317,7 @@ def test_interview_discovery_expands_narrow_product_role_and_keeps_share_links(d
     assert any("AI产品经理" in query for query in seen_queries)
     assert "AI产品经理" in result["data"]["role_variants"]
     assert result["data"]["results"] == [{
+        "snippet": "",
         "title": "抖音 AI 产品经理面经",
         "url": share_url,
         "platform": "xiaohongshu",
@@ -513,6 +516,7 @@ def test_interview_discovery_uses_nowcoder_site_search_as_supplement(database, t
     assert result["data"]["nowcoder_site_source_count"] == 1
     assert "nowcoder-site-search" in result["data"]["providers"]
     assert result["data"]["results"] == [{
+        "snippet": "",
         "title": "滴滴两轮车策略运营面经",
         "url": "https://www.nowcoder.com/discuss/796355474110054400",
         "platform": "nowcoder",
@@ -556,6 +560,7 @@ def test_interview_discovery_keeps_public_cards_rendered_before_login_overlay(da
         )
 
     assert result["data"]["results"] == [{
+        "snippet": "",
         "title": "滴滴两轮车策略运营面经",
         "url": note_url,
         "platform": "xiaohongshu",
@@ -792,6 +797,7 @@ def test_deleting_an_interview_source_recalculates_brief_evidence(database):
     with database.session() as session:
         updated = session.get(InterviewBrief, brief_id)
         assert len(updated.source_ids) == 1
-        assert updated.common_questions[0]["frequency"] == 1
-        assert updated.common_questions[0]["confidence"] == "single_source"
+        assert updated.common_questions[0]["frequency"] is None
+        assert updated.common_questions[0]["cited_source_count"] == 1
+        assert updated.common_questions[0]["confidence"] == "independence_unverified"
         assert updated.metadata_json["recurring_question_count"] == 0

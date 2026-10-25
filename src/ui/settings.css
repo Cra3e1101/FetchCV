@@ -1,7 +1,7 @@
 /* Settings share the workspace palette; controls stay neutral in every theme. */
-.model-settings-backdrop:has(.settings-window) { inset:var(--ui-titlebar-height) 0 0; background: #0003; backdrop-filter: none; padding: 24px; }
+.model-settings-backdrop:has(.settings-window) { inset:var(--ui-titlebar-height) 0 0 var(--ui-rail-width); background: #0003; backdrop-filter: none; padding: 24px; }
 .model-settings-dialog.settings-window {
-  width: min(1040px, calc(100vw - 48px)); height: min(800px, calc(100dvh - var(--ui-titlebar-height) - 48px));
+  width: min(1040px, calc(100vw - var(--ui-rail-width) - 48px)); height: min(800px, calc(100dvh - var(--ui-titlebar-height) - 48px));
   grid-template-columns: 216px minmax(0, 1fr); padding: 0; border: 1px solid var(--ui-line);
   border-radius: var(--ui-radius-panel); color: var(--ui-ink); background: var(--ui-surface);
   font: var(--ui-font-weight) var(--ui-font-size)/1.5 var(--ui-font); box-shadow: var(--ui-overlay-shadow);
@@ -82,8 +82,8 @@
 .settings-window.settings-window .primary-button,.settings-window.settings-window .mcp-config-form > footer > button { background: var(--ui-ink); color: var(--ui-surface); border-color: var(--ui-ink); box-shadow: none; }
 .settings-window.settings-window :is(.model-input-row > button,.provider-form-head button,.settings-section-toolbar > button) { color: var(--ui-ink); background: var(--ui-surface); border-color: var(--ui-line); font-size: 12px; }
 .settings-window.settings-window :is(.settings-capabilities small,.settings-skill-list small,.mcp-form-title small,.mcp-form-section small) { font-size: 13px; color: var(--ui-secondary); }
-.settings-window.settings-window .settings-capabilities > div { gap: 12px; padding-block: 20px; }
-.settings-window.settings-window .settings-capabilities > div > svg { color: var(--ui-secondary); }
+.settings-window.settings-window .settings-capabilities > div { gap: 16px; padding: 12px 14px; }
+.settings-window.settings-window .settings-capabilities select { width: 128px; min-width: 0; max-width: 100%; }
 .settings-window.settings-window .settings-skill-list strong { font-size: 14px; }
 .settings-window.settings-window .settings-skill-list > button:hover { background: var(--ui-selection); }
 .settings-window.settings-window .skill-switches button[aria-pressed=true] i { background: var(--ui-ink); }
@@ -93,8 +93,22 @@
 .settings-window.settings-window .mcp-config-form > footer > span svg { color: var(--ui-secondary); }
 .settings-window.settings-window .model-catalog { background: transparent; border-color: var(--ui-line); }
 .settings-window.settings-window .model-catalog button.active { color: var(--ui-ink); background: var(--ui-selection); }
+.settings-window.settings-window .settings-page-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+.settings-page-heading > button { display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border:1px solid var(--ui-line-strong); border-radius:7px; background:var(--ui-surface); color:var(--ui-ink); cursor:pointer; }
+.settings-page-heading > button:hover { background:var(--ui-selection); }
+.settings-window .settings-help { font:400 12px/1.6 var(--ui-font); color:var(--ui-secondary); }
+.settings-window .settings-help summary { display:flex; align-items:center; gap:6px; width:fit-content; cursor:pointer; list-style:none; }
+.settings-window .settings-help summary::-webkit-details-marker { display:none; }
+.settings-window .settings-help summary svg { flex:none; transform:rotate(-90deg); }
+.settings-window .settings-help[open] summary svg { transform:none; }
+.settings-window .settings-help p { margin:8px 0 0; overflow-wrap:anywhere; }
+.settings-window .settings-help summary:hover { color:var(--ui-ink); }
+.settings-window .settings-skill-list small,.settings-window .mcp-read-tools small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
+.settings-window .settings-skill-list > button > span,.settings-window .mcp-read-tools button > span { min-width:0; }
+.settings-window .mcp-config-form > footer { justify-content:flex-end; }
+.settings-window .mcp-field-label { flex-wrap:wrap; gap:4px 12px; }
 @media (max-width: 760px) {
-  .model-settings-dialog.settings-window { width: calc(100vw - 24px); height: calc(100dvh - var(--ui-titlebar-height) - 24px); grid-template-columns: 172px minmax(0, 1fr); }
+  .model-settings-dialog.settings-window { width: calc(100vw - var(--ui-rail-width) - 24px); height: calc(100dvh - var(--ui-titlebar-height) - 24px); grid-template-columns: 172px minmax(0, 1fr); }
   .settings-window.settings-window .settings-sidebar { padding: 20px 10px 12px; }
   .settings-window.settings-window .settings-pane { width: calc(100% - 40px); }
   .settings-window.settings-window .model-form { grid-template-columns: minmax(0, 1fr); }
@@ -102,7 +116,7 @@
 }
 @media (max-width: 540px) {
   .model-settings-backdrop:has(.settings-window) { padding: 0; }
-  .model-settings-dialog.settings-window { width: 100vw; height: calc(100dvh - var(--ui-titlebar-height)); border-radius: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .model-settings-dialog.settings-window { width: calc(100vw - var(--ui-rail-width)); height: calc(100dvh - var(--ui-titlebar-height)); border-radius: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
   .settings-window.settings-window .settings-sidebar { padding: 16px 16px 10px; border-right: 0; border-bottom: 1px solid var(--ui-line); }
   .settings-sidebar-title { margin: 0 0 12px; }
   .settings-window.settings-window .settings-search { display: none; }
@@ -114,7 +128,7 @@
   .settings-window.settings-window .settings-pane { padding-top: 24px; width: calc(100% - 32px); }
   .settings-window.settings-window .interface-theme-picker { gap: 12px; }
   .settings-window.settings-window .interface-swatch { height: 68px; }
-  .settings-window.settings-window .settings-capabilities > div { grid-template-columns: 22px minmax(0, 1fr); }
-  .settings-window.settings-window .settings-capabilities select { grid-column: 2; justify-self: start; }
+  .settings-window.settings-window .settings-capabilities select { width: 112px; }
   .settings-window.settings-window .mcp-config-form > footer { flex-wrap: wrap; }
 }
+.settings-window .settings-skill-list .skill-change-reason { white-space: normal; overflow-wrap: anywhere; }

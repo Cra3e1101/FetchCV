@@ -12,7 +12,8 @@ test("missing preload rejects Agent operations without HTTP fallback; desktop di
   // Resolve the extensionless Vite import for Node; execute the actual API
   // module unchanged otherwise, without a duplicate test implementation.
   const source = (await readFile(new URL("../src/lib/api.js", import.meta.url), "utf8"))
-    .replace('"./http-client"', JSON.stringify(new URL("../src/lib/http-client.js", import.meta.url).href));
+    .replace('"./http-client"', JSON.stringify(new URL("../src/lib/http-client.js", import.meta.url).href))
+    .replace('"./backend-readiness.js"', JSON.stringify(new URL("../src/lib/backend-readiness.js", import.meta.url).href));
   const { api } = await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
   delete window.appRuntime;
   for (const operation of [() => api.streamMessage("j", "hello"), () => api.sendMessage("j", "hello"),
@@ -29,5 +30,14 @@ test("missing preload rejects Agent operations without HTTP fallback; desktop di
   assert.equal((await api.enqueueTask("r", { kind: "start" })).status, "running");
   assert.deepEqual(calls[0], ["r", "start"]);
   assert.equal((await api.streamMessage("j", "hello")).assistant.content, "ok");
+  assert.equal(requests, 0);
+  window.appRuntime.getBackendStatus = async () => ({ state: "ready", dataReady: true, agentReady: false });
+  window.appRuntime.steerPiTask = async (...args) => calls.push(args);
+  const dispatched = calls.length;
+  for (const operation of [() => api.streamMessage("j", "hello"), () => api.enqueueTask("r"),
+    () => api.steerTask("r", "hello"), () => api.createConversation()]) {
+    await assert.rejects(operation(), { code: "agent_not_ready" });
+  }
+  assert.equal(calls.length, dispatched);
   assert.equal(requests, 0);
 });

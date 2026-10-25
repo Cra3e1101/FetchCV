@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { _electron as electron } from "playwright";
 import { findFreePort } from "../electron/sidecar.mjs";
+import { resolveElectronRuntime } from "./electron-runtime.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 const sourceProvider = path.join(os.homedir(), "Library", "Application Support", "fetchcv-desktop", "settings", "model-provider.json");
@@ -25,6 +26,7 @@ fs.mkdirSync(outputDir, { recursive: true });
 
 const report = { started_at: new Date().toISOString(), input: { resume: path.basename(resumePath), job: "字节跳动 · 策略运营实习生-TikTok Shop" }, stages: [] };
 const application = await electron.launch({
+  executablePath: (await resolveElectronRuntime({ projectRoot: root })).executable,
   args: [root], cwd: root,
   env: { ...process.env, FETCHCV_API_PORT: String(port), FETCHCV_E2E_USER_DATA: userData },
   timeout: 45000,

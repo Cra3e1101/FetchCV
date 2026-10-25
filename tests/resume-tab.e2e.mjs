@@ -1,3 +1,4 @@
+import { resolveElectronRuntime } from "../scripts/electron-runtime.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -9,6 +10,7 @@ const projectRoot = path.resolve(import.meta.dirname, "..");
 const port = await findFreePort();
 const userData = fs.mkdtempSync(path.join(os.tmpdir(), "fetchcv-resume-tab-"));
 const application = await electron.launch({
+  executablePath: (await resolveElectronRuntime({ projectRoot })).executable,
   args: [projectRoot],
   cwd: projectRoot,
   env: {
