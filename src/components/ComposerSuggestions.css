@@ -1,0 +1,46 @@
+.source-composer .composer-suggestions {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  width: min(100%, 480px);
+  z-index: 40;
+  overflow: hidden;
+  border: 1px solid var(--ui-divider, var(--line));
+  border-radius: 14px;
+  background: var(--ui-surface, var(--paper));
+  color: var(--ui-ink, var(--ink));
+  box-shadow: 0 12px 36px #0002, 0 2px 6px #0001;
+  font-family: var(--ui-font, inherit);
+}
+.source-composer .composer-suggestions header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 13px 9px;
+}
+.source-composer .composer-suggestions header strong { font-size: 12px; font-weight: 600; }
+.source-composer .composer-suggestions :is(header small, footer) { color: var(--ui-muted, var(--muted)); font-size: 11px; }
+.source-composer .composer-suggestion-list { max-height: min(260px, 35svh); overflow-y: auto; overscroll-behavior: contain; padding: 0 5px 5px; }
+.source-composer .composer-suggestion-list > button {
+  width: 100%; height: auto; min-height: 48px; padding: 8px;
+  display: flex; align-items: center; justify-content: flex-start; gap: 10px;
+  border: 0; border-radius: 9px; background: transparent;
+  color: inherit; cursor: pointer; text-align: left; transform: none;
+}
+.source-composer .composer-suggestion-list > button[aria-selected=true] { background: color-mix(in oklab, var(--ui-ink, var(--ink)) 8%, var(--ui-surface, var(--paper))); }
+.source-composer .composer-suggestion-list > button[aria-disabled=true] { opacity: .45; cursor: not-allowed; }
+.source-composer .composer-suggestion-icon { display: grid; place-items: center; flex: 0 0 28px; height: 28px; border: 1px solid var(--ui-divider, var(--line)); border-radius: 7px; color: var(--ui-muted, var(--muted)); font-size: 16px; }
+.source-composer .composer-suggestion-copy { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.source-composer .composer-suggestion-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ui-ink, var(--ink)); font-size: 13px; font-weight: 500; }
+.source-composer .composer-suggestion-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--ui-muted, var(--muted)); }
+.source-composer .composer-suggestion-key { margin-left: auto; padding-inline: 5px; color: var(--ui-muted, var(--muted)); }
+.source-composer .composer-suggestion-empty { padding: 8px 14px 16px; color: var(--ui-muted, var(--muted)); font-size: 12px; line-height: 1.6; }
+.source-composer .composer-suggestion-empty button { width: auto; height: auto; display: inline; margin-left: 6px; padding: 2px 5px; background: transparent; color: var(--ui-ink, var(--ink)); font-size: 12px; }
+.source-composer .composer-suggestions footer { padding: 8px 13px; border-top: 1px solid var(--ui-divider, var(--line)); }
+.source-composer .composer-command { display: flex; align-items: center; gap: 7px; width: max-content; max-width: 100%; margin-bottom: 9px; padding: 4px 7px 4px 10px; border-radius: 8px; background: color-mix(in oklab, var(--ui-ink, var(--ink)) 8%, var(--ui-surface, var(--paper))); color: var(--ui-ink, var(--ink)); font-size: 12px; }
+.source-composer .composer-command strong { font-weight: 500; }
+.source-composer .composer-command button { display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: inherit; }
+@media (max-width: 480px) {
+  .source-composer .composer-suggestions header { align-items: flex-start; flex-direction: column; gap: 3px; }
+}

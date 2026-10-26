@@ -12,11 +12,10 @@ export function JobContextEditor({ value, body, onChange, disabled = false }) {
   const change = (key, next) => onChange(updateJobContextField(context, key, next, body));
   return <fieldset className="job-context-editor" disabled={disabled}>
     <legend>确认岗位语境</legend>
-    <p>未知可留空；推断需核对。发布日期以 JD 标注为准。</p>
     <div className="job-context-fields">{JOB_CONTEXT_FIELDS.map(({ key, label, placeholder }) => {
       const field = context.fields[key];
       return <div className="job-context-field" key={key}>
-        <label><span>{label}<small className={`job-context-basis basis-${field.basis}`}>{JOB_CONTEXT_BASIS[field.basis]}</small></span>{key === "recruitment_type"
+        <label><span>{label}{field.value && <small className={`job-context-basis basis-${field.basis}`}>{JOB_CONTEXT_BASIS[field.basis]}</small>}</span>{key === "recruitment_type"
           ? <select aria-label={label} value={field.value || ""} onChange={event => change(key, event.target.value)}><option value="">未知</option>{Object.entries(RECRUITMENT_TYPES).map(([code, title]) => <option value={code} key={code}>{title}</option>)}</select>
           : <input aria-label={label} value={field.value || ""} placeholder={placeholder} maxLength={key === "published_at" ? 80 : 160} onChange={event => change(key, event.target.value)} />}</label>
         {field.value && field.basis !== "user_confirmed" && <button className="job-context-confirm" type="button" onClick={() => change(key, field.value)} aria-label={`确认${label}`}>确认此项</button>}
@@ -30,7 +29,7 @@ export function JobContextSummary({ job, onEdit, disabled = false }) {
   const context = normalizeJobContext(job?.context_json, job?.jd_raw);
   const provenance = job?.jd_provenance;
   return <details className="job-context-summary">
-    <summary><span>岗位语境</span><span>{RECRUITMENT_TYPES[context.fields.recruitment_type.value] || "招聘类型未知"} · 展开核对</span></summary>
+    <summary><span>岗位语境</span>{RECRUITMENT_TYPES[context.fields.recruitment_type.value] && <span>{RECRUITMENT_TYPES[context.fields.recruitment_type.value]}</span>}</summary>
     <dl>{JOB_CONTEXT_FIELDS.map(({ key, label }) => {
       const field = context.fields[key];
       return <div key={key}><dt>{label}</dt><dd><span>{(key === "recruitment_type" ? RECRUITMENT_TYPES[field.value] : field.value) || "未知"}</span><small className={`job-context-basis basis-${field.basis}`}>{JOB_CONTEXT_BASIS[field.basis]}</small><ContextEvidence field={field} /></dd></div>;

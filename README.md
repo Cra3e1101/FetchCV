@@ -32,7 +32,8 @@ FetchCV 是本地优先的 Windows 桌面求职 Agent。它把个人资料、目
 
 ### 个人资料库
 
-- 导入 PDF 简历，本地提取个人信息、教育、实习、项目、技能和奖项。
+- 在同一入口导入 PDF、Word（`.docx`）、LaTeX（`.tex`）和 JSON 简历，本地提取个人信息、教育、实习、项目、技能和奖项。旧 `.doc` 请先另存为 `.docx`；扫描 PDF 需要先 OCR。
+- JSON 支持 FetchCV 简历快照和 JSON Resume；完整旧版工作区使用“迁移旧版工作区”。TeX 采用静态解析，不执行源码。
 - 入库前可逐项修正模块、标题、组织、角色、日期和正文，也可删除、排序或标记无法确认。
  - AI 增强识别默认关闭；选择后仍先完成本地解析，用户必须展开核对实际脱敏外发文本并再次确认，才会调用模型；不上传原 PDF、头像和本地文件路径。
 - 保存作品集、网站、代码仓库、证书和其他求职材料。
@@ -52,8 +53,12 @@ FetchCV 是本地优先的 Windows 桌面求职 Agent。它把个人资料、目
 ### 简历工作台
 
 - 保留既有简历结构和成熟表达，只在有事实依据时调整重点与措辞。
-- 同一份编辑器快照驱动编辑、预览和 PDF 输出，避免预览与后台版本不一致。
-- 独立导出岗位版或基础版 PDF。
+- PDF 预览与导出共用同一份 XeLaTeX 编译文件；编辑器快照提供内容与排版参数。
+- 默认采用 `didi/main.tex` 的 A4 极简排版：宋体正文、居中姓名、右上照片、黑色横线栏目与三列条目。
+- Windows 发行包自带独立 XeLaTeX 运行时，用户无需安装 LaTeX、配置 PATH 或联网下载宏包。导入的 TeX 只做静态解析，编译使用应用内固定模板和转义后的内容。
+- 已安装完整宋体与 Times New Roman 时沿用原稿字体，否则使用随包的 Fandol Song 与 TeX Gyre Termes。替代字体保持模板结构，但字形和换行可能有差异；字体与运行时版本变化会自动使旧预览缓存失效。
+- 草稿可直接预览与编辑；正式导出保留事实核验。导入原件通过单独入口下载，错误响应不会进入 PDF 预览。
+- PDF、Word 导出可选择保存位置；原文未变化的重复保存不会作废已有 PDF。
 - 独立导出单栏、可编辑、适合 ATS 解析的 Word 文件，不替代原排版 PDF。
 - 岗位要求使用可解释的“支持 / 部分支持 / 暂无证据”矩阵，不虚构 ATS 通过率。
 
@@ -170,6 +175,18 @@ node scripts/benchmark-startup.mjs --runtime-only --runs 3
 启动日志区分资料可读和 Agent 就绪两个阶段。`--sidecar-only` 可单独测量 Python 后端；`startup-report.mjs` 按 cold/warm/unclassified 分别汇总中位数与 P95。
 
 ## 测试与打包
+
+排版运行时通过 `scripts/resume-runtime.lock.json` 固定版本和 SHA-512，从公开 TeX Live 镜像构建，构建过程不读取维护者本机的 TeX 安装。首次构建需要下载依赖，之后可复用经过校验的缓存：
+
+```powershell
+npm run resume:runtime
+npm run resume:runtime -- --offline
+npm run resume:runtime:verify
+```
+
+输出为 `build/resume-runtime`，打包时复制到 `resources/resume-runtime`。完整原始宏包、字体和官方源码归档另存于 `build/resume-runtime-sources`，公开发行时应与安装包同时提供；运行时内保留许可证和来源清单。源码归档与二进制版本的逐一对应关系尚未完整验证，公开发行前仍需核对。这些构建产物不提交到 Git。
+
+发行版只接受应用随包运行时，缺失或损坏时明确报错，不回退到某台开发机上的环境。开发调试可用 `FETCHCV_LATEX_RUNTIME` 指定一个完整运行时目录；`FETCHCV_RESUME_FONTS=bundled` 可强制测试内置字体。仅在开发模式且没有随包运行时时，才允许通过 `FETCHCV_XELATEX` 或 PATH 使用已有编译器。
 
 ```powershell
 npm run check

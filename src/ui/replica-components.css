@@ -2,7 +2,6 @@
  * Source: replica.css .rp-sidebar*, .rp-threadcol, .rp-md, .rp-composer*;
  * index.html .rp-set-* and [cmdk-*]. App-shared.css remains read-only. */
 :root:is([data-interface-theme=white],[data-interface-theme=neutral-dark]) {
-  --ui-font:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei UI","Microsoft YaHei","PingFang SC","Noto Sans CJK SC",sans-serif;
   --ui-chat-width:800px;
 }
 :root[data-interface-theme] {
@@ -80,8 +79,8 @@
 .rp-sidebar .source-empty {margin:0;padding:5px 8px;font:400 14px/22px var(--ui-font);}
 .source-grid .task-header {padding-inline:14px;}
 .source-grid .task-header h1 {font:500 15px/24px var(--ui-font);}
-.source-grid .conversation-stream,.source-grid .standalone-transcript {width:100%;max-width:800px;margin:0 auto;padding:16px 24px max(190px,calc(var(--conversation-composer-height,86px) + 32px));box-sizing:border-box;gap:0;}
-.source-grid .conversation-scroll-v2,.source-grid .standalone-scroll {padding:0;scroll-padding-bottom:max(190px,calc(var(--conversation-composer-height,86px) + 32px));scrollbar-gutter:stable both-edges;}
+.source-grid .conversation-stream,.source-grid .standalone-transcript {width:100%;max-width:800px;margin:0 auto;padding:16px 24px 24px;box-sizing:border-box;gap:0;}
+.source-grid .conversation-scroll-v2,.source-grid .standalone-scroll {flex:1 1 0;min-height:0;overflow:auto;padding:0;scroll-padding-bottom:24px;scrollbar-gutter:stable both-edges;}
 .source-grid .agent-message {font:400 15px/26px var(--ui-font);margin:22px 0 0;}
 .source-grid .agent-message:first-child {margin-top:8px;}
 .source-grid .agent-message-content,.source-grid .agent-markdown,.source-grid .agent-message-content :is(p,ul,ol) {font:400 15px/26px var(--ui-font);}
@@ -123,7 +122,8 @@
 .source-grid .activity-line-state {margin-left:auto;}
 /* Same composer subtree as the reference: surface > editor + controls. */
 .source-grid :is(.agent-workspace-v2,.standalone-chat) {position:relative;}
-.source-grid .source-composer.rp-composer-wrap,.source-grid .standalone-composer {position:absolute;left:50%;bottom:16px;transform:translateX(-50%);width:calc(100% - 48px);max-width:752px;margin:0;padding:0;z-index:30;}
+/* Reserve a real footer row: history must clip above the composer at every scroll position. */
+.source-grid .source-composer.rp-composer-wrap,.source-grid .standalone-composer {position:relative;left:auto;bottom:auto;transform:none;flex:0 0 auto;width:calc(100% - 48px);max-width:752px;margin:8px auto 16px;padding:0;z-index:30;}
 .source-grid .standalone-composer>.source-composer.rp-composer-wrap {position:relative;left:auto;bottom:auto;transform:none;width:100%;max-width:none;margin:0;}
 .source-grid .source-composer .rp-composer {display:block;flex:none;width:100%;padding:0;margin:0;gap:0;background:var(--ui-surface);border:0;border-radius:22px;box-shadow:var(--ui-composer-shadow);overflow:visible;}
 .source-grid .source-composer .source-composer-editor.rp-editor {display:block;flex:none;width:100%;padding:12px 14px 0;min-height:36px;margin:0;}
@@ -137,7 +137,7 @@
 .source-grid .source-composer .composer-send {width:32px;height:32px;flex:0 0 32px;padding:0;border-radius:9999px;}
 .source-grid .source-composer .composer-send:disabled {background:#d7d7d7;color:#fff;opacity:1;}
 .source-composer .composer-send svg {width:17px;height:17px;}
-.source-grid :is(.agent-workspace-v2,.standalone-chat) .jump-to-latest {bottom:calc(var(--conversation-composer-height,86px) + 32px);width:32px;height:32px;border-radius:50%;}
+.source-grid :is(.agent-workspace-v2,.standalone-chat) .jump-to-latest {bottom:calc(var(--conversation-composer-height,86px) + 32px);width:max-content;height:36px;border-radius:999px;}
 .source-grid .source-composer .composer-popover {bottom:calc(100% + 8px);}
 .source-grid .agent-effort-panel>header {display:grid;grid-template-columns:32px minmax(0,1fr) 32px;justify-content:normal;}
 .source-grid .effort-model-menu {min-width:0;width:100%;}
@@ -200,7 +200,7 @@
 .rp-perm-wrap {position:relative;display:flex;align-items:center;}
 .source-composer .rp-permmenu {position:absolute;left:0;bottom:calc(100% + 8px);width:312px;max-width:calc(100vw - 24px);z-index:70;border-radius:20px;background:color-mix(in srgb,var(--ui-surface) 95%,transparent);backdrop-filter:blur(16px);padding:8px;box-shadow:0 0 0 .5px var(--ui-popover-ring),0 8px 24px rgba(0,0,0,.1),0 2px 6px rgba(0,0,0,.06);animation:ui-pop-enter .2s var(--ease-enter-snappy) both;}
 .rp-permmenu .h {font:500 13px/18px var(--ui-font);color:var(--ui-ink);padding:6px 8px 10px;}
-.source-composer .rp-permrow {width:100%;display:flex;align-items:flex-start;gap:8px;min-height:0;padding:7px 8px;border:0;border-radius:15px;background:none;color:var(--ui-ink);text-align:left;transition:background .12s,transform .12s;}
+.source-composer .rp-permrow {width:100%;display:flex;align-items:flex-start;gap:8px;min-height:0;padding:7px 8px;border:0;border-radius:15px;background:none;color:var(--ui-ink);text-align:left;transition:background var(--theme-palette-duration, .12s),transform .12s;}
 .source-composer .rp-permrow:hover,.source-composer .rp-permrow:focus-visible {background:var(--ui-hover);}
 .source-composer .rp-permrow:active {transform:scale(.94);}
 .source-composer .rp-permrow:disabled {opacity:.5;cursor:default;}
@@ -235,7 +235,7 @@
 .source-grid .fold-command-row>div>div {display:flex;min-width:0;flex-direction:column;overflow:clip;}
 /* 3 collapsed commands: 3 × 21⅓px + 2 × 4px gaps = 72px. The text
  * itself keeps the measured 13px / 18.57px metrics. */
-.source-grid .fold-group .replica-activity-header {display:inline-flex;align-items:center;gap:4px;min-height:calc(64px / 3);width:100%;cursor:pointer;transition:background-color .12s ease;}
+.source-grid .fold-group .replica-activity-header {display:inline-flex;align-items:center;gap:4px;min-height:calc(64px / 3);width:100%;cursor:pointer;transition:background-color var(--theme-palette-duration, .12s) ease;}
 .source-grid .fold-group .group\/activity-header:is(:hover,:focus-within) {background:var(--fold-hover);border-radius:6px;}
 .source-grid .fold-group .replica-activity-label {font:430 13px/18.57px var(--ui-font);color:var(--ui-status);}
 .source-grid .fold-group .replica-activity-label>svg {width:16px;height:16px;flex:0 0 16px;}
@@ -304,4 +304,4 @@
 .settings-window.settings-window .settings-sidebar nav section>button.active>svg,
 .settings-window.settings-window .settings-sidebar nav section>button:is(:hover,:focus-visible)>svg {color:var(--ui-ink);}
 .settings-window.settings-window .settings-sidebar nav section>button>span {min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-@media(max-width:759px){.source-grid .source-composer.rp-composer-wrap,.source-grid .standalone-composer {bottom:12px;}.source-grid .standalone-composer>.source-composer.rp-composer-wrap{bottom:auto;}.source-grid .source-composer .rp-controls{padding-inline:8px;}.source-grid .standalone-home{padding-top:56px;}.source-grid .standalone-welcome{font-size:28px;line-height:33.6px;}.settings-window .settings-back{position:absolute;top:16px;right:8px;margin:0;}}
+@media(max-width:759px){.source-grid .source-composer.rp-composer-wrap,.source-grid .standalone-composer {margin-bottom:12px;}.source-grid .standalone-composer>.source-composer.rp-composer-wrap{bottom:auto;}.source-grid .source-composer .rp-controls{padding-inline:8px;}.source-grid .standalone-home{padding-top:56px;}.source-grid .standalone-welcome{font-size:28px;line-height:33.6px;}.settings-window .settings-back{position:absolute;top:16px;right:8px;margin:0;}}

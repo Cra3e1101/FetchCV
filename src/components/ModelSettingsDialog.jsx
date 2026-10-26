@@ -3,9 +3,10 @@ import {ProviderPresetPicker} from "./ProviderPresetPicker";
 import {createProviderDraft, PROVIDER_PRESETS} from "../../shared/provider-presets.mjs";
 import "../ui/settings.css";
 import {InterfaceThemePicker} from "../ui/InterfaceThemePicker";
+import { InterfaceDensityPicker } from "../ui/InterfaceDensityPicker";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  BookOpen, CheckCircle2,
+  BookOpen, CheckCircle2, Globe, Terminal,
   LoaderCircle, LockKeyhole, Plus, RefreshCw, Server, Settings2,
   ShieldCheck, SlidersHorizontal, Trash2, X,
 } from "lucide-react";
@@ -13,8 +14,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../lib/api";
 import { applyAppearance, DEFAULT_APPEARANCE } from "../lib/appearance";
 import { useModalFocusTrap } from "../lib/modal-focus";
+import { SegmentedControl } from "../ui/SegmentedControl";
+import { useAgentMotion } from "../ui/motion";
 
 const empty = createProviderDraft();
+const MCP_TRANSPORT_TABS = [
+  { id: "stdio", label: "STDIO", icon: <Terminal size={14} /> },
+  { id: "streamable_http", label: "流式 HTTP", icon: <Globe size={14} /> },
+];
 
 const emptyMcpForm = {
   name: "", transport: "stdio", command: "", args: [""], envKeys: [""], cwd: "",
@@ -66,7 +73,8 @@ function McpServerRow({ server, busy, onConnect, onDisable, onToggleRead, onAppr
   </div>;
 }
 
-export function ModelSettingsDialog({ open, user, runtime, stats = {}, onClose, onSaved }) {
+export function ModelSettingsDialog({ open, initialSection = "general", user, runtime, stats = {}, onClose, onSaved }) {
+  const { transition } = useAgentMotion();
   const [form, setForm] = useState(empty);
   const [profiles, setProfiles] = useState([]);
   const [activeId, setActiveId] = useState("");
@@ -110,7 +118,8 @@ export function ModelSettingsDialog({ open, user, runtime, stats = {}, onClose, 
 
   useEffect(() => {
     if (!open) return undefined;
-    setStatus(null); setShowKey(false); setModelQuery(""); setSettingsQuery(""); setActiveSection("general");
+    setStatus(null); setShowKey(false); setModelQuery(""); setSettingsQuery("");
+    setActiveSection(initialSection === "mcp-add" ? "mcp" : settingsSections.some(section => section.id === initialSection) ? initialSection : "general");
     load().catch((error) => setStatus({ type: "error", message: error.message }));
     Promise.all([api.skills(), api.mcpServers(), api.permissionSettings(), api.generalSettings()]).then(([nextSkills, nextServers, nextPermissions, nextGeneral]) => {
       setSkills(nextSkills); setMcpServers(nextServers); setPermissionSettings(nextPermissions); setGeneralSettings(nextGeneral); publishAppearance(nextGeneral);
@@ -118,7 +127,13 @@ export function ModelSettingsDialog({ open, user, runtime, stats = {}, onClose, 
     const escape = (event) => { if (event.key === "Escape" && !inFlight.current) onClose(); };
     window.addEventListener("keydown", escape);
     return () => { window.removeEventListener("keydown", escape); window.clearTimeout(statusTimer.current); };
-  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, initialSection]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!open || initialSection !== "mcp-add" || activeSection !== "mcp") return undefined;
+    const frame = requestAnimationFrame(() => dialog.current?.querySelector('[aria-label="MCP 名称"]')?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [open, initialSection, activeSection]);
 
   const update = (field, value) => {
     setForm((current) => ({
@@ -344,8 +359,8 @@ export function ModelSettingsDialog({ open, user, runtime, stats = {}, onClose, 
     : /^https:\/\/|^http:\/\/(127\.0\.0\.1|localhost|\[::1\])/.test(mcpForm.command.trim());
   const validMcp = validMcpName && validMcpCommand;
 
-  return <AnimatePresence>{open && <motion.div className="model-settings-backdrop" onMouseDown={(event) => event.target === event.currentTarget && !busy && !fetchingModels && onClose()} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-    <motion.section ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="model-settings-title" className="model-settings-dialog settings-window" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: .2, ease: [.23,1,.32,1] }}>
+  return <AnimatePresence>{open && <motion.div className="model-settings-backdrop" onMouseDown={(event) => event.target === event.currentTarget && !busy && !fetchingModels && onClose()} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: transition("exit") }} transition={transition("panel")}>
+    <section ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="model-settings-title" className="model-settings-dialog settings-window">
       <aside className="settings-sidebar">
         <div className="rp-set-navhead">
         <div className="settings-sidebar-title">设置</div>
@@ -364,7 +379,10 @@ export function ModelSettingsDialog({ open, user, runtime, stats = {}, onClose, 
 
         {activeSection === "general" && <section className="settings-pane" aria-labelledby="settings-general-title">
           <header><h2 id="settings-general-title">常规</h2></header>
-          <div className="settings-group"><h3>外观</h3><div className="rp-set-card"><div className="rp-set-row"><span><strong>主题</strong></span><InterfaceThemePicker compact/></div><div className="rp-set-row"><span><strong>界面密度</strong></span><select aria-label="界面密度" value={generalSettings.density} onChange={(event) => updateGeneral({ density: event.target.value })}><option value="comfortable">舒适</option><option value="compact">紧凑</option></select></div></div></div>
+          <div className="settings-group"><h3>外观</h3><div className="rp-set-card">
+            <div className="rp-set-row settings-appearance-row"><span><strong>主题</strong></span><InterfaceThemePicker /></div>
+            <div className="rp-set-row settings-appearance-row"><span><strong>界面密度</strong></span><InterfaceDensityPicker value={generalSettings.density} onChange={(density) => updateGeneral({ density })} /></div>
+          </div></div>
           <div className="settings-group settings-workspace-overview"><h3>工作区</h3><div className="rp-set-card">{[["岗位项目",stats.jobs],["简历版本",stats.resumes ?? user?.resume_count],["资料",stats.materials ?? user?.material_count]].map(([label,value])=><div className="rp-set-row" key={label}><span><strong>{label}</strong></span><output className="rp-set-value">{value ?? "—"}</output></div>)}</div></div>
         </section>}
 
@@ -398,7 +416,7 @@ export function ModelSettingsDialog({ open, user, runtime, stats = {}, onClose, 
             <div className="mcp-form-title"><span><strong>添加服务器</strong></span></div>
             <section className="mcp-form-section mcp-identity-section">
               <label><span>名称</span><input aria-label="MCP 名称" value={mcpForm.name} onChange={(event) => updateMcpField("name", event.target.value)} placeholder="例如 local_tools" />{mcpForm.name && !validMcpName && <small>只可使用字母、数字、短横线和下划线</small>}</label>
-              <div className="mcp-transport-row"><strong>类型</strong><div className="mcp-transport-switch" role="group" aria-label="MCP 连接类型"><button type="button" className={mcpForm.transport === "stdio" ? "active" : ""} aria-pressed={mcpForm.transport === "stdio"} onClick={() => updateMcpField("transport", "stdio")}>STDIO</button><button type="button" className={mcpForm.transport === "streamable_http" ? "active" : ""} aria-pressed={mcpForm.transport === "streamable_http"} onClick={() => updateMcpField("transport", "streamable_http")}>流式 HTTP</button></div></div>
+              <div className="mcp-transport-row"><strong>类型</strong><SegmentedControl className="mcp-transport-switch" aria-label="MCP 连接类型" tabs={MCP_TRANSPORT_TABS} value={mcpForm.transport} onChange={(value) => updateMcpField("transport", value)} disabled={busy} /></div>
             </section>
             <section className="mcp-form-section">
               <label><span>{mcpForm.transport === "stdio" ? "启动命令" : "服务器 URL"}</span><input aria-label={mcpForm.transport === "stdio" ? "MCP 可执行文件" : "MCP 服务器 URL"} value={mcpForm.command} onChange={(event) => updateMcpField("command", event.target.value)} placeholder={mcpForm.transport === "stdio" ? "可执行文件的绝对路径" : "https://mcp.example.com/mcp"} /></label>
@@ -425,6 +443,6 @@ export function ModelSettingsDialog({ open, user, runtime, stats = {}, onClose, 
           {status && <div className="settings-inline-status" role="status">{status.message}</div>}
         </section>}
       </main>
-    </motion.section>
+    </section>
   </motion.div>}</AnimatePresence>;
 }

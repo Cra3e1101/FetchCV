@@ -18,7 +18,8 @@ const { independentQuestionCount, matchingQuestionEvidence } = await import("../
 
 test("completed job workspaces expose interview intelligence as a third surface", () => {
   assert.match(workspace, /tab === "interview"/);
-  assert.match(workspace, />面试<\/button>/);
+  assert.match(workspace, /id: "interview", label: "面试"/);
+  assert.match(workspace, /<SegmentedControl[^>]*tabs=\{WORKSPACE_TABS\}/);
   assert.match(workspace, /InterviewIntelligence/);
   assert.match(workspace, /准备面试/);
 });

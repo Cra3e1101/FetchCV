@@ -48,8 +48,10 @@ contextBridge.exposeInMainWorld("appRuntime", {
   steerPiTask: (runId, input) => runtimeRequest("agent.steer", { runId, ...input }),
   getAgentEvents: (streamId, afterSeq) => runtimeRequest("agent.events", { streamId, afterSeq }),
   selectResumePdf: () => ipcRenderer.invoke("dialog:select-resume-pdf"),
+  selectResumeFile: () => ipcRenderer.invoke("dialog:select-resume-file"),
   selectJobDescriptionFile: () => ipcRenderer.invoke("dialog:select-job-description"),
   importWorkspaceFiles: () => ipcRenderer.invoke("dialog:import-workspace-files"),
+  listWorkspaceFiles: () => ipcRenderer.invoke("workspace:list-files"),
   selectLegacyWorkspace: () => ipcRenderer.invoke("dialog:select-legacy-workspace"),
   getModelProvider: () => ipcRenderer.invoke("provider:get"),
   listModelProviders: () => ipcRenderer.invoke("provider:list"),
@@ -64,6 +66,7 @@ contextBridge.exposeInMainWorld("appRuntime", {
   finishXiaohongshuLogin: () => ipcRenderer.invoke("xiaohongshu:finish-login"),
   getResumeSnapshot: (resumeId) => ipcRenderer.invoke("resume:get-snapshot", resumeId),
   renderResumePdf: (resumeId, expectedHash) => ipcRenderer.invoke("resume:render-pdf", resumeId, expectedHash),
+  saveResumeFile: (resumeId, format) => ipcRenderer.invoke("resume:save-file", resumeId, format),
 });
 
 contextBridge.exposeInMainWorld("desktopWindow", {

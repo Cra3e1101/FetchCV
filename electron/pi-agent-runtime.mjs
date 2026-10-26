@@ -7,6 +7,7 @@ import { toolActivity } from "../shared/tool-activity.mjs";
 import { sanitizeOutboundValue, trimToolResult } from "./pi/context-policy.mjs";
 import { createFetchCVHarness } from "./pi/fetchcv-harness.mjs";
 import { requestConversationTool } from "./pi/conversation-tools.mjs";
+import { createContextUsageTracker } from "./pi/context-usage.mjs";
 
 const TOOL_LABELS = {
   search_web: "搜索网页",
@@ -334,6 +335,8 @@ export class FetchCVAgentHost {
       let turnText = "";
       let turnHadTool = false;
       let usage = {};
+      let contextUsage = null;
+      let contextUsageTracker;
       const toolReceipts = [];
       let checkpointSequence = Number(bootstrap.prior_checkpoint?.sequence || 0);
       let checkpointPhase = "starting";
@@ -548,13 +551,15 @@ export class FetchCVAgentHost {
         taskMode,
         getInputReferences: () => [...inputReferences.values()],
         assertCapabilities: () => { if (capabilityRefreshError) throw capabilityRefreshError; if (fatalToolError) throw fatalToolError; },
-        recordRequest: async record => {
+        recordRequest: async (record, payload) => {
           if (this.cancelledRequests.has(input.requestId) || taskControlSignal) throw Object.assign(new Error("已停止生成"), { name: "AbortError" });
           const kind = taskMode ? "task" : "turn";
           const id = taskMode ? bootstrap.task_id : bootstrap.user.id;
           await this.request(apiBase, controlToken, (bootstrap.standalone ? `/api/pi/chat-records/${encodeURIComponent(id)}/requests` : `/api/pi/records/${kind}/${encodeURIComponent(id)}/requests`), {
             method: "POST", body: JSON.stringify({ sequence: record.sequence, record }),
           });
+          contextUsage = contextUsageTracker.recordRequest(record, payload);
+          emit("context_usage", { usage: contextUsage });
         },
         onContext: async messages => {
           // A queue count change alone is not proof of consumption. Confirm
@@ -569,6 +574,7 @@ export class FetchCVAgentHost {
       harness = created.harness;
       setRecoveryState = created.setRecoveryState;
       const { protocol } = created;
+      contextUsageTracker = createContextUsageTracker({ model: created.model, providerId: provider.id || null, protocol, previousSnapshot: bootstrap.previous_context_usage });
       this.active.set(input.requestId, harness);
       if (taskMode) { this.activeTasks.set(bootstrap.run_id, harness); this.taskInputs.set(bootstrap.run_id, pendingInputs); this.taskInputReferences.set(bootstrap.run_id,inputReferences); }
       let taskControlBusy = false;
@@ -663,6 +669,8 @@ export class FetchCVAgentHost {
         }
         if (event.type === "turn_end") {
           usage = mergeUsage(usage, usageFromMessage(event.message));
+          contextUsage = contextUsageTracker.observeResponse(event.message);
+          if (contextUsage) emit("context_usage", { usage: contextUsage });
           if (!turnHadTool) {
             const answer = textFromMessage(event.message).trim() || turnText.trim();
             if (answer) {
@@ -712,7 +720,7 @@ export class FetchCVAgentHost {
         method: "POST",
         body: JSON.stringify({
           content: finalText,
-          usage: { ...usage, provider: provider.providerName, model: provider.model, protocol, runtime: "pi" },
+          usage: { ...usage, provider: provider.providerName, model: provider.model, protocol, runtime: "pi", ...(contextUsage ? { context_usage: contextUsage } : {}) },
           processing_trace: traceOrder.map((id) => processing.get(id)),
           tool_receipts: toolReceipts,
           processing_duration_ms: Math.max(1, Date.now() - startedAt),

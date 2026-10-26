@@ -1,10 +1,11 @@
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  ArrowUpRight, Award, BriefcaseBusiness, FileArchive, FileText, FolderGit2,
+  ArrowUpRight, Award, BriefcaseBusiness, Download, FileArchive, FileText, FolderGit2,
   Globe2, GraduationCap, Layers3, Plus, Upload, UserRound, X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
+import { ContentSkeleton } from "../ui/Skeleton";
 import "./LibraryView.css";
 
 const categoryNames = {
@@ -24,6 +25,10 @@ const categoryIcons = {
 
 const materialLabel = {
   resume_pdf: "基础简历",
+  resume_doc: "基础简历",
+  resume_docx: "基础简历",
+  resume_tex: "基础简历",
+  resume_json: "基础简历",
   portfolio: "作品集",
   website: "网站 / 应用",
   repository: "代码仓库",
@@ -76,8 +81,9 @@ function ExperienceDetailDialog({ item, onClose }) {
 export function LibraryView({ library, busy, onImportResume, onAddMaterial, onNewJob }) {
   const [selectedExperience, setSelectedExperience] = useState(null);
   const { candidate, resumes = [], experiences = [], materials = [] } = library || {};
-  if (!library) return <main className="main-pane library-loading"><div className="library-skeleton"><i /><i /><i /></div></main>;
+  if (!library) return <main className="main-pane library-loading"><ContentSkeleton className="library-skeleton" label="正在读取资料库…" /></main>;
   const grouped = experiences.reduce((result, item) => { (result[item.kind] ||= []).push(item); return result; }, {});
+  const resumeBySource = new Map(resumes.filter((resume) => resume.content_json?.source_asset_id).map((resume) => [resume.content_json.source_asset_id, resume]));
   return <main className="main-pane library-pane" aria-label="个人资料库">
     <header className="task-header library-header"><h1>个人资料库</h1><div className="library-header-actions"><button className="text-button" disabled={busy} onClick={onImportResume}><FileText size={14} />导入简历</button><button className="secondary-button" disabled={busy} onClick={onAddMaterial}><Upload size={15} />添加资料</button></div></header>
     <div className="content-scroll"><motion.div className="library-content" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
@@ -90,9 +96,15 @@ export function LibraryView({ library, busy, onImportResume, onAddMaterial, onNe
           {materials.map((material) => {
             const Icon = material.kind === "website" ? Globe2 : material.kind === "repository" ? FolderGit2 : FileText;
             const meta = [materialLabel[material.kind] || "资料", material.metadata_json?.page_count ? `${material.metadata_json.page_count} 页` : "", material.status !== "ready" ? material.status : ""].filter(Boolean).join(" · ");
-            return <article className="material-card" key={material.id}><span><Icon size={18} /></span><div><strong title={material.name}>{material.name}</strong><small>{meta}</small></div>{material.source_url && <a href={material.source_url} target="_blank" rel="noreferrer" aria-label={`打开 ${material.name}`}><ArrowUpRight size={14} /></a>}</article>;
+            const sourceResume = resumeBySource.get(material.id);
+            return <article className="material-card" key={material.id}><span><Icon size={18} /></span><div><strong title={material.name}>{material.name}</strong><small>{meta}</small></div>{sourceResume ? <a href={api.assetUrl(`/api/resumes/${encodeURIComponent(sourceResume.id)}/source`)} target="_blank" rel="noreferrer" title="下载原件" aria-label={`下载原件 ${material.name}`}><Download size={14} /></a> : material.source_url && <a href={material.source_url} target="_blank" rel="noreferrer" aria-label={`打开 ${material.name}`}><ArrowUpRight size={14} /></a>}</article>;
           })}
-          {!materials.length && resumes.map((resume) => <article className="material-card" key={resume.id}><span><FileText size={18} /></span><div><strong title={resume.name}>{resume.name}</strong><small>基础简历{resume.content_json?.source?.filename && resume.content_json.source.filename !== resume.name ? ` · ${resume.content_json.source.filename}` : ""}</small></div>{resume.pdf_path && <a href={api.assetUrl(`/api/resumes/${resume.id}/pdf`)} target="_blank" rel="noreferrer" aria-label={`打开 ${resume.name}`}><ArrowUpRight size={14} /></a>}</article>)}
+          {!materials.length && resumes.map((resume) => {
+            const hasSource = Boolean(resume.content_json?.source_asset_id);
+            const hasVerifiedPdf = resume.content_json?.verification_status === "verified" && resume.pdf_path && resume.content_json?.pdf_sha256;
+            const artifactUrl = hasSource ? `/api/resumes/${encodeURIComponent(resume.id)}/source` : hasVerifiedPdf ? `/api/resumes/${encodeURIComponent(resume.id)}/pdf` : "";
+            return <article className="material-card" key={resume.id}><span><FileText size={18} /></span><div><strong title={resume.name}>{resume.name}</strong><small>基础简历{resume.content_json?.source?.filename && resume.content_json.source.filename !== resume.name ? ` · ${resume.content_json.source.filename}` : ""}</small></div>{artifactUrl && <a href={api.assetUrl(artifactUrl)} target="_blank" rel="noreferrer" aria-label={hasSource ? `下载原件 ${resume.name}` : `打开 ${resume.name}`} title={hasSource ? "下载原件" : "打开 PDF"}>{hasSource ? <Download size={14} /> : <ArrowUpRight size={14} />}</a>}</article>;
+          })}
           <button className="material-add" disabled={busy} onClick={onAddMaterial}><Plus size={17} /><strong>添加资料</strong></button>
         </div>
       </section>

@@ -42,6 +42,7 @@ function InterviewMessageSources({ sources, onOpenOriginal, onOpenSnapshot, open
 }
 
 export const AgentMessage = memo(function AgentMessage({ message, pending = false, animate = false, onQuote, interviewSources = EMPTY_ITEMS, interviewBriefs = EMPTY_ITEMS }) {
+  const [animateAttachments] = useState(animate);
   const [copied, setCopied] = useState(false);
   const [selectionAction, setSelectionAction] = useState(null);
   const [readerSource, setReaderSource] = useState(null);
@@ -112,7 +113,7 @@ export const AgentMessage = memo(function AgentMessage({ message, pending = fals
       {!assistant && quotedText && <blockquote className="message-quote"><span><Quote size={11} />引用 Agent</span><p>{quotedText}</p></blockquote>}
       {assistant ? (content && <Suspense fallback={<p className="agent-markdown-fallback">{content}</p>}><AgentMarkdown content={content} streaming={message.id === "streaming-assistant" || processingLive} resolveInterviewSource={resolveInterviewSource} onOpenInterviewSource={openOriginalSource} onOpenInterviewSnapshot={setReaderSource} /></Suspense>) : <p>{content}</p>}
       {assistant && <InterviewMessageSources sources={researchSources} onOpenOriginal={openOriginalSource} onOpenSnapshot={setReaderSource} openingId={openingSourceId} />}
-      {!assistant && !!attachments.length && <div className="message-attachments">{attachments.map((path) => <span key={path}><FileText size={12} />{String(path).split("/").pop()}</span>)}</div>}
+      {!assistant && !!attachments.length && <div className="message-attachments">{attachments.map((path) => <span key={path} className={animateAttachments ? "agent-chip-in" : undefined}><FileText size={12} />{String(path).split("/").pop()}</span>)}</div>}
       {!assistant && steeringLabel && <small className="message-input-receipt" role="status">{steeringLabel}</small>}
       {assistant && actions}
     </div>

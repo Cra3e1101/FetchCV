@@ -94,7 +94,7 @@ export async function createFetchCVHarness({
   harness.on("before_provider_payload", async event => {
     try{
     const prepared = prepareRequestRecord(compatiblePayload(event.payload,provider), { model: event.model, privacy: bootstrap.outbound_privacy, tools:activeTools, sequence: ++requestSequence,contextManifest });
-    await recordRequest(prepared.record);
+    await recordRequest(prepared.record, prepared.payload);
     await onContext(selectedMessages);
     return { payload: prepared.payload };
     }catch(error){assemblyError=error;throw error;}

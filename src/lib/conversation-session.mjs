@@ -109,6 +109,7 @@ function createSession(api, conversationId, identify) {
         if (event === 'status') processing(meta => ({...meta, processing_label: data.label || meta.processing_label,
           processing_status: data.label === '等待联网批准' || meta.tool_receipts?.some(item => item.status === 'awaiting_approval') ? 'awaiting_approval' : 'running'}));
         if (event === 'reasoning') processing(meta => ({...meta, processing_trace: mergeProcessingEvent(meta.processing_trace, data.event)}));
+        if (event === 'context_usage') processing(meta => ({...meta, context_usage: data.usage}));
         if (event === 'tool_receipt' && data.receipt?.tool_call_id) processing(meta => {
           const receipts = meta.tool_receipts || [], receipt = data.receipt;
           const next = receipts.some(item => item.tool_call_id === receipt.tool_call_id)

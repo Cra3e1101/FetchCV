@@ -1,0 +1,1660 @@
+{
+  "schemaVersion": 1,
+  "platform": "win32",
+  "arch": "x64",
+  "texLiveYear": 2026,
+  "archiveBase": "https://texlive.info/tlnet-archive/2026/10/26/tlnet/archive",
+  "sourceDateEpoch": 1772323200,
+  "binaries": [
+    "bin/windows/dvipdfmx.dll",
+    "bin/windows/icudt78.dll",
+    "bin/windows/kpathsealibw64.dll",
+    "bin/windows/kpsewhich.exe",
+    "bin/windows/msvcr100.dll",
+    "bin/windows/xdvipdfmx.exe",
+    "bin/windows/xelatex.exe",
+    "bin/windows/xetex.dll",
+    "bin/windows/xetex.exe"
+  ],
+  "fonts": {
+    "cjkRegular": "texmf-dist/fonts/opentype/public/fandol/FandolSong-Regular.otf",
+    "cjkBold": "texmf-dist/fonts/opentype/public/fandol/FandolSong-Bold.otf",
+    "serifRegular": "texmf-dist/fonts/opentype/public/tex-gyre/texgyretermes-regular.otf",
+    "serifBold": "texmf-dist/fonts/opentype/public/tex-gyre/texgyretermes-bold.otf",
+    "serifItalic": "texmf-dist/fonts/opentype/public/tex-gyre/texgyretermes-italic.otf",
+    "serifBoldItalic": "texmf-dist/fonts/opentype/public/tex-gyre/texgyretermes-bolditalic.otf"
+  },
+  "fontFiles": [
+    "texmf-dist/fonts/opentype/public/fandol/FandolSong-Regular.otf",
+    "texmf-dist/fonts/opentype/public/fandol/FandolSong-Bold.otf",
+    "texmf-dist/fonts/opentype/public/tex-gyre/texgyretermes-regular.otf",
+    "texmf-dist/fonts/opentype/public/tex-gyre/texgyretermes-bold.otf",
+    "texmf-dist/fonts/opentype/public/tex-gyre/texgyretermes-italic.otf",
+    "texmf-dist/fonts/opentype/public/tex-gyre/texgyretermes-bolditalic.otf",
+    "texmf-dist/fonts/opentype/public/lm/lmroman10-regular.otf",
+    "texmf-dist/fonts/opentype/public/lm/lmroman10-bold.otf",
+    "texmf-dist/fonts/opentype/public/lm/lmroman10-italic.otf",
+    "texmf-dist/fonts/opentype/public/lm/lmroman10-bolditalic.otf"
+  ],
+  "packages": [
+    {
+      "name": "adobemapping",
+      "revision": 66552,
+      "license": "bsd",
+      "archives": [
+        {
+          "kind": "",
+          "file": "adobemapping.r66552.tar.xz",
+          "urlFile": "adobemapping.tar.xz",
+          "relocated": true,
+          "size": 2178116,
+          "sha512": "363f7fd337e5a34737608a2bc37521bb526ce726f5c9b5b4d08416e534448306002bc7af1be3f5e6fefcaba16ffc2260c4dea8a486d44dbccad577fb04d6da5b"
+        }
+      ]
+    },
+    {
+      "name": "amsfonts",
+      "revision": 77682,
+      "license": "ofl",
+      "archives": [
+        {
+          "kind": "",
+          "file": "amsfonts.r77682.tar.xz",
+          "urlFile": "amsfonts.tar.xz",
+          "relocated": true,
+          "size": 3626284,
+          "sha512": "be514397b9844ae4a4f2e4f8c79d78e8b3b434bacffc18ccde3cbca462bfc49cbf7affd75b70fb013266c00f8f9be8636729ee18ee1274b0241ad74293751450"
+        },
+        {
+          "kind": "doc",
+          "file": "amsfonts.doc.r77682.tar.xz",
+          "urlFile": "amsfonts.doc.tar.xz",
+          "relocated": true,
+          "size": 1162540,
+          "sha512": "d92f76ffd3049776bd0f8e80ce9cf7d46a55a5988eaccb9c8982f63b80490af1983a5600724501f6431f401b22a9a34d8f9dca20c6f2b8ccf85ddef0a65a063b"
+        },
+        {
+          "kind": "source",
+          "file": "amsfonts.source.r77682.tar.xz",
+          "urlFile": "amsfonts.source.tar.xz",
+          "relocated": true,
+          "size": 49152,
+          "sha512": "6e0c10317625b82374e3dc22ee9ba9fcfef5bebf7b51005907f96ae6ce80a631db0d88909f8251942bb1286100c9dc02f618608795bf7259930514f623b7a103"
+        }
+      ]
+    },
+    {
+      "name": "bigintcalc",
+      "revision": 79461,
+      "license": "lppl1.3",
+      "archives": [
+        {
+          "kind": "",
+          "file": "bigintcalc.r79461.tar.xz",
+          "urlFile": "bigintcalc.tar.xz",
+          "relocated": true,
+          "size": 6532,
+          "sha512": "e7230b29a08d1ef9d84254eff59c4db1dce1a9afd2a8d70f8e71c14f34a2d8fdd7f87840d2df055fba1821170504a2519bc7d73e719cca33cc03e74e171a62c1"
+        },
+        {
+          "kind": "doc",
+          "file": "bigintcalc.doc.r79461.tar.xz",
+          "urlFile": "bigintcalc.doc.tar.xz",
+          "relocated": true,
+          "size": 456956,
+          "sha512": "33075f396249a59b56226cde6fab76ebf68b204eb7570b92365de6461141a664ed318692f978fbf72188e3acbe0b7e7efdea0f0489ac818e0786a9a09d90ff82"
+        },
+        {
+          "kind": "source",
+          "file": "bigintcalc.source.r79461.tar.xz",
+          "urlFile": "bigintcalc.source.tar.xz",
+          "relocated": true,
+          "size": 14244,
+          "sha512": "27368745ba5bd2db04f61c237390e8bdda68dcde82c1c0a2700212193cb78a39f75854270f812ea842e7ab8cca163c1e5370b3d7c10ad7393425c1416a825534"
+        }
+      ]
+    },
+    {
+      "name": "bitset",
+      "revision": 79461,
+      "license": "lppl1.3",
+      "archives": [
+        {
+          "kind": "",
+          "file": "bitset.r79461.tar.xz",
+          "urlFile": "bitset.tar.xz",
+          "relocated": true,
+          "size": 5736,
+          "sha512": "fec1098a0affe5ac333cf813ed2183b7c2975ffd9f1dc281bcc7f9c608592ce5139b40b5b65363378d079b9bb77ae4a837916d6641476f312f681815ad4141fa"
+        },
+        {
+          "kind": "doc",
+          "file": "bitset.doc.r79461.tar.xz",
+          "urlFile": "bitset.doc.tar.xz",
+          "relocated": true,
+          "size": 616520,
+          "sha512": "9be10d230bf477b054833e7b6a672f88ef6e383a9b439592e7b2d16364597d7654901ef21b096e16fcc51c8e09a1db7b601a30e58ff88b3b0f7be23e79ad14f3"
+        },
+        {
+          "kind": "source",
+          "file": "bitset.source.r79461.tar.xz",
+          "urlFile": "bitset.source.tar.xz",
+          "relocated": true,
+          "size": 14628,
+          "sha512": "f5937c31e52d5ee3b0fffd8ea86fb2673a021cf1765a08308170bc3cb2f48dc4418ae5a6e6a75fd82b3d0d3dada64a3907471f2d6e3220f7e5bfea0a4d98040e"
+        }
+      ]
+    },
+    {
+      "name": "cjk",
+      "revision": 60865,
+      "license": "gpl2",
+      "archives": [
+        {
+          "kind": "",
+          "file": "cjk.r60865.tar.xz",
+          "urlFile": "cjk.tar.xz",
+          "relocated": true,
+          "size": 58480,
+          "sha512": "b13712912e479dab68cab9027042be8cb11047ebf9c034f532c857e83d28f19dfea5a1748685cfe1847c7372f2d0982f79736525694d937c88962c5262094585"
+        },
+        {
+          "kind": "doc",
+          "file": "cjk.doc.r60865.tar.xz",
+          "urlFile": "cjk.doc.tar.xz",
+          "relocated": true,
+          "size": 1477448,
+          "sha512": "a8c6b2d4d0899b841ccc32b378855d61bdaa65d5f68fd408df3894d386bcde18f384410f34e6f33ee2a5ce770e1e663a05ab038d9b7483012a3cb414739c3705"
+        },
+        {
+          "kind": "source",
+          "file": "cjk.source.r60865.tar.xz",
+          "urlFile": "cjk.source.tar.xz",
+          "relocated": true,
+          "size": 73056,
+          "sha512": "88be587328daedfed3bdcb289b1a03343bd7257ae180a9e0857a6b00f173f601eccd8e5978dd29c2d95fbab180fcfd5135a682c5218325fc6b664f2cd505213c"
+        }
+      ]
+    },
+    {
+      "name": "cm",
+      "revision": 57963,
+      "license": "knuth",
+      "archives": [
+        {
+          "kind": "",
+          "file": "cm.r57963.tar.xz",
+          "urlFile": "cm.tar.xz",
+          "relocated": true,
+          "size": 238064,
+          "sha512": "e65b2096ca183ca21d8ff987489223bc98750fcbaf4f9f9a9996f5153a76c5587d1ad77693234d02f80753b8b8cb86fd957514f82065bd7aab9eb64bad9003a3"
+        },
+        {
+          "kind": "doc",
+          "file": "cm.doc.r57963.tar.xz",
+          "urlFile": "cm.doc.tar.xz",
+          "relocated": true,
+          "size": 2500,
+          "sha512": "39ccdee82d86f01e11aaeb53844639b4f976677c0baef7675817fafe4263e8e44cfec144f6fce265c9c80d9a9373a2f46ac8a55b7f20923c680eaddd0222a045"
+        }
+      ]
+    },
+    {
+      "name": "ctex",
+      "revision": 79993,
+      "license": "lppl1.3c",
+      "archives": [
+        {
+          "kind": "",
+          "file": "ctex.r79993.tar.xz",
+          "urlFile": "ctex.tar.xz",
+          "relocated": true,
+          "size": 136228,
+          "sha512": "79364716f5edaafe18185b6bd22a66b81bd8bfc8b6e9061496f0844a3ba6bb73dc8534ff7391b2736f5f12c44ffb241e1a7cf3a92656674dff3961284eb114a2"
+        },
+        {
+          "kind": "doc",
+          "file": "ctex.doc.r79993.tar.xz",
+          "urlFile": "ctex.doc.tar.xz",
+          "relocated": true,
+          "size": 1388892,
+          "sha512": "bc7fd6eeca1d748bc4fff784b022924c0e936902fe34fec33e015c3f20c7ab8f1ce416131ccd96d692a315b60b033389dea22e572c44c607c6cd98ca4e45dc1b"
+        },
+        {
+          "kind": "source",
+          "file": "ctex.source.r79993.tar.xz",
+          "urlFile": "ctex.source.tar.xz",
+          "relocated": true,
+          "size": 101980,
+          "sha512": "44a47f172c51d2d2c2719e10da4b119c94b043b57dedcc0e31b7911de0d4fde733ad51728b15121385acb5a31a58d702a47d94f37333e9c118b902d23b24228a"
+        }
+      ]
+    },
+    {
+      "name": "dvipdfmx",
+      "revision": 78409,
+      "license": "gpl",
+      "archives": [
+        {
+          "kind": "",
+          "file": "dvipdfmx.r78409.tar.xz",
+          "urlFile": "dvipdfmx.tar.xz",
+          "relocated": false,
+          "size": 27224,
+          "sha512": "96bed8d72f0f5cb4332aa8c5a8c1217e9fb0deb175b241323045986566b3a1135790d8321226ac0b65274bfb18b28e136c6959b466e0dd79fbdd440d2e5b7ed2"
+        },
+        {
+          "kind": "doc",
+          "file": "dvipdfmx.doc.r78409.tar.xz",
+          "urlFile": "dvipdfmx.doc.tar.xz",
+          "relocated": false,
+          "size": 3098940,
+          "sha512": "681c30512cd62f52d2cf60797881a445d18f9cd57677961074fa7a867cb27feb111c01548521f3bd41242fea6062907232075516d6c20d64388410476a02e3c9"
+        }
+      ]
+    },
+    {
+      "name": "dvipdfmx.windows",
+      "revision": 78413,
+      "license": "see-upstream",
+      "archives": [
+        {
+          "kind": "",
+          "file": "dvipdfmx.windows.r78413.tar.xz",
+          "urlFile": "dvipdfmx.windows.tar.xz",
+          "relocated": false,
+          "size": 353448,
+          "sha512": "07885b62cc03a8c40a96d09b8d5b07ac8bbc21bacc32a0d3888972b0f59d6a25c8636bcf427bdbd9ef85b5cd6ae6c4a91c59b4aa52e1137f3362a4521cc07674"
+        }
+      ]
+    },
+    {
+      "name": "enumitem",
+      "revision": 79618,
+      "license": "mit",
+      "archives": [
+        {
+          "kind": "",
+          "file": "enumitem.r79618.tar.xz",
+          "urlFile": "enumitem.tar.xz",
+          "relocated": true,
+          "size": 13816,
+          "sha512": "6bbdd89a92a18e8b59c9a9f1a2da203da7c34a73fefd4974a5b4dcd8c9ab457c20e8555a2f6c01eb55ef722ae8ee4a943dbca41b905d83c8eceba2b87917baa0"
+        },
+        {
+          "kind": "doc",
+          "file": "enumitem.doc.r79618.tar.xz",
+          "urlFile": "enumitem.doc.tar.xz",
+          "relocated": true,
+          "size": 169256,
+          "sha512": "3fa51446d8a8dd7860b96770faeb3197d59055683fe42263ddaaab9f0b0c1af43ec8e886d84cc49ec09655496b4b5af98b32496d45ab1266fee4911dacdcbbf1"
+        }
+      ]
+    },
+    {
+      "name": "etoolbox",
+      "revision": 77682,
+      "license": "lppl1.3c",
+      "archives": [
+        {
+          "kind": "",
+          "file": "etoolbox.r77682.tar.xz",
+          "urlFile": "etoolbox.tar.xz",
+          "relocated": true,
+          "size": 8780,
+          "sha512": "0de30a7f0329add368a764d28d5be57b23a5c552e80472d48b5e0c78be6c13c6e032bd09620ad2690198f88dbfcaa723dd22bdbf3054da1b63a8e115f7a45ecb"
+        },
+        {
+          "kind": "doc",
+          "file": "etoolbox.doc.r77682.tar.xz",
+          "urlFile": "etoolbox.doc.tar.xz",
+          "relocated": true,
+          "size": 235536,
+          "sha512": "e651ce2ca135318712626a4dec1a4b1e039835fa37a59e3ab2817e48d37ff77db041c069aeb48fef7ea1d1a70ac08d1f2783e4209078e00c0116b5b489a2b146"
+        }
+      ]
+    },
+    {
+      "name": "fandol",
+      "revision": 37889,
+      "license": "gpl",
+      "archives": [
+        {
+          "kind": "",
+          "file": "fandol.r37889.tar.xz",
+          "urlFile": "fandol.tar.xz",
+          "relocated": true,
+          "size": 21582588,
+          "sha512": "309b19d6bff9d3e009610d698a73ba191da70cabd57157f274dfca7583a9e9b31fc30ea52b2b2ab3386be7290a680f8eb47dc92381c3da8251b01d8c6a65c3ff"
+        },
+        {
+          "kind": "doc",
+          "file": "fandol.doc.r37889.tar.xz",
+          "urlFile": "fandol.doc.tar.xz",
+          "relocated": true,
+          "size": 12168,
+          "sha512": "d74e78a1c863d3865ec4b21a4c762bf6e2c30a8656fe0ec830d1e56b9fcb48861f316ccf8d8641e7c674e25f1ac2292d10ff2127315275347096ad325828d7e5"
+        }
+      ]
+    },
+    {
+      "name": "fontname",
+      "revision": 75544,
+      "license": "gpl",
+      "archives": [
+        {
+          "kind": "",
+          "file": "fontname.r75544.tar.xz",
+          "urlFile": "fontname.tar.xz",
+          "relocated": true,
+          "size": 17528,
+          "sha512": "318eaa7cdc310bb651d8dd0df92adcfc0e20fd5e98a670314075ba1241287a5f14021c27acf253b2930c1c0d677c8fcd6ce4f53dfc409c4d36c34c51672a8043"
+        },
+        {
+          "kind": "doc",
+          "file": "fontname.doc.r75544.tar.xz",
+          "urlFile": "fontname.doc.tar.xz",
+          "relocated": true,
+          "size": 673296,
+          "sha512": "e5052d782c0a4023c0b49538a76adc0977351b0ac74235d7b849fc2d1331e616e8a5a2d3e6d0cd85c71faaa25286248eafd056b53ec5a9366b233b5ba32ae494"
+        }
+      ]
+    },
+    {
+      "name": "fontspec",
+      "revision": 79934,
+      "license": "lppl1.3c",
+      "archives": [
+        {
+          "kind": "",
+          "file": "fontspec.r79934.tar.xz",
+          "urlFile": "fontspec.tar.xz",
+          "relocated": true,
+          "size": 27432,
+          "sha512": "e3841905e4babb74d2cdb74653cdc424b0ce353c3f9f9f17426654e539445cb763865a7a341dab21966bd3a17cfbfb4ca237f1257882d2901610c88e15e1deeb"
+        },
+        {
+          "kind": "doc",
+          "file": "fontspec.doc.r79934.tar.xz",
+          "urlFile": "fontspec.doc.tar.xz",
+          "relocated": true,
+          "size": 1199940,
+          "sha512": "dc971795db283e473e4e264cbd8aae72e18bd0168f4d41723eadabaa481fb170a2e9b03295537eef38f46327c6382d8329d8529807ed3d573a0df91e42590244"
+        },
+        {
+          "kind": "source",
+          "file": "fontspec.source.r79934.tar.xz",
+          "urlFile": "fontspec.source.tar.xz",
+          "relocated": true,
+          "size": 87696,
+          "sha512": "38feb72f04fc669c9d4a915e405828229123a8843eade188267145c7bcbbcf2495cbf2e8da9a8a65379c358ca81644d16b06bdac329e34821047fbf7f49eee5d"
+        }
+      ]
+    },
+    {
+      "name": "geometry",
+      "revision": 78315,
+      "license": "lppl1.3c",
+      "archives": [
+        {
+          "kind": "",
+          "file": "geometry.r78315.tar.xz",
+          "urlFile": "geometry.tar.xz",
+          "relocated": true,
+          "size": 8744,
+          "sha512": "1c7120b50db68c40ae22b9cbd138189474c9c6e000742b65654097c0d9838aa23d81be3414fb621a7515d083e2d92f6b4d68e0f3a96c2073d10bf756482b6812"
+        },
+        {
+          "kind": "doc",
+          "file": "geometry.doc.r78315.tar.xz",
+          "urlFile": "geometry.doc.tar.xz",
+          "relocated": true,
+          "size": 871240,
+          "sha512": "54a32f1b7850715b56b0c8f11a8bdd094bf3013bb6b11dd8067c16aff3327de603d89eee801849b6774297dff5d7b20439a746068ec775ce0ff236907c0d6827"
+        },
+        {
+          "kind": "source",
+          "file": "geometry.source.r78315.tar.xz",
+          "urlFile": "geometry.source.tar.xz",
+          "relocated": true,
+          "size": 47924,
+          "sha512": "d13e71c192730a761983c31e6f9c7dce395b7b666bd26ab0f527b9bf2785f486b13e097cde7b3a460dfc6ba83ba74d13d184537bc5934568785795ea3d48df24"
+        }
+      ]
+    },
+    {
+      "name": "gettitlestring",
+      "revision": 79461,
+      "license": "lppl1.3",
+      "archives": [
+        {
+          "kind": "",
+          "file": "gettitlestring.r79461.tar.xz",
+          "urlFile": "gettitlestring.tar.xz",
+          "relocated": true,
+          "size": 2808,
+          "sha512": "b61409ca66ce462be691d0a263e2ea161a8faeab8e6f63dcd2a5bfb8a73ac331795e82af8b8a36b74ba6560edfee2899661b8057ede71dcbc76460c85b272efb"
+        },
+        {
+          "kind": "doc",
+          "file": "gettitlestring.doc.r79461.tar.xz",
+          "urlFile": "gettitlestring.doc.tar.xz",
+          "relocated": true,
+          "size": 317828,
+          "sha512": "c4d0d0a438af8a3bc499976d0c0b27f8e4eac506877685bd6aa2c173d934c469dbcb771d8c13951178de1c6ec8a9c3cebbb6b342c75ae5eed1105107d3af7c0c"
+        },
+        {
+          "kind": "source",
+          "file": "gettitlestring.source.r79461.tar.xz",
+          "urlFile": "gettitlestring.source.tar.xz",
+          "relocated": true,
+          "size": 6428,
+          "sha512": "e9e870850188b4685abce4534f3508b2f5233211deb8f9f8094581fbc9ef6f76c9d651842cda6ab9d68780a5854cd2feeb5e9b202e467a5a7d0b35d688e2a6d6"
+        }
+      ]
+    },
+    {
+      "name": "glyphlist",
+      "revision": 54074,
+      "license": "see-upstream",
+      "archives": [
+        {
+          "kind": "",
+          "file": "glyphlist.r54074.tar.xz",
+          "urlFile": "glyphlist.tar.xz",
+          "relocated": true,
+          "size": 24764,
+          "sha512": "c050808623d162ffbfba8742c9aee6c92555717eb3ed0a0cfb0e3cd6696c4f6d940aa494582011e6d0becc3c5572ddccac2598ac8d521b58a323768272f9125a"
+        }
+      ]
+    },
+    {
+      "name": "graphics",
+      "revision": 79234,
+      "license": "lppl1.3c",
+      "archives": [
+        {
+          "kind": "",
+          "file": "graphics.r79234.tar.xz",
+          "urlFile": "graphics.tar.xz",
+          "relocated": true,
+          "size": 16040,
+          "sha512": "1fce8c76d1cc65eb416c1b40bb8b872ec886384c1a42c02110756ff08d4c5909a3675cf1098499aa9e743eb2f4df18c6487bc0849208bf3ef9efc17dd27cb7ae"
+        },
+        {
+          "kind": "doc",
+          "file": "graphics.doc.r79234.tar.xz",
+          "urlFile": "graphics.doc.tar.xz",
+          "relocated": true,
+          "size": 2446748,
+          "sha512": "8af396b51d073c000ef2b53d38d2b23b610297b2608c9d0a432b1a72abbe7684f45b10af8dbdb036e0162d27d51bfeaac3518ca8e8515b680e0db68224336f8c"
+        },
+        {
+          "kind": "source",
+          "file": "graphics.source.r79234.tar.xz",
+          "urlFile": "graphics.source.tar.xz",
+          "relocated": true,
+          "size": 57596,
+          "sha512": "97ac67859c9bb8e5f2b12f0b9acff095596df455ecc20a194fc3df8f504cdf9868dabb0677a444c21e3af3637ca4d75e6cc7f620e88c139a768df810992b0c51"
+        }
+      ]
+    },
+    {
+      "name": "graphics-cfg",
+      "revision": 41448,
+      "license": "pd",
+      "archives": [
+        {
+          "kind": "",
+          "file": "graphics-cfg.r41448.tar.xz",
+          "urlFile": "graphics-cfg.tar.xz",
+          "relocated": true,
+          "size": 1160,
+          "sha512": "e1015d360b56f63f1b9790daf16e2101e6af995bd1e45288ea604ae94e20196cab22e7e54d318aa79fa386123032a928be70a57154d409321e04f03ecf97ab75"
+        },
+        {
+          "kind": "doc",
+          "file": "graphics-cfg.doc.r41448.tar.xz",
+          "urlFile": "graphics-cfg.doc.tar.xz",
+          "relocated": true,
+          "size": 876,
+          "sha512": "dbcfdf635c2816f305205915119e1f6acba816c17b683622a8a32c361d75338376426b258c1fa3271abc1d7ad2a520ac85092a7b3bfbac6463106449bc906ae4"
+        }
+      ]
+    },
+    {
+      "name": "graphics-def",
+      "revision": 76719,
+      "license": "lppl1.3c",
+      "archives": [
+        {
+          "kind": "",
+          "file": "graphics-def.r76719.tar.xz",
+          "urlFile": "graphics-def.tar.xz",
+          "relocated": true,
+          "size": 10992,
+          "sha512": "5fedc5bd4ac2313c920b23addb5753f6f90ec5def0b9f7e8fa6b31248c01a5246331f0d266d367d806931f61e824925099d9bf61f805f81c21385007f7f832b3"
+        },
+        {
+          "kind": "doc",
+          "file": "graphics-def.doc.r76719.tar.xz",
+          "urlFile": "graphics-def.doc.tar.xz",
+          "relocated": true,
+          "size": 604,
+          "sha512": "3d63e17a5899452abda47a1dbf19630100384eacec9f7bbda564f10c49e3a93fe3fa59b6256df96704cbddcb7361c1a2887706c26e1167abacfe30c5e8ea6bf3"
+        }
+      ]
+    },
+    {
+      "name": "hycolor",
+      "revision": 79461,
+      "license": "lppl1.3",
+      "archives": [
+        {
+          "kind": "",
+          "file": "hycolor.r79461.tar.xz",
+          "urlFile": "hycolor.tar.xz",
+          "relocated": true,
+          "size": 4064,
+          "sha512": "2da57e41723e7db7d610425d59eb290a1e20b6bcb0052fda9694fcd082f85d7d27e25f076932c1082ab608a7a6dcf2746cbc3fbfe51a0790b06298efdd48a6be"
+        },
+        {
+          "kind": "doc",
+          "file": "hycolor.doc.r79461.tar.xz",
+          "urlFile": "hycolor.doc.tar.xz",
+          "relocated": true,
+          "size": 375200,
+          "sha512": "f3b33618849d07d11071c545936f5ba02740203d9db519e90228a722e8f1dae811ca1d9abd2e39e2a02ef65993633d570970f65e0dffaee71ef0a21a3ab4c3a6"
+        },
+        {
+          "kind": "source",
+          "file": "hycolor.source.r79461.tar.xz",
+          "urlFile": "hycolor.source.tar.xz",
+          "relocated": true,
+          "size": 9680,
+          "sha512": "af1b3c0c85a9972db2610d968cbe8086cb9fa2f0f21de0a7f57ed3d0eb0db5d3476f5e81a1bca4f9046b8717bd7897e7d448d8f57b2e9158ddc8237710bb9216"
+        }
+      ]
+    },
+    {
+      "name": "hyperref",
+      "revision": 80576,
+      "license": "lppl1.3",
+      "archives": [
+        {
+          "kind": "",
+          "file": "hyperref.r80576.tar.xz",
+          "urlFile": "hyperref.tar.xz",
+          "relocated": true,
+          "size": 89160,
+          "sha512": "05dd4e280170c706cfdda6625883f4eafca53b011a96ea2a4f152199e3efdde8085ab4be4e3c6ac1685d41d06606b266f6d5b2c6844f2768af150680b9b5fa56"
+        },
+        {
+          "kind": "doc",
+          "file": "hyperref.doc.r80576.tar.xz",
+          "urlFile": "hyperref.doc.tar.xz",
+          "relocated": true,
+          "size": 3586108,
+          "sha512": "b7b62f51ee3ad7629513aad7ce9574e342b79f8176d9f04d228c8ddef43e45169202fb004b699a06460d6997259bb450e052f8aa8f5e494eaa98a20364658668"
+        },
+        {
+          "kind": "source",
+          "file": "hyperref.source.r80576.tar.xz",
+          "urlFile": "hyperref.source.tar.xz",
+          "relocated": true,
+          "size": 418648,
+          "sha512": "aa53a7b5375db8cd41d5926eb4ac093dab27768ea0bedb1622629f70e4a8b19555ccfeb3ab62bcb39ea8b50d5c9373b8b26dc2caa417054e8f7babb2f07e13ad"
+        }
+      ]
+    },
+    {
+      "name": "hyphen-base",
+      "revision": 78076,
+      "license": "see-upstream",
+      "archives": [
+        {
+          "kind": "",
+          "file": "hyphen-base.r78076.tar.xz",
+          "urlFile": "hyphen-base.tar.xz",
+          "relocated": true,
+          "size": 22644,
+          "sha512": "dc110200707c395dd61dcf30ed32b8eb4dd648fbb98eaa897e473ff683fe79af05464028a4b0a4685c9c17ebf61f19c592825f2a778d512ad68e1a57925a033f"
+        }
+      ]
+    },
+    {
+      "name": "iftex",
+      "revision": 77682,
+      "license": "lppl1.3c",
+      "archives": [
+        {
+          "kind": "",
+          "file": "iftex.r77682.tar.xz",
+          "urlFile": "iftex.tar.xz",
+          "relocated": true,
+          "size": 3256,
+          "sha512": "76181d60fb7c52af3d87b44a3f3147d45a6fe28030c160ba41c98bcfa8be5cd6c4dc449806530186ba6e52233543ed808e18c248557b1d5b9ce2305a506361d8"
+        },
+        {
+          "kind": "doc",
+          "file": "iftex.doc.r77682.tar.xz",
+          "urlFile": "iftex.doc.tar.xz",
+          "relocated": true,
+          "size": 229364,
+          "sha512": "e3a4d5ef49f75ed4901c09b24741ff1bbfb59b81bbe260a09438c0c52b8b82d3a6fff11abdc003e2d7d5f56e773829cbc5aeccd4f07361bf28c1f67557ffdc22"
+        }
+      ]
+    },
+    {
+      "name": "infwarerr",
+      "revision": 79461,
+      "license": "lppl1.3",
+      "archives": [
+        {
+          "kind": "",
+          "file": "infwarerr.r79461.tar.xz",
+          "urlFile": "infwarerr.tar.xz",
+          "relocated": true,
+          "size": 2672,
+          "sha512": "646b6a43b4fe964192bcfe0b0af7149bcfdefbb1bd6f44806176c07e41fb3be17a6227329745e195649342a371f4044505c829f2075d5efb232ea93e5d535fa2"
+        },
+        {
+          "kind": "doc",
+          "file": "infwarerr.doc.r79461.tar.xz",
+          "urlFile": "infwarerr.doc.tar.xz",
+          "relocated": true,
+          "size": 284916,
+          "sha512": "e925acc13f4f6777be08b8a20fc24c00cb599a3cbb52352b7b3923196f5791bf05e9e54225153c1992277a8a0a01f54864907950c21d3a27487772cf5acd3d5d"
+        },
+        {
+          "kind": "source",
+          "file": "infwarerr.source.r79461.tar.xz",
+          "urlFile": "infwarerr.source.tar.xz",
+          "relocated": true,
+          "size": 5716,
+          "sha512": "275179f6a7c380555be0f1f71b65749c18090d11eb16958544bd3baf3471fdd80305642973a68afb4d0cc3083433a5b00d3bdf647abffc356c77c39412a67eaf"
+        }
+      ]
+    },
+    {
+      "name": "intcalc",
+      "revision": 79461,
+      "license": "lppl1.3",
+      "archives": [
+        {
+          "kind": "",
+          "file": "intcalc.r79461.tar.xz",
+          "urlFile": "intcalc.tar.xz",
+          "relocated": true,
+          "size": 5464,
+          "sha512": "94515d10212baead746e1fa1b39baca6146bf42eea09579a5b6c06a3649b08cc37a4dd0f9f4d2e4d1644e04ceaabdee0d26cc6c317e20450c06ddecd0e988bdb"
+        },
+        {
+          "kind": "doc",
+          "file": "intcalc.doc.r79461.tar.xz",
+          "urlFile": "intcalc.doc.tar.xz",
+          "relocated": true,
+          "size": 423200,
+          "sha512": "e100f58fad144069c22d488c515d5f0181978e494487bed283bcf6d0028d8109e40387e796b599db0db65756958fd1cf7365f076e30912bd030ae9409bfdc9c6"
+        },
+        {
+          "kind": "source",
+          "file": "intcalc.source.r79461.tar.xz",
+          "urlFile": "intcalc.source.tar.xz",
+          "relocated": true,
+          "size": 12576,
+          "sha512": "0b397bf5705f3e5069ef309797d18a4740b498fb1bc1c38f00d7d850b1ec5960b705e2c17ce45c1191f764335cf5447c08a6b360b663c0dbd057388659e45f3b"
+        }
+      ]
+    },
+    {
+      "name": "kpathsea",
+      "revision": 79498,
+      "license": "lgpl2.1",
+      "archives": [
+        {
+          "kind": "",
+          "file": "kpathsea.r79498.tar.xz",
+          "urlFile": "kpathsea.tar.xz",
+          "relocated": false,
+          "size": 33684,
+          "sha512": "46db6b1d08a53e057d95b7f4484b53a78f974ad7f4f35ecfd033add5dbfda987dfe6e00cc99a5866f87a8cb3611d0824d8a465a58d04b429b3e3ecd3f2ebded6"
+        },
+        {
+          "kind": "doc",
+          "file": "kpathsea.doc.r79498.tar.xz",
+          "urlFile": "kpathsea.doc.tar.xz",
+          "relocated": false,
+          "size": 1287828,
+          "sha512": "f63e3f8ba380f43c0605df39bfbcde7f62082d235dc8dd135a96a858922c57a2829e4082941c278d4e6ead6842da5477817d7937a1ee37fd7afd527727416c84"
+        }
+      ]
+    },
+    {
+      "name": "kpathsea.windows",
+      "revision": 77973,
+      "license": "see-upstream",
+      "archives": [
+        {
+          "kind": "",
+          "file": "kpathsea.windows.r77973.tar.xz",
+          "urlFile": "kpathsea.windows.tar.xz",
+          "relocated": false,
+          "size": 518904,
+          "sha512": "5fbd94efe5f18ee6e4cf27447105563d9b4d9c9fe580ca881fedc3490f02efe85f35108a1097f927bcff0d9af3641432bfbd0e83d87903cb60ff86fceb7447b8"
+        }
+      ]
+    },
+    {
+      "name": "kvdefinekeys",
+      "revision": 79461,
+      "license": "lppl1.3c",
+      "archives": [
+        {
+          "kind": "",
+          "file": "kvdefinekeys.r79461.tar.xz",
+          "urlFile": "kvdefinekeys.tar.xz",
+          "relocated": true,
+          "size": 2116,
+          "sha512": "31c04dd6f185fdc807b4dc1901a04bdbba306ad4af95669ace38f9809bc15da5e60725993d16af60612797d5f74f1a09c40003a167293756abd4dffdb9afa1d7"
+        },
+        {
+          "kind": "doc",
+          "file": "kvdefinekeys.doc.r79461.tar.xz",
+          "urlFile": "kvdefinekeys.doc.tar.xz",
+          "relocated": true,
+          "size": 296812,
+          "sha512": "89d25a033ec08cc2920acc82ef35ace633c31bfdac3fb15e12eec183ffcf76cfaa845ac88b3a16c26e207a722062126c2d3ca449bc6b628e1d0a3d42f33459df"
+        },
+        {
+          "kind": "source",
+          "file": "kvdefinekeys.source.r79461.tar.xz",
+          "urlFile": "kvdefinekeys.source.tar.xz",
+          "relocated": true,
+          "size": 5116,
+          "sha512": "66b40f046474ebd7ecf07a90aed786b1cca756bce5c67fa3296158f352a243fc6998f547ccf276ea79708336292e199e0eb7743c3ae33d6fe08758638f31308f"
+        }
+      ]
+    },
+    {
+      "name": "kvoptions",
+      "revision": 79461,
+      "license": "lppl1.3",
+      "archives": [
+        {
+          "kind": "",
+          "file": "kvoptions.r79461.tar.xz",
+          "urlFile": "kvoptions.tar.xz",
+          "relocated": true,
+          "size": 7208,
+          "sha512": "57b7e13f9750526835a381f58f745ab37c1fff32971deb4185a83df94942a54ad4f5bc949610e548a1e817456fe1339c0160455fd94b99e9c1f1a661fbbb353a"
+        },
+        {
+          "kind": "doc",
+          "file": "kvoptions.doc.r79461.tar.xz",
+          "urlFile": "kvoptions.doc.tar.xz",
+          "relocated": true,
+          "size": 485348,
+          "sha512": "feaa9ddf224b64676d5ae8d8d5a8a4698ad7f8e2a8a389a7c9752e04922a06e703af38f4dfd0ac52bc88ecb918ecd6977220a215b83c4c17383ee227f48ae54e"
+        },
+        {
+          "kind": "source",
+          "file": "kvoptions.source.r79461.tar.xz",
+          "urlFile": "kvoptions.source.tar.xz",
+          "relocated": true,
+          "size": 21144,
+          "sha512": "45287bed8460453fd8d8d7a0435ed06c32c9d343553c6182d4ce7231a13610f89219fcb5d7723226d5db2a0436fd0b9c0eb0ef3f4b626bd697cdd94092b2bf20"
+        }
+      ]
+    },
+    {
+      "name": "kvsetkeys",
+      "revision": 79461,
+      "license": "lppl1.3",
+      "archives": [
+        {
+          "kind": "",
+          "file": "kvsetkeys.r79461.tar.xz",
+          "urlFile": "kvsetkeys.tar.xz",
+          "relocated": true,
+          "size": 3592,
+          "sha512": "2ed2a56d262ef1d14ad7de4ce580aa3dc12fa0d9358fabe56e1346617e7c8bd86aaa6e04d6101b3bf7515fbd7b4b48f0b8767f14f70db67c1c058c3af90ecfb1"
+        },
+        {
+          "kind": "doc",
+          "file": "kvsetkeys.doc.r79461.tar.xz",
+          "urlFile": "kvsetkeys.doc.tar.xz",
+          "relocated": true,
+          "size": 390776,
+          "sha512": "4f0995e87a518ba5f867604d14d300e7dd3d708e260fe210ce8d0d79cf8782df337eb5cb2d09c38f12e34c234223b67a97a5697231c1395bb2edd9b37bc9126b"
+        },
+        {
+          "kind": "source",
+          "file": "kvsetkeys.source.r79461.tar.xz",
+          "urlFile": "kvsetkeys.source.tar.xz",
+          "relocated": true,
+          "size": 10608,
+          "sha512": "3a734a79b2176ed72fbec82f77fac12cb09bd95db738e956b1af1d065b85dcd06711c87c31afe6c71a59f14c889dc200a5fb10cb166b1765654e21044f902c1e"
+        }
+      ]
+    },
+    {
+      "name": "l3kernel",
+      "revision": 80334,
+      "license": "lppl1.3c",
+      "archives": [
+        {
+          "kind": "",
+          "file": "l3kernel.r80334.tar.xz",
+          "urlFile": "l3kernel.tar.xz",
+          "relocated": true,
+          "size": 206716,
+          "sha512": "fbf78865f81a7da8884a72ce564fbc73ecde366532c8d46e47cbc4336c83f6264926093f0c48de20bdfbbc576671f543f7bd5e96744ff996a9da63daa49ac9a3"
+        },
+        {
+          "kind": "doc",
+          "file": "l3kernel.doc.r80334.tar.xz",
+          "urlFile": "l3kernel.doc.tar.xz",
+          "relocated": true,
+          "size": 12233824,
+          "sha512": "cbf063f1f821761f44c2262d829b284965f680a1b36382e7b44da64d79476570507dd1a68f89961eb1ec2d0c85052f051ee186a8b7b8e22a3d4cb875b43a5456"
+        },
+        {
+          "kind": "source",
+          "file": "l3kernel.source.r80334.tar.xz",
+          "urlFile": "l3kernel.source.tar.xz",
+          "relocated": true,
+          "size": 688704,
+          "sha512": "f8e7799ddb51661f0f30f711b43705fb369a8e6e752f2eee999501b9f18b069f0207ea9f520b171ed2afd7ad2ef1c839cd362589b095cb5245801cad26f0b91f"
+        }
+      ]
+    },
+    {
+      "name": "l3packages",
+      "revision": 76637,
+      "license": "lppl1.3c",
+      "archives": [
+        {
+          "kind": "",
+          "file": "l3packages.r76637.tar.xz",
+          "urlFile": "l3packages.tar.xz",
+          "relocated": true,
+          "size": 20448,
+          "sha512": "47a7365cb7d3c00ccc6a88917d7500d45cc5c1eb5faa6a6ea9b263dfe43426284fa6f2091a7f20b6a8cc82313ec8248f6137f97853c0a36049ca0f20a13cdc8c"
+        },
+        {
+          "kind": "doc",
+          "file": "l3packages.doc.r76637.tar.xz",
+          "urlFile": "l3packages.doc.tar.xz",
+          "relocated": true,
+          "size": 1417396,
+          "sha512": "26b1ea0535f5073033e652c8765ce81814101ea4813bca1e910d6ecc27b24b6953c060f5ea717b87e7b9b789fd3b8761de5eb8b1735b4cd5897614be303a629f"
+        },
+        {
+          "kind": "source",
+          "file": "l3packages.source.r76637.tar.xz",
+          "urlFile": "l3packages.source.tar.xz",
+          "relocated": true,
+          "size": 27400,
+          "sha512": "799558793930588481129fe455a73006d3629f5710a3bcf0c54c2178e61983fcaeaf5e7f9912766a9a305586906b6208c31815d5aa18ff7717d29a9dd9540a8c"
+        }
+      ]
+    },
+    {
+      "name": "latex",
+      "revision": 79618,
+      "license": "lppl1.3c",
+      "archives": [
+        {
+          "kind": "",
+          "file": "latex.r79618.tar.xz",
+          "urlFile": "latex.tar.xz",
+          "relocated": true,
+          "size": 264336,
+          "sha512": "04d6380ef7c023f63192749080c15e6e47b873aa151e838a946439f5de4455cce1a872e688cf8a366363d09ddcf03cf6b588f3db0573160486afe9cbe0f514e1"
+        },
+        {
+          "kind": "doc",
+          "file": "latex.doc.r79618.tar.xz",
+          "urlFile": "latex.doc.tar.xz",
+          "relocated": true,
+          "size": 39805068,
+          "sha512": "22d9659d0c69649a93b2b5386f9502e5b4cfedd71042f0b312e04f4757b3849630b3bc92c787a0ca3a0853ea4ca90a1983e9001484ae85ab7e691777eab993f1"
+        },
+        {
+          "kind": "source",
+          "file": "latex.source.r79618.tar.xz",
+          "urlFile": "latex.source.tar.xz",
+          "relocated": true,
+          "size": 841876,
+          "sha512": "cde635a3602c5de04292e053c0f375074992ca51cb2e82efd534be6f975f7788599d5cd45091049181ca448a1369d59d5adbc2b8a919f8af690fc630f32efcd2"
+        }
+      ]
+    },
+    {
+      "name": "latex-fonts",
+      "revision": 79618,
+      "license": "lppl1.2",
+      "archives": [
+        {
+          "kind": "",
+          "file": "latex-fonts.r79618.tar.xz",
+          "urlFile": "latex-fonts.tar.xz",
+          "relocated": true,
+          "size": 17956,
+          "sha512": "64915845acf0218c69802c9602ceb126412cc02cf856f430dd89e915536c318c61f53801db8a888b2eb1d03ef252eb3cd2563612f4ee26891ff261737ceabd1e"
+        },
+        {
+          "kind": "doc",
+          "file": "latex-fonts.doc.r79618.tar.xz",
+          "urlFile": "latex-fonts.doc.tar.xz",
+          "relocated": true,
+          "size": 1128,
+          "sha512": "71d9af041af1de0d5907d8bf92a2c611d68a5c7d96b6463f9d4c4c16e92ba42e5978d65f0c59bf323e3adedbb790e4824cc996f9725114a74976d9d2b9c3d785"
+        }
+      ]
+    },
+    {
+      "name": "lm",
+      "revision": 77682,
+      "license": "gfl",
+      "archives": [
+        {
+          "kind": "",
+          "file": "lm.r77682.tar.xz",
+          "urlFile": "lm.tar.xz",
+          "relocated": true,
+          "size": 11944800,
+          "sha512": "c4fae36dbf06177583c2dd3431176deca7f6fc1919a2aa9d7dbef89b77f26501e7d323dbda3a72fb3c9644074f8c4aec90d0389d72d87ab4dd38efd99b757d5b"
+        },
+        {
+          "kind": "doc",
+          "file": "lm.doc.r77682.tar.xz",
+          "urlFile": "lm.doc.tar.xz",
+          "relocated": true,
+          "size": 2511620,
+          "sha512": "45fac0159b7e8a29df305902af04835fc339556ee3b791ddc69bab2ba742371be1cd08bd425fdc73d065bce8cb1cff91809b2fa0ce4723e2d30a1c7f8f697782"
+        }
+      ]
+    },
+    {
+      "name": "ltxcmds",
+      "revision": 79461,
+      "license": "lppl1.3c",
+      "archives": [
+        {
+          "kind": "",
+          "file": "ltxcmds.r79461.tar.xz",
+          "urlFile": "ltxcmds.tar.xz",
+          "relocated": true,
+          "size": 4144,
+          "sha512": "e123a338ecffc630d5f2447e4f2fd5df05b1ee06d0a2d7630625b4528b83ae6e4972aa9417d51efbc0a41621611c5020e50d50b62d985991d22dcd08c55441d1"
+        },
+        {
+          "kind": "doc",
+          "file": "ltxcmds.doc.r79461.tar.xz",
+          "urlFile": "ltxcmds.doc.tar.xz",
+          "relocated": true,
+          "size": 405948,
+          "sha512": "ef30a95dc33c20dcc9803b4dddd55bbcb0f952d8aef2b852948b43f08c69ef2b4528af0ba1f95474c711cf3e8d24a86e6d78936d6506b2ec30847c1accd4a6ad"
+        },
+        {
+          "kind": "source",
+          "file": "ltxcmds.source.r79461.tar.xz",
+          "urlFile": "ltxcmds.source.tar.xz",
+          "relocated": true,
+          "size": 12948,
+          "sha512": "f10d9233a71a98df9913809a82e26a77dcba90e6599e02efb9a7456ddd6176eb9dc049bd73e2899f1f9468b43aca912f57d51e070ec72727c6a9f1366e5aa6d0"
+        }
+      ]
+    },
+    {
+      "name": "needspace",
+      "revision": 77682,
+      "license": "lppl1.3c",
+      "archives": [
+        {
+          "kind": "",
+          "file": "needspace.r77682.tar.xz",
+          "urlFile": "needspace.tar.xz",
+          "relocated": true,
+          "size": 956,
+          "sha512": "e77a8261444cde90394b4de0e53702f09420ea869c68b30c12f27db2f5ed2aaa1a9b5e8e0bd94bb1592b567d3176f5a37a5e60516c837433277f224e5510f0f6"
+        },
+        {
+          "kind": "doc",
+          "file": "needspace.doc.r77682.tar.xz",
+          "urlFile": "needspace.doc.tar.xz",
+          "relocated": true,
+          "size": 183912,
+          "sha512": "6e3f4e74d401fecc36ca0be05b9d68faf54cc1b3590f1e54976f0d17717ec7885a9de4e1cd006d7019108d876909ceff62cae7bacaad940dbfc618d6405a08e6"
+        },
+        {
+          "kind": "source",
+          "file": "needspace.source.r77682.tar.xz",
+          "urlFile": "needspace.source.tar.xz",
+          "relocated": true,
+          "size": 2220,
+          "sha512": "28e1c19932f13d9b3e9d58d427f89adc1e941b5160b4812b14eeb5ade956392e80ca48c1e4c6f4b00dc18f3b190e30439a015ba998afd2058cdead1908f906a5"
+        }
+      ]
+    },
+    {
+      "name": "pdfescape",
+      "revision": 79461,
+      "license": "lppl1.3",
+      "archives": [
+        {
+          "kind": "",
+          "file": "pdfescape.r79461.tar.xz",
+          "urlFile": "pdfescape.tar.xz",
+          "relocated": true,
+          "size": 4268,
+          "sha512": "25e9c69209cde2be2cbed5afeee2912023883ad245c7b69a817df1b7ce0ff0d9a47bcc4d0d5e9592f6f8b03db612ac5a24616ca86d08bcab9f44723b966ad890"
+        },
+        {
+          "kind": "doc",
+          "file": "pdfescape.doc.r79461.tar.xz",
+          "urlFile": "pdfescape.doc.tar.xz",
+          "relocated": true,
+          "size": 342648,
+          "sha512": "f80eda7f75ce5883cbba38896a9ec5f06b4f17be5668c81a27e8c16adc05f86eb68e2109cda4fbde5f0efe6f4d9f18b0c3d64168ffba209f0ede968e2ee4dd20"
+        },
+        {
+          "kind": "source",
+          "file": "pdfescape.source.r79461.tar.xz",
+          "urlFile": "pdfescape.source.tar.xz",
+          "relocated": true,
+          "size": 8308,
+          "sha512": "6bb5b3aa1ade105f317a75267e41d1075579e37c63936c15e6802daa07986b189e7f0ce7bcdefb4f75df70a3c8ac610febc12cc5d94eebd63dcc91d0b17b298d"
+        }
+      ]
+    },
+    {
+      "name": "pdftexcmds",
+      "revision": 79461,
+      "license": "lppl1.3c",
+      "archives": [
+        {
+          "kind": "",
+          "file": "pdftexcmds.r79461.tar.xz",
+          "urlFile": "pdftexcmds.tar.xz",
+          "relocated": true,
+          "size": 6336,
+          "sha512": "d4179f248170d08fffd6d4d80479c00bfe3cf27c9c2101db02c13a4ff07255a37627861288d6634fdc3bd13dcc2a126f393f279b5aa0a0ebc64bc665874ced92"
+        },
+        {
+          "kind": "doc",
+          "file": "pdftexcmds.doc.r79461.tar.xz",
+          "urlFile": "pdftexcmds.doc.tar.xz",
+          "relocated": true,
+          "size": 379848,
+          "sha512": "7005fa376b10ac4146ea1b42504e51abbf01845dcf4371b71bcc9a583558b27d6e0fc67a92eb8d6ba5704585b4866498fc43863070814d16ae7fc1fd4724de18"
+        },
+        {
+          "kind": "source",
+          "file": "pdftexcmds.source.r79461.tar.xz",
+          "urlFile": "pdftexcmds.source.tar.xz",
+          "relocated": true,
+          "size": 14048,
+          "sha512": "aec11ec0c7ea8922793ff121660a8bc412c673c57e355d4243979a826abb5d8131d4509bc338fdfc40fcebc7098bc364f91ad2b5b99411a8458c8542aaec6a8c"
+        }
+      ]
+    },
+    {
+      "name": "pgf",
+      "revision": 79866,
+      "license": "lppl1.3c gpl2 fdl",
+      "archives": [
+        {
+          "kind": "",
+          "file": "pgf.r79866.tar.xz",
+          "urlFile": "pgf.tar.xz",
+          "relocated": true,
+          "size": 719492,
+          "sha512": "03b616664e33bbe6dcf54e6cfe86fce58d4e08175c2b1d7dc37d493f61dfd0797ed0abcadafbd591c08c33b117dcee4362f82bf39787fd388dccb2117462dd0a"
+        },
+        {
+          "kind": "doc",
+          "file": "pgf.doc.r79866.tar.xz",
+          "urlFile": "pgf.doc.tar.xz",
+          "relocated": true,
+          "size": 10327132,
+          "sha512": "5fac17dce996635271c4c4aa9204a7915d9f370d4257b6ed3cf9a6e6b6ca9c9a840c72728063a35b7151405c96b0c1b0a2309ed34665199a29d7ddc43e0becb4"
+        }
+      ]
+    },
+    {
+      "name": "refcount",
+      "revision": 79461,
+      "license": "lppl1.3",
+      "archives": [
+        {
+          "kind": "",
+          "file": "refcount.r79461.tar.xz",
+          "urlFile": "refcount.tar.xz",
+          "relocated": true,
+          "size": 3068,
+          "sha512": "a3cf2f2dcea4641d19f96cee5631f3c218770f33eb4ffb9560f2c33e1e7911911039680c89aae98807f9509f2fdaa6c76ff8d2e240b1c7e99b99284b5628191c"
+        },
+        {
+          "kind": "doc",
+          "file": "refcount.doc.r79461.tar.xz",
+          "urlFile": "refcount.doc.tar.xz",
+          "relocated": true,
+          "size": 325412,
+          "sha512": "19d5dd6af8605839c7eaa87b06a9aab73cc7b75f1089d3527009415d0f37bc537500ab14afdde8e644dd5fc9622291567afdb6bee83f34269252489872ce7fbe"
+        },
+        {
+          "kind": "source",
+          "file": "refcount.source.r79461.tar.xz",
+          "urlFile": "refcount.source.tar.xz",
+          "relocated": true,
+          "size": 7468,
+          "sha512": "246d639f414ef2032dc5d82374f680b9d943a92d6a17197c175f510e8a03769945a211780f779ba4044b292f5dff06c9a4e29fea6c5b64a207bd23ee6f25c27b"
+        }
+      ]
+    },
+    {
+      "name": "rerunfilecheck",
+      "revision": 79461,
+      "license": "lppl1.3c",
+      "archives": [
+        {
+          "kind": "",
+          "file": "rerunfilecheck.r79461.tar.xz",
+          "urlFile": "rerunfilecheck.tar.xz",
+          "relocated": true,
+          "size": 3156,
+          "sha512": "bdca3107b24a51cdc5b8284b25822a6f235723967a5dce8055ed34299b5ce4cb7cbd14f359f11c6ff7dbdce558ccdf5e2626adbd5f36bba83b26e37382b8d598"
+        },
+        {
+          "kind": "doc",
+          "file": "rerunfilecheck.doc.r79461.tar.xz",
+          "urlFile": "rerunfilecheck.doc.tar.xz",
+          "relocated": true,
+          "size": 330220,
+          "sha512": "01716193d622a4569e08610b41358bb4337e3c423f3f03378b979513259d4f8d5866632eacff936aa87315be784d6c26a4575fd8af8ede4fba37ead33e726fc1"
+        },
+        {
+          "kind": "source",
+          "file": "rerunfilecheck.source.r79461.tar.xz",
+          "urlFile": "rerunfilecheck.source.tar.xz",
+          "relocated": true,
+          "size": 7248,
+          "sha512": "a84357f22babc5aee5e8aed883fd5dd7851173d2e15b8f4d67d787fed3f517ec65fdd8cd213bacc6e3be685da41c878495add0e80626b08fe4012726141eddb3"
+        }
+      ]
+    },
+    {
+      "name": "stringenc",
+      "revision": 79461,
+      "license": "lppl1.3",
+      "archives": [
+        {
+          "kind": "",
+          "file": "stringenc.r79461.tar.xz",
+          "urlFile": "stringenc.tar.xz",
+          "relocated": true,
+          "size": 23384,
+          "sha512": "581007b261584771dcaedefa982511c8e9869a085ae6da15b13fad86ec5b832ea17c96067eaa66c302f1af7624de0b4f3edf402abf54d8993b2d8e32ef73d1b2"
+        },
+        {
+          "kind": "doc",
+          "file": "stringenc.doc.r79461.tar.xz",
+          "urlFile": "stringenc.doc.tar.xz",
+          "relocated": true,
+          "size": 664772,
+          "sha512": "3d791e47ffeebedd90339f3f6de94cac093e12c4904ab4fafb2865113efca22d59865403079463b03312e8035ef8b7ded70d1e7fd5e68bcb6b4a23ab95b20a92"
+        },
+        {
+          "kind": "source",
+          "file": "stringenc.source.r79461.tar.xz",
+          "urlFile": "stringenc.source.tar.xz",
+          "relocated": true,
+          "size": 30632,
+          "sha512": "7fbd68204d876adf100fb8d600b5d2eb554a52348c0ffa8069afbf3623d6a0e6444439344f7c23771762d0daa4f634d56e91a4b291b08c4f5779cf9989f796d7"
+        }
+      ]
+    },
+    {
+      "name": "tex-gyre",
+      "revision": 68624,
+      "license": "gfl",
+      "archives": [
+        {
+          "kind": "",
+          "file": "tex-gyre.r68624.tar.xz",
+          "urlFile": "tex-gyre.tar.xz",
+          "relocated": true,
+          "size": 7748428,
+          "sha512": "5422f349d15233e6f49576fe3a65f8afb5cae6a3c51e5ad7cb56617d7d064e9cf574f233f789c029c04bbfc24e5948c115b2d33569e881373d68615ac709153f"
+        },
+        {
+          "kind": "doc",
+          "file": "tex-gyre.doc.r68624.tar.xz",
+          "urlFile": "tex-gyre.doc.tar.xz",
+          "relocated": true,
+          "size": 11141772,
+          "sha512": "db2bcc8da6d3bfb6f2165c1fb127b2b4a7471e41a0cebb851ce5465a18740d34948ce8292b4f6bd359621166602cf62a978bb179346dbd1dcfada49cc7972686"
+        },
+        {
+          "kind": "source",
+          "file": "tex-gyre.source.r68624.tar.xz",
+          "urlFile": "tex-gyre.source.tar.xz",
+          "relocated": true,
+          "size": 1016896,
+          "sha512": "e958408e6e64a54b25fa89b38de181c96fffb9eb8762959209799c39cead7a5525f220b7b3cd278e35cb9e3e49c1c85d565d518ffacb0695b0c3c09ede935266"
+        }
+      ]
+    },
+    {
+      "name": "tex-ini-files",
+      "revision": 78524,
+      "license": "pd",
+      "archives": [
+        {
+          "kind": "",
+          "file": "tex-ini-files.r78524.tar.xz",
+          "urlFile": "tex-ini-files.tar.xz",
+          "relocated": true,
+          "size": 4628,
+          "sha512": "bb60c588186061ea9489ca7c2778d0cb2ddc9d6628d39433938596b3a5ba6d688cce7fed1840a7fb281ea3379df897303d6e1bd33cc5d2bc46e7395416739627"
+        },
+        {
+          "kind": "doc",
+          "file": "tex-ini-files.doc.r78524.tar.xz",
+          "urlFile": "tex-ini-files.doc.tar.xz",
+          "relocated": true,
+          "size": 1472,
+          "sha512": "e82eca90c5c9ac70d928a2c67682714b9a3ede07ca0c32dae2d0f05066b287f41c18fce279a188238efaf5dd2671d0efe49a2349c060300730324807a5e3ac04"
+        }
+      ]
+    },
+    {
+      "name": "tools",
+      "revision": 79234,
+      "license": "lppl1.3c",
+      "archives": [
+        {
+          "kind": "",
+          "file": "tools.r79234.tar.xz",
+          "urlFile": "tools.tar.xz",
+          "relocated": true,
+          "size": 48836,
+          "sha512": "9bcf59a34fda40574fedd88583787937d33601fc1f505f12ec30e6ddb2095a5d5c52dd431e6ca354fedcd09cd1311acaed35ea858b429ba631cef7e58262d221"
+        },
+        {
+          "kind": "doc",
+          "file": "tools.doc.r79234.tar.xz",
+          "urlFile": "tools.doc.tar.xz",
+          "relocated": true,
+          "size": 6418344,
+          "sha512": "147ee9fde90c207f07089c959e7ae3703f18029e719ec1037911b1e7cc9257d1f5e90f9cefdbe4684f0a86f1ca8e667f4b92bd691538fd3b23cbe98a9f6a2855"
+        },
+        {
+          "kind": "source",
+          "file": "tools.source.r79234.tar.xz",
+          "urlFile": "tools.source.tar.xz",
+          "relocated": true,
+          "size": 248108,
+          "sha512": "801c0fec8dc1bcdcaa37b08071bcfa86aaa30935180523d628746c4bd64200afbf3cda016ed9297dffb1bcb098d9630a9c67e2db8f2eaac940e9dbb0f07f1e12"
+        }
+      ]
+    },
+    {
+      "name": "unicode-data",
+      "revision": 80380,
+      "license": "lppl1.3c other-free",
+      "archives": [
+        {
+          "kind": "",
+          "file": "unicode-data.r80380.tar.xz",
+          "urlFile": "unicode-data.tar.xz",
+          "relocated": true,
+          "size": 323356,
+          "sha512": "45f63c930ac35d6072fb51f2575bc5d56df79422b26a26523f03af95b5599bd5867c7ac527d787256fe4df9afa4ae9ff4c4b8a25d30ede1ebec951cdc34be534"
+        },
+        {
+          "kind": "doc",
+          "file": "unicode-data.doc.r80380.tar.xz",
+          "urlFile": "unicode-data.doc.tar.xz",
+          "relocated": true,
+          "size": 3952,
+          "sha512": "29afc19251703be285d156a1b6335475cb15ff8551e6f1e1d4d02d389ae30e9be7df6ce596b16b9eebb16c843b0558f22497c285216c23430c6376e3109e88ca"
+        }
+      ]
+    },
+    {
+      "name": "uniquecounter",
+      "revision": 79461,
+      "license": "lppl1.3",
+      "archives": [
+        {
+          "kind": "",
+          "file": "uniquecounter.r79461.tar.xz",
+          "urlFile": "uniquecounter.tar.xz",
+          "relocated": true,
+          "size": 2300,
+          "sha512": "37e18ccc52fbb4c8acb84226af85da37d4ccc0775b5bf52cdac0568841e3c67bb26ee29711c60cbe01cbfc7a295ea584965b80c072c1bb793bc464de04436f90"
+        },
+        {
+          "kind": "doc",
+          "file": "uniquecounter.doc.r79461.tar.xz",
+          "urlFile": "uniquecounter.doc.tar.xz",
+          "relocated": true,
+          "size": 291272,
+          "sha512": "7388faa91681ea7119b739a2f90e062f7c9c5f636a2403be2450e90e347d0e2ff32d1aed1a7cca4336bfe0f37d89f12819809387616e5022cfe9cf4e88be0ca2"
+        },
+        {
+          "kind": "source",
+          "file": "uniquecounter.source.r79461.tar.xz",
+          "urlFile": "uniquecounter.source.tar.xz",
+          "relocated": true,
+          "size": 5324,
+          "sha512": "e1e345bf31fd5b5c751adadbf9a6990753db2ee62341c48cc95a650222cb00b23b2aa6fb58798464ff3b1315e7fc8196c6508f4fc6d8d7c5ba85e53a81c40118"
+        }
+      ]
+    },
+    {
+      "name": "url",
+      "revision": 77682,
+      "license": "lppl",
+      "archives": [
+        {
+          "kind": "",
+          "file": "url.r77682.tar.xz",
+          "urlFile": "url.tar.xz",
+          "relocated": true,
+          "size": 5516,
+          "sha512": "4d036b664abd4917c9237aaa84bd5f93baa5589fda698543ac31fe18ab686ec25926a127733435a0cb5f4230d0d3be05b392c0395eb57991e3e9f0b93fe4a35a"
+        },
+        {
+          "kind": "doc",
+          "file": "url.doc.r77682.tar.xz",
+          "urlFile": "url.doc.tar.xz",
+          "relocated": true,
+          "size": 266856,
+          "sha512": "56ea7a79181156a61ec34ecd75d7fc420b3e31a475a5d39448edfab0a73bc0cade5d6480cd65cda69af0db5bfb3cb5013b686153e63101e817745ad3e0389ab1"
+        }
+      ]
+    },
+    {
+      "name": "xcolor",
+      "revision": 77682,
+      "license": "lppl1.3c",
+      "archives": [
+        {
+          "kind": "",
+          "file": "xcolor.r77682.tar.xz",
+          "urlFile": "xcolor.tar.xz",
+          "relocated": true,
+          "size": 18300,
+          "sha512": "3ba03742b310e82e5d51df140ac1322afd46d0e18700e3b827f6d5771fd94ee2d82e3d284c548c8159f1360a8ec0c085c65e33c03dc71fb9f308ad66e4f930aa"
+        },
+        {
+          "kind": "doc",
+          "file": "xcolor.doc.r77682.tar.xz",
+          "urlFile": "xcolor.doc.tar.xz",
+          "relocated": true,
+          "size": 935036,
+          "sha512": "300988b2d84b97365c95063552c1bf1c8eb2a4b2e5be1819c1f1e81026ff775855fed33b67f8bb8d1f6e837dde95e2dd95e78159674134c143917c6c54cd148b"
+        },
+        {
+          "kind": "source",
+          "file": "xcolor.source.r77682.tar.xz",
+          "urlFile": "xcolor.source.tar.xz",
+          "relocated": true,
+          "size": 77232,
+          "sha512": "fabf3014ede7786ddbd3588ad4fa2859fa9c1d451e4e12c01137be342440ffc4d8fea2b90cea48917a1b460c5c2c02dd3f7b89e849b9e8db2b8b3f92c2ecccf5"
+        }
+      ]
+    },
+    {
+      "name": "xecjk",
+      "revision": 80059,
+      "license": "lppl1.3c",
+      "archives": [
+        {
+          "kind": "",
+          "file": "xecjk.r80059.tar.xz",
+          "urlFile": "xecjk.tar.xz",
+          "relocated": true,
+          "size": 245112,
+          "sha512": "40e4c9c5f2195021cde4859da7b137de0cdf0c96b83f7ddbf724c682e1dd07276cb83bf4004b2b7cb5f90b6033da54940b3c58aeb2ca231b9ce449ee32d3a3d8"
+        },
+        {
+          "kind": "doc",
+          "file": "xecjk.doc.r80059.tar.xz",
+          "urlFile": "xecjk.doc.tar.xz",
+          "relocated": true,
+          "size": 1789380,
+          "sha512": "bd810a93bcb3849456c28a28456db65e75a74921412d93f22564c8f87342f4dab8edfbd531a530374a678ad3624bc593736116736b387b5d43960e8143af4a73"
+        },
+        {
+          "kind": "source",
+          "file": "xecjk.source.r80059.tar.xz",
+          "urlFile": "xecjk.source.tar.xz",
+          "relocated": true,
+          "size": 138556,
+          "sha512": "a5b6c34b1266016a5b88f05becead7093638f693c07fe9259d56ff93f35d301513f77f064dc5a3dac5924852530a458a687cb38225304073a5fd7a6ab01cbb0b"
+        }
+      ]
+    },
+    {
+      "name": "xetex",
+      "revision": 80015,
+      "license": "x11",
+      "archives": [
+        {
+          "kind": "",
+          "file": "xetex.r80015.tar.xz",
+          "urlFile": "xetex.tar.xz",
+          "relocated": false,
+          "size": 7988,
+          "sha512": "72d91a2f4b89926d30a2c9e6b230eb71bc4cf300614dfe6287123de2807b06c4e02aeb6a74b3132d5eec6d2a8c96abd289c316a5ec151c2ac718e3d2ecca2589"
+        },
+        {
+          "kind": "doc",
+          "file": "xetex.doc.r80015.tar.xz",
+          "urlFile": "xetex.doc.tar.xz",
+          "relocated": false,
+          "size": 641400,
+          "sha512": "a2a6db0c0a907103f4c48b362115da750f5faed969a2f4af9ab050a6ca772be9fc147fb5f845d9e4ccd0b1a210e29c3b8746a6d4a6c45e5d594d2d106c352fb2"
+        }
+      ]
+    },
+    {
+      "name": "xetex.windows",
+      "revision": 77973,
+      "license": "see-upstream",
+      "archives": [
+        {
+          "kind": "",
+          "file": "xetex.windows.r77973.tar.xz",
+          "urlFile": "xetex.windows.tar.xz",
+          "relocated": false,
+          "size": 10883596,
+          "sha512": "40fab41d6359924d1b21f61fe2306ba31d3b78532d7fbd1e8e4e8fd0fad50ef76d0c053d63aaec5de5aa028ea64503662c8298e295925449488a237f7da997bb"
+        }
+      ]
+    },
+    {
+      "name": "zapfding",
+      "revision": 77161,
+      "license": "gpl",
+      "archives": [
+        {
+          "kind": "",
+          "file": "zapfding.r77161.tar.xz",
+          "urlFile": "zapfding.tar.xz",
+          "relocated": true,
+          "size": 46940,
+          "sha512": "20b91c6136a12eb88b104d1171e1c9d7f09f592f70231404af9eadeee2c29d00e957a4628697649436476fd5385a39843bef0007959897c87a6789af3ab21eb5"
+        }
+      ]
+    },
+    {
+      "name": "zhnumber",
+      "revision": 80458,
+      "license": "lppl1.3c",
+      "archives": [
+        {
+          "kind": "",
+          "file": "zhnumber.r80458.tar.xz",
+          "urlFile": "zhnumber.tar.xz",
+          "relocated": true,
+          "size": 9828,
+          "sha512": "0df6b3ca0aa9e503696ea0b60bd92490d522ea5e0fd8d771d14245538c019216642db986bd1c5679233f7304251da1223ca2491a3da093bf0f893d12344df72b"
+        },
+        {
+          "kind": "doc",
+          "file": "zhnumber.doc.r80458.tar.xz",
+          "urlFile": "zhnumber.doc.tar.xz",
+          "relocated": true,
+          "size": 504404,
+          "sha512": "a6875f8a047d5e8b73fcedb1f22a05494388bbe32be4c56baee0c79dd73c745cdb4a2f57e7b39067c4a47aed5dca94239420b2d69eb6de79156fc2d38543cb67"
+        },
+        {
+          "kind": "source",
+          "file": "zhnumber.source.r80458.tar.xz",
+          "urlFile": "zhnumber.source.tar.xz",
+          "relocated": true,
+          "size": 26808,
+          "sha512": "fb99aca77a20239c2ce01531e6a96e3bc80a7403eabbf6c17cf67bca8b535df1190fdd7f6c79733bfc8bf498371bda5cafa2fc6267b1817df80355bcbf782595"
+        }
+      ]
+    }
+  ],
+  "archiveMirrors": [
+    "https://mirrors.tuna.tsinghua.edu.cn/CTAN/systems/texlive/tlnet/archive",
+    "https://tug.ctan.org/systems/texlive/tlnet/archive"
+  ],
+  "catalogue": {
+    "url": "https://mirrors.tuna.tsinghua.edu.cn/CTAN/systems/texlive/tlnet/tlpkg/texlive.tlpdb.xz",
+    "sha512": "9dc0c6cd2b7ecafdc7dc39ef262cb13198993d2ad49722c8fc0f2ebfb2ae137dd5b6940349d75c39b2e4897d9b0d2cd8e8da032bcf964d41f401600f3d3cf47e",
+    "capturedAt": "2026-10-27"
+  },
+  "externalSources": [
+    {
+      "file": "texlive-20260301-source.tar.xz",
+      "url": "https://tug.ctan.org/systems/texlive/Source/texlive-20260301-source.tar.xz",
+      "size": 99342236,
+      "sha512": "7b244504c7ea667267c3a93c4140a0c2288cb73425e695df8633e1801664d65bc72838f6a778e1e895904d8e5a373419ae91a1138cd919568a1c9a230935bbde",
+      "sourceCorrespondence": "official-2026-annual-source-snapshot",
+      "binaryCorrespondenceVerified": false,
+      "notices": [
+        "texlive-20260301-source/libs/freetype2/freetype-src/LICENSE.TXT",
+        "texlive-20260301-source/libs/graphite2/graphite2-src/COPYING",
+        "texlive-20260301-source/libs/graphite2/graphite2-src/LICENSE",
+        "texlive-20260301-source/libs/harfbuzz/harfbuzz-src/src/ms-use/COPYING",
+        "texlive-20260301-source/libs/harfbuzz/harfbuzz-src/COPYING",
+        "texlive-20260301-source/libs/icu/icu-src/LICENSE",
+        "texlive-20260301-source/libs/icu/icu-src/license.html",
+        "texlive-20260301-source/libs/libpng/libpng-src/LICENSE",
+        "texlive-20260301-source/libs/libpng/libpng-src/contrib/gregbook/COPYING",
+        "texlive-20260301-source/libs/libpng/libpng-src/contrib/gregbook/LICENSE",
+        "texlive-20260301-source/libs/libpng/libpng-src/contrib/pngminus/LICENSE.txt",
+        "texlive-20260301-source/libs/teckit/TECkit-src/COPYING",
+        "texlive-20260301-source/libs/zlib/zlib-src/LICENSE",
+        "texlive-20260301-source/libs/zlib/zlib-src/contrib/minizip/LICENSE.Info-Zip",
+        "texlive-20260301-source/libs/zziplib/zziplib-src/docs/COPYING.ZLIB",
+        "texlive-20260301-source/texk/dvipdfm-x/COPYING",
+        "texlive-20260301-source/texk/kpathsea/COPYING.LESSERv2",
+        "texlive-20260301-source/texk/web2c/luatexdir/luaharfbuzz/LICENSE",
+        "texlive-20260301-source/texk/web2c/xetexdir/COPYING",
+        "texlive-20260301-source/libs/pplib/pplib-src/src/util/utilmd5.c",
+        "texlive-20260301-source/libs/pplib/pplib-src/src/util/utilsha.c",
+        "texlive-20260301-source/libs/freetype2/freetype-src/docs/FTL.TXT",
+        "texlive-20260301-source/libs/freetype2/freetype-src/docs/GPLv2.TXT",
+        "texlive-20260301-source/libs/freetype2/freetype-src/src/bdf/README",
+        "texlive-20260301-source/libs/freetype2/freetype-src/src/pcf/README",
+        "texlive-20260301-source/libs/freetype2/freetype-src/src/base/fthash.c",
+        "texlive-20260301-source/libs/freetype2/freetype-src/include/freetype/internal/fthash.h",
+        "texlive-20260301-source/libs/freetype2/freetype-src/src/gzip/zlib.h",
+        "texlive-20260301-source/libs/freetype2/freetype-src/src/autofit/ft-hb-ft.c",
+        "texlive-20260301-source/libs/freetype2/freetype-src/src/autofit/ft-hb-decls.h",
+        "texlive-20260301-source/libs/freetype2/freetype-src/src/autofit/ft-hb-types.h",
+        "texlive-20260301-source/libs/freetype2/freetype-src/src/autofit/hb-script-list.h",
+        "texlive-20260301-source/libs/teckit/TECkit-src/license/LICENSING.txt",
+        "texlive-20260301-source/libs/teckit/TECkit-src/license/License_CPLv05.txt",
+        "texlive-20260301-source/libs/teckit/TECkit-src/license/License_LGPLv21.txt"
+      ]
+    },
+    {
+      "file": "texlive-20260301-devsource.tar.xz",
+      "url": "https://tug.ctan.org/systems/texlive/Source/texlive-20260301-devsource.tar.xz",
+      "size": 8575952,
+      "sha512": "1753528ca087e51ebc2ce1599cd2e88506dd69142471157eb41047aacd55287ddff2577e56ca5246095a09a7556eb6d514ce68b5d5cf7f2f2dae7c5bed2aa75e",
+      "sourceCorrespondence": "official-2026-annual-source-snapshot",
+      "binaryCorrespondenceVerified": false,
+      "notices": []
+    },
+    {
+      "file": "windows-src2025.tar.xz",
+      "url": "https://tug.ctan.org/systems/texlive/Source/windows-src2025.tar.xz",
+      "size": 47061352,
+      "sha512": "6664a26d1b42d5be9ee654a5d0e1b4afaed487f4570db293d2159201fad2ce4d2a3f65232fa4bda11bf0981e7d6ee36baeb3c83e2e2ce3268b6e9d2de4659df7",
+      "sourceCorrespondence": "official-listed-windows-platform-additions-2025",
+      "binaryCorrespondenceVerified": false,
+      "notices": [
+        "ktx/libs/freetype/LICENSE.TXT",
+        "ktx/libs/libpng/LICENSE",
+        "ktx/libs/zlib/LICENSE",
+        "ktx/texk/dvipdfm-x/COPYING",
+        "ktx/texk/kpathsea/COPYING.LESSERv2",
+        "ptx/libs/freetype/LICENSE.TXT",
+        "ptx/libs/graphite2-src/COPYING",
+        "ptx/libs/graphite2-src/LICENSE",
+        "ptx/libs/harfbuzz/harfbuzz-src/src/ms-use/COPYING",
+        "ptx/libs/libpng/LICENSE",
+        "ptx/libs/teckit/COPYING",
+        "ptx/libs/zlib/LICENSE",
+        "ptx/texk/kpathsea/COPYING.LESSERv2",
+        "ptx/texk/web2c/xetexdir/COPYING",
+        "qtx/libs/graphite2-src/COPYING",
+        "qtx/libs/graphite2-src/LICENSE",
+        "qtx/libs/harfbuzz/harfbuzz-src/src/ms-use/COPYING",
+        "qtx/libs/libpng/LICENSE",
+        "qtx/libs/zlib/LICENSE",
+        "qtx/texk/kpathsea/COPYING.LESSERv2",
+        "qtx/texk/web2c/luatexdir/luaharfbuzz/OTHERFILES/LICENSE",
+        "ptx/libs/fontconfig/fontconfig/fontconfig.h",
+        "ptx/libs/fontconfig/src/fccfg.c",
+        "ptx/libs/fontconfig/src/fcint.h",
+        "ktx/libs/freetype/docs/FTL.TXT",
+        "ktx/libs/freetype/docs/GPLv2.TXT",
+        "ktx/libs/freetype/include/freetype/internal/fthash.h",
+        "ktx/libs/freetype/src/base/fthash.c",
+        "ktx/libs/freetype/src/bdf/README",
+        "ktx/libs/freetype/src/gzip/zlib.h",
+        "ktx/libs/freetype/src/pcf/README",
+        "ptx/libs/freetype/docs/FTL.TXT",
+        "ptx/libs/freetype/docs/GPLv2.TXT",
+        "ptx/libs/freetype/include/freetype/internal/fthash.h",
+        "ptx/libs/freetype/src/base/fthash.c",
+        "ptx/libs/freetype/src/bdf/README",
+        "ptx/libs/freetype/src/gzip/zlib.h",
+        "ptx/libs/freetype/src/pcf/README",
+        "ktx/libs/freetype/src/autofit/ft-hb.c",
+        "ktx/libs/freetype/src/autofit/ft-hb.h",
+        "ptx/libs/freetype/src/autofit/ft-hb.c",
+        "ptx/libs/freetype/src/autofit/ft-hb.h"
+      ]
+    }
+  ],
+  "recipeVersion": 5,
+  "fontRuntimePrefixes": [
+    "texmf-dist/fonts/opentype/public/lm/",
+    "texmf-dist/fonts/map/",
+    "texmf-dist/fonts/tfm/public/cm/",
+    "texmf-dist/fonts/type1/public/amsfonts/cm/",
+    "texmf-dist/fonts/tfm/public/latex-fonts/",
+    "texmf-dist/fonts/type1/public/amsfonts/latxfont/",
+    "texmf-dist/fonts/misc/xetex/fontmapping/"
+  ],
+  "fontRuntimeFiles": [
+    "texmf-dist/fonts/tfm/adobe/zapfding/pzdr.tfm",
+    "texmf-dist/fonts/cmap/adobemapping/mapping-resources-pdf/pdf2unicode/Adobe-GB1-UCS2"
+  ]
+}

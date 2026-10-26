@@ -5,6 +5,7 @@ release/
 .tmp/
 .pytest-*/
 artifacts/
+/output/pdf/
 tmp/
 coverage/
 build/
@@ -65,6 +66,9 @@ backend/data/
 
 # Local review notes, validation reports, and generated test attachments.
 /docs/reviews/
+/docs/status/
+/docs/resume-runtime-*.md
+/docs/resume-runtime-*.json
 /docs/retrieval/
 /docs/AGENT_MOTION_REVIEW.md
 /docs/BROWSER_RUNTIME_PREFLIGHT.md
@@ -75,3 +79,4 @@ backend/data/
 /synthetic-chat.txt
 __pycache__/
 *.py[cod]
+/pytest-of-*/

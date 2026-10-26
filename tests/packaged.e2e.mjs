@@ -46,7 +46,8 @@ try {
   console.log(`FetchCV shell visible in ${shellVisibleMs}ms`);
   assert.ok(shellVisibleMs < 8000, `Desktop shell took ${shellVisibleMs}ms to appear`);
   await window.getByText("FetchCV", { exact: true }).first().waitFor({ state: "visible", timeout: 30000 });
-  await window.getByRole("heading", { name: "从一份真实简历开始。" }).waitFor({ state: "visible", timeout: 30000 });
+  await window.getByRole("main", { name: "独立对话" }).waitFor({ state: "visible", timeout: 30000 });
+  await window.getByRole("textbox", { name: "消息", exact: true }).waitFor({ state: "visible", timeout: 30000 });
   console.log(`FetchCV sidecar healthy in ${await healthReadyPromise}ms`);
   console.log(`FetchCV Agent ready in ${Date.now() - launchStartedAt}ms`);
   assert.equal(await isFetchCVHealthy(`http://127.0.0.1:${port}`), true);

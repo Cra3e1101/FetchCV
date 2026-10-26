@@ -24,8 +24,8 @@ test("resume editor keeps the structure sidebar inside its layout grid", () => {
   assert.match(html, /id="drawerHandle"[^>]*type="button"[^>]*aria-expanded="true"/);
   assert.match(html, /<strong>内容模块<\/strong>/);
   assert.doesNotMatch(html, /拖动调整顺序/);
-  assert.match(html, /class="profile-panel-head"[\s\S]*?默认保留，不随岗位改写/);
-  assert.match(html, /class="section-heading-copy"[\s\S]*?当前编辑模块/);
+  assert.match(html, /class="profile-panel-head"[\s\S]*?<strong>基本信息<\/strong>/);
+  assert.match(html, /class="section-heading-copy"[\s\S]*?id="activeSectionTitle"/);
   assert.match(html, /class="settings-section-label">页面排版/);
   assert.match(html, /class="settings-section-label">元素定位/);
 });

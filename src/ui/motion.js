@@ -1,25 +1,33 @@
 import { useSyncExternalStore } from "react";
+import "./native-motion.css";
 
-// The single source for both CSS and Framer Motion. Durations are milliseconds.
+// Shared CSS / Framer timings, adapted from Open Claude UI v2 §4.3:
+// https://openclaudeui.com/docs/v2/04#43-响应时间与贝塞尔曲线
+// Keep reading surfaces on small, non-overshooting tweens. The reference's
+// drag-release and voice-button springs are specific to those interactions.
+// https://github.com/Caho1/open-claude-ui/blob/main/code-examples/ClaudeMotionPresets.ts
+// Durations are milliseconds; the existing semantic names keep callers aligned.
 export const motionTokens = Object.freeze({
-  micro: 140, enter: 200, exit: 140, expand: 220, panel: 280,
+  press: 60, micro: 120, enter: 200, exit: 120, expand: 200, panel: 300,
   loop: 1400, stagger: 40, distance: 4, distanceSubtle: 2, pressScale: .98,
-  easeEnter: [.2, .8, .2, 1], easeExit: [.4, 0, 1, 1],
+  easeEnter: [.165, .84, .44, 1], easeSnap: [.32, .72, 0, 1], easeExit: [.4, 0, 1, 1],
 });
 
 export const motionTransitions = Object.fromEntries(
-  ["micro", "enter", "exit", "expand", "panel"].map(name => [name, {
+  ["press", "micro", "enter", "exit", "expand", "panel"].map(name => [name, {
     type: "tween", duration: motionTokens[name] / 1000,
-    ease: name === "exit" ? motionTokens.easeExit : motionTokens.easeEnter,
+    ease: name === "exit" ? motionTokens.easeExit
+      : name === "press" || name === "micro" ? motionTokens.easeSnap : motionTokens.easeEnter,
   }]),
 );
 
 export function applyMotionTokens(root = globalThis.document?.documentElement) {
   if (!root) return;
-  for (const name of ["micro", "enter", "exit", "expand", "panel", "loop", "stagger"]) {
+  for (const name of ["press", "micro", "enter", "exit", "expand", "panel", "loop", "stagger"]) {
     root.style.setProperty(`--motion-duration-${name}`, `${motionTokens[name]}ms`);
   }
   root.style.setProperty("--motion-ease-enter", `cubic-bezier(${motionTokens.easeEnter.join(",")})`);
+  root.style.setProperty("--motion-ease-snap", `cubic-bezier(${motionTokens.easeSnap.join(",")})`);
   root.style.setProperty("--motion-ease-exit", `cubic-bezier(${motionTokens.easeExit.join(",")})`);
   root.style.setProperty("--motion-distance-sm", `${motionTokens.distance}px`);
   root.style.setProperty("--motion-press-scale", String(motionTokens.pressScale));

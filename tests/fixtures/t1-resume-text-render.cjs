@@ -39,10 +39,15 @@ async function main() {
         } else if (Date.now()>deadline) { clearInterval(timer); reject(new Error('editor initialization timed out')); }
       }, 80);
     })`);
-    const mainSource = fs.readFileSync(path.join(root, "electron/main.mjs"), "utf8");
-    const renderScript = mainSource.match(/const metrics = await renderWindow\.webContents\.executeJavaScript\(`([\s\S]*?)`\);/);
-    assert.ok(renderScript, "Use the production DOM print preparation");
-    const metrics = await window.webContents.executeJavaScript(renderScript[1]);
+    // This fixture checks the legacy client-PDF validation boundary. Official
+    // preview/export now uses XeLaTeX, covered by the native renderer tests.
+    const metrics = await window.webContents.executeJavaScript(`(() => {
+      const page = document.querySelector('#resumePage');
+      document.body.replaceChildren(page);
+      Object.assign(document.body.style, { display: 'block', width: '794px', height: 'auto', overflow: 'visible' });
+      Object.assign(page.style, { position: 'relative', left: 'auto', top: 'auto', width: '794px', margin: '0', transform: 'none', boxShadow: 'none' });
+      return { text: page.innerText };
+    })()`);
     const pdf = await window.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true, pageSize: "A4", margins: { top: 0, bottom: 0, left: 0, right: 0 } });
     fs.writeFileSync(path.join(output, "synthetic-editor.pdf"), pdf);
     fs.writeFileSync(path.join(output, "synthetic-snapshot.json"), JSON.stringify(snapshot, null, 2));

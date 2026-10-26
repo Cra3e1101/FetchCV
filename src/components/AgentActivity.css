@@ -2,6 +2,8 @@
   width: 100%; min-height: 32px; border-bottom: 1px solid var(--ui-line, rgba(128,128,128,.16));
   justify-content: flex-start; gap: 4px;
 }
+.processing-summary .activity-indicator { color: var(--ui-accent, currentColor); }
+#root .source-grid .processing-summary time { font-variant-numeric: tabular-nums; }
 #root .source-grid .processing-disclosure .processing-detail { padding: 12px 0; margin: 0; border: 0; }
 #root .source-grid .processing-events > .activity-line,
 #root .source-grid .processing-events > .tool-receipt-detail { margin: 0 0 8px; }

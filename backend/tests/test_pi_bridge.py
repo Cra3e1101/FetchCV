@@ -65,6 +65,22 @@ def test_pi_turn_bootstrap_exposes_gateway_and_persists_messages(database):
         assert workspace["messages"][1]["content"] == "已读取岗位。"
 
 
+def test_job_context_calibration_is_reloaded_separately_from_model_history(database):
+    snapshot = {"version": 1, "model": "test-model", "source": "reported", "used_tokens": 2400,
+                "calibration": {"prompt_tokens": 2400, "estimated_tokens": 700, "envelope_hash": "b" * 64}}
+    with TestClient(create_app(database)) as client:
+        _, job = _workspace(client)
+        first = client.post(f"/api/pi/jobs/{job['id']}/turns", json=_turn_payload()).json()
+        assert first["previous_context_usage"] is None
+        done = client.post(f"/api/pi/turns/{first['user']['id']}/complete",
+                           json={"content": "已完成", "usage": {"context_usage": snapshot, "total_tokens": 9999}})
+        assert done.status_code == 200
+        assert done.json()["assistant"]["metadata_json"]["runtime"]["context_usage"] == snapshot
+        second = client.post(f"/api/pi/jobs/{job['id']}/turns", json=_turn_payload("继续")).json()
+        assert second["previous_context_usage"] == snapshot
+        assert "calibration" not in str(second["history"])
+
+
 def test_pi_interview_research_exposes_dedicated_multi_source_evidence_tools(database):
     with TestClient(create_app(database)) as client:
         _, job = _workspace(client)

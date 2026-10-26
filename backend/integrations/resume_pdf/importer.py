@@ -5,12 +5,12 @@ import hashlib
 from html import escape as escape_html
 from io import BytesIO
 import re
-import shutil
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 from pypdf import PdfReader
+from pypdf.errors import PyPdfError
 from sqlalchemy import select
 
 from applyos_domain.database import Database
@@ -22,6 +22,9 @@ from applyos_agent.config import AgentSettings
 from applyos_agent.runtime import AgentRuntime
 
 from .ai_parser import parse_resume_with_model, redact_resume_text
+from integrations.resume_import.formats import MIME_TYPES, MAX_SOURCE_BYTES, MAX_TEXT_CHARS, ResumeDocument, read_document
+from integrations.resume.template import DIDI_TEMPLATE, didi_settings
+from integrations.resume.latex_renderer import rich_text_equivalent
 
 
 SECTION_NAMES = {
@@ -43,9 +46,12 @@ SECTION_NAMES = {
     "Education": "education",
     "Experience": "experience",
     "Work Experience": "experience",
+    "Work History": "experience",
+    "Professional Experience": "experience",
     "Projects": "project",
     "Project Experience": "project",
     "Skills": "skill",
+    "Technical Skills": "skill",
     "Awards": "award",
     "Summary": "summary",
 }
@@ -79,7 +85,7 @@ def _header_field(header: str, label: str) -> str:
 def _extract_profile(header: str, filename: str) -> dict[str, str]:
     lines = [_clean(line) for line in header.splitlines() if _clean(line)]
     fallback_name = re.split(r"[-_—]", Path(filename).stem)[0].strip()
-    name = next((line for line in lines if re.fullmatch(r"[\u4e00-\u9fff·]{2,12}", line)), fallback_name)
+    name = next((line for line in lines if re.fullmatch(r"[\u4e00-\u9fff·]{2,12}|[A-Za-z][A-Za-z .'-]{2,60}", line)), fallback_name)
     email_match = re.search(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", header, re.IGNORECASE)
     phone_match = re.search(r"(?<!\d)(1[3-9]\d)[- ]?(\d{4})[- ]?(\d{4})(?!\d)", header)
     title_match = re.search(r"(?:职位|岗位|求职意向|目标岗位)\s*[：:]\s*([^\n]+)", header)
@@ -189,7 +195,11 @@ def _section_entries(body: str) -> list[str]:
     for line in lines:
         if not line:
             continue
-        starts_entry = bool(re.match(r"^(?:19|20)\d{2}\s*[-/.年]", line))
+        starts_entry = bool(re.match(r"^(?:19|20)\d{2}\s*[-/.年]", line)) or (
+            not re.match(r"^[·•]", line)
+            and len(line) < 180
+            and bool(re.search(r"(?:19|20)\d{2}[-/.年]\d{1,2}\s*(?:--?|[—–~至])\s*(?:(?:19|20)\d{2}[-/.年]\d{1,2}|至今|present)", line, re.I))
+        )
         if starts_entry and current:
             entries.append("\n".join(current))
             current = [line]
@@ -321,10 +331,13 @@ def _rebase_job_snapshot(base_snapshot: dict[str, Any], job_snapshot: dict[str, 
 
 
 def _without_date_prefix(text: str) -> str:
+    date = r"(?:19|20)\d{2}\s*[-/.年]\s*\d{1,2}(?:\s*月)?"
+    duration = rf"{date}\s*[-~—–至到]+\s*(?:{date}|至今|现在|present|current)"
+    without_range = re.sub(rf"(?:^{duration}\s*|\s*{duration}$)", "", text, flags=re.IGNORECASE)
     return re.sub(
-        r"^(?:19|20)\d{2}\s*[-/.年]\s*\d{1,2}(?:\s*月)?\s*(?:[-~—–至到]+\s*(?:(?:19|20)\d{2}\s*[-/.年]\s*\d{1,2}(?:\s*月)?|至今|现在))?\s*",
+        rf"^{date}\s*",
         "",
-        text,
+        without_range,
     ).strip(" -—–·")
 
 
@@ -339,6 +352,9 @@ def _experience_record(section: dict[str, Any], entry: str, index: int) -> dict[
         headline,
     )
     organization = organization_match.group(1) if organization_match else ""
+    if not organization:
+        english_organization = re.search(r"\b([A-Za-z][A-Za-z &.'-]{1,70}?(?:University|College|Company|Inc\.?|Ltd\.?|Corporation))\b", headline)
+        organization = english_organization.group(1).strip() if english_organization else ""
     role = headline.replace(organization, "", 1).strip(" -—–·") if organization else ""
     bullets: list[str] = []
     for raw_line, line in zip(raw_lines[1:], lines[1:]):
@@ -459,9 +475,12 @@ def _editor_snapshot(profile: dict[str, str], experiences: list[dict[str, Any]],
         "campus": ("campus", "校园经历"),
         "award": ("awards", "竞赛获奖"),
         "summary": ("self", "自我评价"),
+        "research": ("research", "科研经历"),
+        "other": ("other", "其他经历"),
     }
     sections = []
-    for kind, (section_id, title) in section_map.items():
+    for kind in dict.fromkeys(item["kind"] for item in experiences):
+        section_id, title = section_map.get(kind, (kind, "其他经历"))
         items = []
         for index, item in enumerate(value for value in experiences if value["kind"] == kind):
             date_text = " ~ ".join(part for part in [item["start_date"], item["end_date"]] if part)
@@ -472,18 +491,31 @@ def _editor_snapshot(profile: dict[str, str], experiences: list[dict[str, Any]],
                 gpa_match = re.search(r"GPA\s*[：:]?\s*([0-9.]+\s*/\s*[0-9.]+)", education_text, re.IGNORECASE)
                 fields.update({
                     "school": item["organization"] or item["title"],
-                    "major": re.sub(r"\s*GPA\s*[：:]?\s*[0-9.]+\s*/\s*[0-9.]+", "", education_text, flags=re.IGNORECASE).strip(),
+                    "major": re.sub(r"\s*GPA\s*[：:]?\s*[0-9.]+\s*/\s*[0-9.]+", "", education_text, flags=re.IGNORECASE).strip(" |｜"),
                     "gpa": re.sub(r"\s+", "", gpa_match.group(1)) if gpa_match else "",
                 })
             elif kind == "experience":
                 fields.update({"company": item["organization"] or item["title"], "role": item["role"]})
             elif kind == "project":
                 fields.update({"projectName": item["title"], "role": item["role"]})
+            details = item.get("details") if isinstance(item.get("details"), dict) else {}
+            rich_body = details.get("rich_body")
+            body = rich_body if rich_text_equivalent(rich_body, item["summary"]) else _bold_markup(item["summary"], bold_phrases or [])
+            meta_rich = details.get("meta_rich") if isinstance(details.get("meta_rich"), dict) else {}
+            accepted_meta = {}
+            plain_title = (item["organization"] or item["title"]) if kind in {"education", "experience"} else item["title"]
+            for key, plain in (("title", plain_title), ("role", item["role"])):
+                if rich_text_equivalent(meta_rich.get(key), plain):
+                    accepted_meta[key] = meta_rich[key]
+            phantom = meta_rich.get("roleLeadingPhantomEm")
+            if "role" in accepted_meta and isinstance(phantom, (float, int)) and not isinstance(phantom, bool) and 0 <= phantom <= 3:
+                accepted_meta["roleLeadingPhantomEm"] = phantom
             items.append({
                 "id": f"{section_id}-item-{index + 1}",
                 "metaLeft": date_text,
                 "metaRight": right,
-                "body": _bold_markup(item["summary"], bold_phrases or []),
+                "body": body,
+                "metaRich": accepted_meta,
                 "fields": fields,
             })
         if items:
@@ -494,17 +526,13 @@ def _editor_snapshot(profile: dict[str, str], experiences: list[dict[str, Any]],
         "profile": {
             "name": profile.get("name", ""), "gender": profile.get("gender", ""), "age": profile.get("age", ""),
             "phone": profile.get("phone", ""), "email": profile.get("email", ""), "political": profile.get("political", ""),
-            "arrival": profile.get("arrival", ""), "workYears": "", "location": "", "showPhoto": bool(photo), "photo": photo,
+            "arrival": profile.get("arrival", ""), "workYears": "", "location": profile.get("location", ""), "showPhoto": bool(photo), "photo": photo,
+            "website": profile.get("website", ""), "summary": profile.get("summary", ""),
             "photoFileName": "原简历证件照.jpg" if photo else "", "custom": [],
         },
         "sections": sections,
-        "template": "classic",
-        "settings": {
-            "margin": 18, "spacing": 7, "lineHeight": 150, "fontSize": 14,
-            "fontFamily": "'Microsoft YaHei', 'PingFang SC', sans-serif", "nameSize": 28,
-            "infoColumns": 2, "basicHeight": 132, "titleStyle": "block", "fitScale": 1, "verticalFillGap": 0,
-            "customAccent": "#2e5577", "customAccent2": "#3f6688", "customStage": "#eef1f5",
-        },
+        "template": DIDI_TEMPLATE,
+        "settings": didi_settings(),
     }
 
 
@@ -522,13 +550,18 @@ class PdfResumeImporter:
         self.settings = settings or AgentSettings.from_env()
         self.runtime = runtime
 
-    def preview(self, source_path: str | Path, *, ai_enhanced: bool = True) -> dict[str, Any]:
+    def preview(self, source_path: str | Path, *, ai_enhanced: bool = False) -> dict[str, Any]:
         path = Path(source_path).expanduser().resolve(strict=True)
-        if path.suffix.lower() != ".pdf" or not path.is_file():
-            raise ValueError("请选择有效的 PDF 简历")
+        source_format = path.suffix.lower().lstrip(".")
+        if source_format == "doc":
+            raise ValueError("旧版 .doc 暂不支持直接读取，请在 Word 中另存为 .docx 后导入")
+        if source_format not in MIME_TYPES or not path.is_file():
+            raise ValueError("请选择 PDF、Word（.docx）、LaTeX（.tex）或 JSON 简历")
+        if path.stat().st_size > MAX_SOURCE_BYTES:
+            raise ValueError("简历文件不能超过 20MB")
         raw = path.read_bytes()
-        if len(raw) > 20 * 1024 * 1024:
-            raise ValueError("PDF 简历不能超过 20MB")
+        if len(raw) > MAX_SOURCE_BYTES:
+            raise ValueError("简历文件不能超过 20MB")
         sha256 = hashlib.sha256(raw).hexdigest()
         cache_key = (
             str(path),
@@ -540,28 +573,43 @@ class PdfResumeImporter:
             self.settings.provider_base_url,
             self.settings.model,
         )
-        if cache_key in self._preview_cache:
+        # TeX can reference a local portrait that changes independently of the
+        # source text. Re-read it so an old cached image cannot be imported.
+        if source_format != "tex" and cache_key in self._preview_cache:
             return deepcopy(self._preview_cache[cache_key])
-        reader = PdfReader(path)
-        if reader.is_encrypted:
-            raise ValueError("暂不支持有密码的 PDF")
-        pages = [page.extract_text(extraction_mode="layout") or "" for page in reader.pages]
-        text = "\n".join(pages).strip()
-        if len(_clean(text)) < 80:
-            raise ValueError("没有检测到可提取文字；扫描版 PDF 请先执行 OCR")
+        if source_format == "pdf":
+            try:
+                reader = PdfReader(BytesIO(raw))
+                if reader.is_encrypted:
+                    raise ValueError("暂不支持有密码的 PDF")
+                pages = [page.extract_text(extraction_mode="layout") or "" for page in reader.pages]
+            except (PyPdfError, OSError, UnicodeError, IndexError) as exc:
+                raise ValueError("无法读取 PDF，请检查文件是否完整或已加密") from exc
+            text = "\n".join(pages).strip()
+            if len(_clean(text)) < 80:
+                raise ValueError("没有检测到可提取文字；扫描版 PDF 请先执行 OCR")
+            if len(text) > MAX_TEXT_CHARS:
+                raise ValueError("简历正文过长，请缩减到 500,000 字以内")
+            document = ResumeDocument(text=text, page_count=len(reader.pages))
+        else:
+            document = read_document(path, raw)
+            text = document.text
         header, sections = _split_sections(text)
-        profile = _extract_profile(header, path.name)
-        if not profile["title"]:
-            experience = next((item for item in sections if item["key"] == "experience" and item["entries"]), None)
-            if experience:
-                title_match = re.search(r"[-–—]([^\-–—\n]{2,30})$", experience["entries"][0])
-                if title_match:
-                    profile["title"] = _clean(title_match.group(1))
-        local_experiences = [
+        profile = {**_extract_profile(header, path.name), **document.profile}
+        local_experiences = document.experiences if document.experiences is not None else [
             _experience_record(section, entry, index)
             for section in sections
             for index, entry in enumerate(section["entries"])
         ]
+        if not local_experiences and text.strip():
+            local_experiences = [{
+                "kind": "other", "section": "其他经历", "title": "简历正文", "organization": "", "role": "",
+                "start_date": "", "end_date": "", "summary": text,
+                "details": {"raw_text": text, "headline": "", "bullets": []}, "content": text,
+            }]
+            document.warnings.append("未识别出标准模块，已保留全部正文，请在核对页调整。")
+        if not profile["title"]:
+            profile["title"] = next((item["role"] for item in local_experiences if item["kind"] == "experience" and item.get("role")), "")
         redacted = redact_resume_text(text, profile)
         outbound_text = redacted.text[:30000]
         ai_result = parse_resume_with_model(
@@ -572,9 +620,11 @@ class PdfResumeImporter:
         ) if ai_enhanced else None
         ai_experiences = _ai_experience_records(ai_result.items) if ai_result and ai_result.used else []
         experiences = _merge_ai_with_local(ai_experiences, local_experiences) if ai_experiences else local_experiences
-        section_summaries = _section_summaries(experiences) if ai_experiences else [
-            {"title": item["title"], "key": item["key"], "entry_count": len(item["entries"])} for item in sections
-        ]
+        if len(experiences) > 200:
+            raise ValueError("简历经历不能超过 200 项")
+        if not experiences:
+            raise ValueError("未识别到简历经历，请检查模块标题或选择其他格式")
+        section_summaries = _section_summaries(experiences)
         facts = [
             {"category": item["kind"], "section": item["section"], "content": item["content"]}
             for item in experiences
@@ -584,21 +634,26 @@ class PdfResumeImporter:
             "filename": path.name,
             "source_sha256": sha256,
             "size_bytes": len(raw),
-            "page_count": len(reader.pages),
+            "source_format": source_format,
+            "source_photo_sha256": hashlib.sha256(document.photo.encode("ascii")).hexdigest() if document.photo else "",
+            "mime_type": MIME_TYPES[source_format],
+            "page_count": document.page_count,
             "text_length": len(text),
             "profile": profile,
             "sections": section_summaries,
             "experiences": experiences,
             "facts": facts,
             "text_preview": text[:6000],
-            "outbound_preview": outbound_text[:6000],
+            "outbound_preview": outbound_text,
             "outbound_text_length": len(outbound_text),
             "outbound_truncated": len(redacted.text) > len(outbound_text),
             "recognition_mode": "ai_enhanced" if ai_experiences else "local",
             "provider": ai_result.provider if ai_result and ai_result.used else "",
             "model": ai_result.model if ai_result and ai_result.used else "",
             "redacted_fields": ai_result.redacted_fields if ai_result else redacted.categories,
-            "warnings": ai_result.warnings if ai_result else [],
+            "warnings": [*document.warnings, *(ai_result.warnings if ai_result else [])],
+            "_bold_phrases": document.bold_phrases,
+            "_photo": document.photo,
         }
         self._preview_cache[cache_key] = deepcopy(result)
         while len(self._preview_cache) > 12:
@@ -612,15 +667,28 @@ class PdfResumeImporter:
         candidate_id: str | None = None,
         candidate_name: str | None = None,
         candidate_title: str | None = None,
-        ai_enhanced: bool = True,
+        ai_enhanced: bool = False,
         reviewed_preview: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         preview = self.preview(source_path, ai_enhanced=ai_enhanced)
         if reviewed_preview is not None:
             preview = self._apply_reviewed_preview(preview, reviewed_preview)
         source = Path(preview["source_path"])
+        source_format = preview.get("source_format", "pdf")
         profile = preview["profile"]
+        raw = source.read_bytes()
+        if len(raw) > MAX_SOURCE_BYTES or hashlib.sha256(raw).hexdigest() != preview["source_sha256"]:
+            raise ValueError("简历文件已变化，请重新选择并核对")
         with self.database.session() as session:
+            source_key = f"{source_format}:{preview['source_sha256']}"
+            if source_format == "tex" and preview.get("source_photo_sha256"):
+                source_key += f":{preview['source_photo_sha256'][:20]}"
+            existing = session.scalar(select(ResumeVersion).where(ResumeVersion.legacy_id == source_key))
+            if existing is not None:
+                # Re-importing the same file must not overwrite subsequent user edits.
+                if source_format == "pdf" and not (existing.content_json or {}).get("editor_source"):
+                    self._repair_existing_snapshot(existing, preview, source)
+                return {"candidate_id": existing.candidate_id, "resume_id": existing.id, "facts_created": 0, "duplicate": True, "preview": preview}
             candidate = session.get(Candidate, candidate_id) if candidate_id else None
             if candidate_id and candidate is None:
                 raise ValueError("候选人不存在")
@@ -636,24 +704,20 @@ class PdfResumeImporter:
             candidate.email = candidate.email or profile.get("email") or None
             candidate.phone = candidate.phone or profile.get("phone") or None
 
-            source_key = f"pdf:{preview['source_sha256']}"
-            existing = session.scalar(select(ResumeVersion).where(ResumeVersion.legacy_id == source_key))
-            if existing is not None:
-                self._repair_existing_snapshot(existing, preview, source)
-                return {"candidate_id": existing.candidate_id, "resume_id": existing.id, "facts_created": 0, "duplicate": True, "preview": preview}
-
             destination_dir = artifact_root() / "resumes" / "imported"
             destination_dir.mkdir(parents=True, exist_ok=True)
-            destination = destination_dir / f"{preview['source_sha256'][:20]}.pdf"
-            shutil.copy2(source, destination)
+            destination = destination_dir / f"{preview['source_sha256'][:20]}.{source_format}"
+            destination.write_bytes(raw)
             material = MaterialAsset(
                 candidate_id=candidate.id,
-                kind="resume_pdf",
+                kind=f"resume_{source_format}",
                 name=preview["filename"],
                 source_path=str(destination),
-                mime_type="application/pdf",
+                mime_type=preview.get("mime_type", "application/pdf"),
                 metadata_json={
                     "sha256": preview["source_sha256"],
+                    "source_format": source_format,
+                    "photo_sha256": preview.get("source_photo_sha256", ""),
                     "page_count": preview["page_count"],
                     "size_bytes": preview["size_bytes"],
                 },
@@ -665,12 +729,12 @@ class PdfResumeImporter:
                 "sections": preview["sections"],
                 "raw_text": preview["text_preview"],
                 "source_asset_id": material.id,
-                "source": {"type": "pdf", "filename": preview["filename"], "sha256": preview["source_sha256"], "page_count": preview["page_count"]},
-                "source_pdf_fidelity": True,
+                "source": {"type": source_format, "filename": preview["filename"], "sha256": preview["source_sha256"], "page_count": preview["page_count"], "photo_sha256": preview.get("source_photo_sha256", "")},
+                "source_pdf_fidelity": source_format == "pdf",
                 "pdf_import_schema_version": PDF_IMPORT_SCHEMA_VERSION,
             }
-            photo, _ = _extract_photo_data_uri(source)
-            bold_phrases = _extract_bold_phrases(source)
+            photo, _ = _extract_photo_data_uri(source) if source_format == "pdf" else (preview.get("_photo", ""), None)
+            bold_phrases = _extract_bold_phrases(source) if source_format == "pdf" else preview.get("_bold_phrases", [])
             content["profile"]["photo"] = photo
             content["editor_snapshot"] = _editor_snapshot({**profile, "name": candidate.name}, preview["experiences"], photo=photo, bold_phrases=bold_phrases)
             resume = ResumeVersion(
@@ -679,7 +743,7 @@ class PdfResumeImporter:
                 name=f"{candidate.name}的基础简历",
                 status=AssetStatus.DRAFT,
                 content_json=content,
-                pdf_path=str(destination),
+                pdf_path=str(destination) if source_format == "pdf" else None,
                 content_hash=canonical_hash(content),
             )
             session.add(resume)
@@ -731,7 +795,9 @@ class PdfResumeImporter:
             raise ValueError("简历核对结果格式无效")
         source_sha = str(reviewed.get("source_sha256") or base["source_sha256"])
         if source_sha != base["source_sha256"]:
-            raise ValueError("简历核对结果与当前 PDF 不匹配")
+            raise ValueError("简历核对结果与当前文件不匹配，请重新选择并核对")
+        if "source_photo_sha256" in reviewed and reviewed["source_photo_sha256"] != base.get("source_photo_sha256", ""):
+            raise ValueError("简历头像已变化，请重新选择并核对")
         raw_items = reviewed.get("experiences")
         if not isinstance(raw_items, list) or len(raw_items) > 200:
             raise ValueError("简历经历核对结果无效")

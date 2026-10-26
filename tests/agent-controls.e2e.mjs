@@ -66,7 +66,7 @@ try {
   await pending().waitFor();
   check("cancel and pause disable immediately during request", await pending().isDisabled() && await page.getByRole("button", { name: "暂停当前 Agent 任务" }).isDisabled());
   check("pending request preserves actual task and busy lock", await page.evaluate(() => window.controlsFixture.task.status === 'running' && window.controlsFixture.busy));
-  check("pending request uses accurate header and rail labels", (await page.locator('.task-meta').innerText()).includes('正在请求取消') && (await page.locator('.rail-state strong').innerText()) === '正在请求取消');
+  check("pending request uses accurate header and rail labels", (await page.locator('.task-meta').innerText()).includes('正在请求取消') && (await page.locator('.job-progress-heading strong').innerText()) === '正在请求取消');
   check("pending request does not claim cancellation complete", !(await page.locator('.agent-workspace-v2').innerText()).includes('已取消') && !(await page.locator('.agent-rail-v2').innerText()).includes('任务已取消'));
   await page.locator('.processing-disclosure.stopping').waitFor();
   const time = await page.locator('.processing-summary time').innerText();

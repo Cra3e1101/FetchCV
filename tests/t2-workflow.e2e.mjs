@@ -130,19 +130,23 @@ async function scenario(name, origin) {
     const created=page.waitForResponse(response=>response.url()===apiBase+'/api/jobs'&&response.request().method()==='POST');
     await modal.getByRole('button',{name:'创建项目',exact:true}).click();
     const jobReceipt=await created;assert.equal(jobReceipt.status(),201);const job=await jobReceipt.json();
-    const progress=page.getByRole('region',{name:'岗位进度',exact:true});
+    const railToggle=page.locator('.source-context-toggle');
+    await railToggle.waitFor();
+    assert.equal(await railToggle.getAttribute('aria-expanded'),'false','right rail starts closed');
+    assert.equal(await page.locator('.agent-workspace-v2 .job-progress-panel').count(),0,'progress does not occupy the conversation');
+    await railToggle.click();
+    const progress=page.locator('.agent-rail-v2').getByRole('region',{name:'岗位进度',exact:true});
     await progress.waitFor();
-    assert.equal(await page.getByRole('button',{name:'展开任务上下文',exact:true}).count(),1,'right rail stays closed');
     assert.equal(await progress.locator('button.primary-button,button.primary').count(),1,'one primary next step');
-    if(name==='usable')await capture(page,'02-job-progress.png','岗位创建真实POST=201；中央进度、已有、缺失与下一步，右栏关闭');
+    assert.equal(await progress.locator('.job-progress-details').evaluate(node=>node.open),false,'supporting details start collapsed');
+    if(name==='usable')await capture(page,'02-job-progress.png','岗位创建真实POST=201；从顶部按钮打开右栏，进度与唯一主操作位于右侧，详情默认收起');
     await progress.getByRole('button',{name:'分析这个岗位',exact:true}).click();
-    await progress.getByRole('button',{name:'确认本次经历',exact:true}).waitFor();
-    await progress.getByRole('button',{name:'确认本次经历',exact:true}).click();
-    const facts=page.getByRole('dialog',{name:'确认本次经历',exact:true});
+    const facts=page.locator('.agent-rail-v2 .rail-selector');
     await facts.waitFor();
-    if(name==='usable')await capture(page,'03-central-experience-confirmation.png','中央经历选择对话框；右栏关闭，无默认审批绕过');
+    assert.equal(await progress.locator('button.primary-button,button.primary').count(),0,'inline experience selector owns the confirmation action');
+    if(name==='usable')await capture(page,'03-central-experience-confirmation.png','右栏直接选择经历并确认；不重复显示确认入口，无默认审批绕过');
     await facts.getByRole('button',{name:'确认并生成策略',exact:true}).click();
-    await page.getByRole('dialog',{name:'确认本次经历',exact:true}).waitFor({state:'hidden'});
+    await facts.waitFor({state:'hidden'});
     await progress.getByRole('button',{name:/处理待补证|审阅改写建议/,exact:true}).click();
     const review=page.getByRole('dialog',{name:'简历改写审阅',exact:true});
     const unsafe=review.locator('.proposal-list > article').filter({hasText:'无支持的合成攻击草稿'});
@@ -167,8 +171,12 @@ async function scenario(name, origin) {
     await safe.getByRole('button',{name:'采用建议',exact:true}).click();
     await review.getByRole('button',{name:'应用已确认修改',exact:true}).click();
     await review.waitFor({state:'hidden'});
+    const progressDetails=progress.locator('.job-progress-details');
+    if(!await progressDetails.evaluate(node=>node.open))await progressDetails.locator(':scope > summary').click();
     assert.doesNotMatch(await progress.innerText(),/\d+\s*条改写待补证/,'A rejected unsupported draft is retained as history, not an outstanding evidence task');
-    scenarioReport.checks.push('Real job POST, central mock analysis, real fact approval, central T1 review, disabled unsupported adoption and production API rejection, real mixed approve/reject POST');
+    scenarioReport.checks.push('Real job POST, sidebar mock analysis and direct fact approval, central T1 review, disabled unsupported adoption and production API rejection, real mixed approve/reject POST, expanded details clear rejected evidence todos');
+    await railToggle.click();
+    assert.equal(await railToggle.getAttribute('aria-expanded'),'false','right rail can close after workflow actions');
     await page.locator('.workspace-tabs').getByRole('button',{name:'面试',exact:true}).click();
     await page.getByRole('button',{name:'开始面试调研',exact:true}).click();
     await page.locator('[aria-label="面试证据状态"]').getByText('本轮调研已结束',{exact:true}).waitFor();
@@ -218,7 +226,7 @@ async function scenario(name, origin) {
       }
     }
     scenarioReport.checks.push(`${name}: current evidence boundary, stale brief filtering, JD practice or source question, explicit round ending`);
-    assert.equal(await page.getByRole('button',{name:'展开任务上下文',exact:true}).count(),1);
+    assert.equal(await railToggle.getAttribute('aria-expanded'),'false');
     scenarioReport.database=await request('/fixture/inspect');
     assert.equal(scenarioReport.database.body.jobs,1);
     assert.deepEqual(scenarioReport.page_errors,[]);

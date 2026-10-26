@@ -448,6 +448,8 @@ def start_turn(job_id: str, payload: PiTurnStart, session: Session = Depends(get
     ]
     latest_snapshot = context_manager.latest(job.id, run.id)
     compacted_summary = latest_snapshot.summary if latest_snapshot else ""
+    previous_usage = next((item.metadata_json.get("runtime") for item in history_rows
+                           if item.role == "assistant" and item.content.strip()), None)
 
     return {
         "job_id": job.id,
@@ -461,6 +463,7 @@ def start_turn(job_id: str, payload: PiTurnStart, session: Session = Depends(get
             settings, skills=enabled_skill_catalog(session), thinking_level=payload.thinking_level,
         ),
         "history": history,
+        "previous_context_usage": previous_usage.get("context_usage") if isinstance(previous_usage, dict) else None,
         "compacted_summary": compacted_summary,
         "outbound_privacy": _outbound_privacy_profile(session, job.candidate_id),
         "tools": tools,

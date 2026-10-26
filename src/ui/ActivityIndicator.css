@@ -1,7 +1,24 @@
-.activity-indicator { width: 16px; height: 16px; display: inline-flex; flex: 0 0 16px; align-items: center; justify-content: center; gap: 2px; color: inherit; }
-.activity-indicator i { width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: .68; }
-.activity-indicator[data-motion-active="true"] i { animation: agent-dot-breathe var(--motion-duration-loop) ease-in-out infinite; }
-.activity-indicator[data-motion-active="true"] i:nth-child(2) { animation-delay: calc(var(--motion-duration-loop) / -3); }
-.activity-indicator[data-motion-active="true"] i:nth-child(3) { animation-delay: calc(var(--motion-duration-loop) / -1.5); }
-@keyframes agent-dot-breathe { 0%, 100% { opacity: .62; } 50% { opacity: .88; } }
+/* Motion reference: Caho1/open-claude-ui, StatusIndicators.tsx / cds-theme.css.
+   Keep the existing icon slot and inherited color for buttons and loaders. */
+.activity-indicator { width: 16px; height: 16px; display: inline-flex; flex: 0 0 16px; align-items: center; justify-content: center; gap: 3.5px; color: inherit; }
+.activity-indicator > i { display: block; flex: none; width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: .68; }
+.activity-indicator[data-variant="dots"] > i { position: relative; top: .26em; }
+.activity-indicator[data-variant="dots"][data-motion-active="true"] > i { animation: agent-quiet-dot 1.9s cubic-bezier(.4, 0, .2, 1) infinite; }
+@supports (animation-delay: calc(sibling-index() * 1ms)) {
+  .activity-indicator[data-variant="dots"][data-motion-active="true"] > i { animation-delay: calc((sibling-index() - 1) * 150ms); }
+}
+.activity-indicator:is([data-variant="running"], [data-variant="breathe"]) > i { width: 6px; height: 6px; opacity: 1; }
+.activity-indicator[data-variant="running"][data-motion-active="true"] > i { animation: agent-status-blink 1.2s ease-in-out infinite; }
+.activity-indicator[data-variant="breathe"][data-motion-active="true"] > i { animation: agent-status-breathe 3s ease-in-out infinite; }
+@keyframes agent-quiet-dot {
+  0%, 8% { opacity: 0; transform: translateY(2px); }
+  22% { opacity: 1; transform: translateY(-2.5px); }
+  36%, 70% { opacity: 1; transform: translateY(0); }
+  90%, 100% { opacity: 0; transform: translateY(0); }
+}
+@keyframes agent-status-blink { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
+@keyframes agent-status-breathe {
+  0%, 100% { filter: brightness(.96); transform: scale(.86); }
+  50% { filter: brightness(1.06); transform: scale(1); }
+}
 @media (prefers-reduced-motion: reduce) { .activity-indicator i { animation: none !important; } }

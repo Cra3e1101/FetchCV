@@ -99,7 +99,7 @@
 .settings-window .settings-help { font:400 12px/1.6 var(--ui-font); color:var(--ui-secondary); }
 .settings-window .settings-help summary { display:flex; align-items:center; gap:6px; width:fit-content; cursor:pointer; list-style:none; }
 .settings-window .settings-help summary::-webkit-details-marker { display:none; }
-.settings-window .settings-help summary svg { flex:none; transform:rotate(-90deg); }
+.settings-window .settings-help summary svg { flex:none; transform:rotate(-90deg); transition:transform var(--motion-duration-micro,120ms) var(--motion-ease-snap,ease-out); }
 .settings-window .settings-help[open] summary svg { transform:none; }
 .settings-window .settings-help p { margin:8px 0 0; overflow-wrap:anywhere; }
 .settings-window .settings-help summary:hover { color:var(--ui-ink); }

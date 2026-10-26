@@ -23,9 +23,9 @@ export default {
         danger: "#c64545",
       },
       fontFamily: {
-        display: ["Source Serif 4", "Noto Serif SC", "Songti SC", "serif"],
-        sans: ["Plus Jakarta Sans", "Microsoft YaHei UI", "sans-serif"],
-        mono: ["JetBrains Mono", "ui-monospace", "monospace"],
+        display: ["var(--ui-font)"],
+        sans: ["var(--ui-font)"],
+        mono: ["var(--ui-code-font)"],
       },
       boxShadow: {
         quiet: "var(--shadow-quiet)",

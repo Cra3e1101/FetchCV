@@ -26,6 +26,7 @@ import { JobContextEditor } from "./components/JobContextCard";
 import { installSelectAllShortcut } from "./lib/keyboard";
 import { mergeProcessingEvent } from "./lib/processing";
 import { shareWorkspaceSnapshot } from "./lib/workspace-snapshot";
+import { useAgentMotion } from "./ui/motion";
 
 
 
@@ -82,6 +83,7 @@ function InteractiveMilestone() {
 }
 
 function NewJobModal({ open, candidates, preferredCandidateId, onClose, onCreate, busy }) {
+  const { enter, transition } = useAgentMotion();
   const [form, setForm] = useState({ candidate_id: "", company: "", role: "", jd_raw: "", source_type: "manual", source_url: "", context_json: normalizeJobContext(), jd_provenance: {} });
   const [inputMode, setInputMode] = useState("url");
   const [webPreview, setWebPreview] = useState(null);
@@ -90,6 +92,7 @@ function NewJobModal({ open, candidates, preferredCandidateId, onClose, onCreate
   const [importedIndex, setImportedIndex] = useState(0);
   const [importedName, setImportedName] = useState("");
   const [importError, setImportError] = useState("");
+  const [contextExpanded, setContextExpanded] = useState(false);
   const previewController = useRef(null);
   useEffect(() => {
     previewController.current?.abort();
@@ -97,6 +100,7 @@ function NewJobModal({ open, candidates, preferredCandidateId, onClose, onCreate
       setForm({ candidate_id: candidates.find(item => item.id === preferredCandidateId)?.id || candidates[0]?.id || "", company: "", role: "", jd_raw: "", source_type: "manual", source_url: "", context_json: normalizeJobContext(), jd_provenance: {} });
       setImportedJobs([]); setImportedIndex(0); setImportedName(""); setImportError("");
       setInputMode("url"); setWebPreview(null); setWebBusy(false);
+      setContextExpanded(false);
     }
     return () => previewController.current?.abort();
   }, [open, candidates, preferredCandidateId]);
@@ -112,6 +116,7 @@ function NewJobModal({ open, candidates, preferredCandidateId, onClose, onCreate
       const file = await window.appRuntime?.selectJobDescriptionFile?.();
       if (!file) return;
       previewController.current?.abort(); setWebBusy(false); setWebPreview(null); setInputMode("text");
+      setContextExpanded(false);
       const jobs = splitJobDescriptions(file.text);
       setImportedName(file.name); setImportedJobs(jobs); setImportedIndex(0);
       if (jobs.length) {
@@ -127,6 +132,7 @@ function NewJobModal({ open, candidates, preferredCandidateId, onClose, onCreate
     const job = importedJobs[index];
     if (!job) return;
     setImportedIndex(index);
+    setContextExpanded(false);
     setForm((current) => ({ ...current, company: job.company, role: job.role, jd_raw: job.jd, source_type: "file_import", source_url: "", context_json: normalizeJobContext(), jd_provenance: {} }));
   };
   const importJobPage = async () => {
@@ -141,36 +147,45 @@ function NewJobModal({ open, candidates, preferredCandidateId, onClose, onCreate
       if (controller.signal.aborted) return;
       setWebPreview(posting);
       const preview = jobPostingPreviewState(posting);
-      if (preview.usable) setForm((current) => ({ ...current, company: posting.company || current.company, role: posting.title || current.role, jd_raw: preview.body, source_type: "web_import", source_url: posting.source_url || url, context_json: normalizeJobContext(posting.context_json, preview.body), jd_provenance: posting.jd_provenance || {} }));
+      if (preview.usable) {
+        const context = normalizeJobContext(posting.context_json, preview.body);
+        setForm((current) => ({ ...current, company: posting.company || current.company, role: posting.title || current.role, jd_raw: preview.body, source_type: "web_import", source_url: posting.source_url || url, context_json: context, jd_provenance: posting.jd_provenance || {} }));
+        setContextExpanded(Object.values(context.fields).some(field => field.value));
+      }
     } catch (error) { if (!controller.signal.aborted) setImportError(error.message || "招聘网页读取失败"); }
     finally { if (previewController.current === controller) setWebBusy(false); }
   };
   const preview = webPreview && jobPostingPreviewState(webPreview);
   if (!open) return null;
   return <div className="modal-layer" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}>
-    <motion.form role="dialog" aria-modal="true" aria-labelledby="new-job-title" className="job-modal job-context-modal" initial={{ opacity: 0, scale: .98, y: 3 }} animate={{ opacity: 1, scale: 1, y: 0 }} transition={{duration:.2,ease:[.23,1,.32,1]}} onSubmit={(event) => { event.preventDefault(); if (!webBusy) onCreate(form); }}>
+    <motion.form role="dialog" aria-modal="true" aria-labelledby="new-job-title" className="job-modal job-context-modal new-job-modal" initial={enter()} animate={{ opacity: 1, y: 0 }} transition={transition("enter")} onSubmit={(event) => { event.preventDefault(); if (!webBusy) onCreate(form); }}>
       <button type="button" className="modal-close" onClick={onClose} disabled={busy} aria-label="关闭"><X size={16} /></button>
-      <p className="eyebrow">NEW JOB</p><h2 id="new-job-title">新增岗位项目</h2><p>填写岗位信息后，Agent 会先解释对 JD 的理解，再给出经历与改写建议。</p>
-      <label>候选人<select value={form.candidate_id} onChange={(event) => setForm({ ...form, candidate_id: event.target.value })}>{candidates.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select></label>
-      <div className="jd-input-tabs" role="tablist" aria-label="岗位描述来源"><button type="button" role="tab" aria-selected={inputMode === "url"} className={inputMode === "url" ? "active" : ""} onClick={() => setInputMode("url")}>网页导入</button><button type="button" role="tab" aria-selected={inputMode === "text"} className={inputMode === "text" ? "active" : ""} onClick={() => setInputMode("text")}>导入文本</button><button type="button" onClick={importJobFile}><FileUp size={14} />文件</button></div>
-      {inputMode === "url" && <div className="jd-url-import"><input aria-label="招聘网页 URL" type="url" value={form.source_url} onChange={(event) => { previewController.current?.abort(); setWebBusy(false); setWebPreview(null); setForm({ ...form, source_url: event.target.value, source_type: "manual", jd_provenance: {} }); }} placeholder="https://talent.example.com/jobs/..." /><button type="button" disabled={webBusy || !form.source_url.trim()} onClick={importJobPage}>{webBusy ? <LoaderCircle className="spin" size={14} /> : <Globe2 size={14} />}读取网页</button></div>}
-      {inputMode === "text" && <div className="jd-file-import"><span>{importedName || "粘贴或输入岗位描述文本"}</span></div>}
-      {importedJobs.length > 1 && <label className="jd-import-picker">检测到 {importedJobs.length} 个岗位<select aria-label="选择导入的岗位" value={importedIndex} onChange={(event) => chooseImportedJob(event.target.value)}>{importedJobs.map((job, index) => <option value={index} key={`${job.company}-${job.role}-${index}`}>{job.company} · {job.role}</option>)}</select></label>}
-      {importError && <div className="dialog-error" role="alert">{importError}</div>}
-      {preview && <><div className={`jd-web-preview${preview.usable ? "" : " preview-warning"}`} role="status"><strong>{preview.label}{webPreview.title ? ` · ${webPreview.title}` : ""}</strong><span>{preview.usable ? `${preview.body.length} 字符 · 预览尚未保存` : "请补充完整 JD 正文后再创建岗位"}</span></div>{preview.warningMessages.length > 0 && <p className="jd-preview-notice">{preview.warningMessages.join(" ")}</p>}</>}
-      <div className="form-row">
-        <label>公司<input required value={form.company} onChange={(event) => setForm({ ...form, company: event.target.value })} placeholder="例如：字节跳动" /></label>
-        <label>岗位<input required value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value })} placeholder="例如：AI 产品经理" /></label>
+      <header className="new-job-header"><h2 id="new-job-title">新增岗位项目</h2></header>
+      <div className="new-job-body">
+        <label>候选人<select value={form.candidate_id} onChange={(event) => setForm({ ...form, candidate_id: event.target.value })}>{candidates.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select></label>
+        <div className="jd-input-tabs" role="tablist" aria-label="岗位描述来源"><button type="button" role="tab" aria-selected={inputMode === "url"} className={inputMode === "url" ? "active" : ""} onClick={() => setInputMode("url")}>网页导入</button><button type="button" role="tab" aria-selected={inputMode === "text"} className={inputMode === "text" ? "active" : ""} onClick={() => setInputMode("text")}>导入文本</button><button type="button" onClick={importJobFile}><FileUp size={14} />文件</button></div>
+        {inputMode === "url" && <div className="jd-url-import"><input aria-label="招聘网页 URL" type="url" value={form.source_url} onChange={(event) => { previewController.current?.abort(); setWebBusy(false); setWebPreview(null); setForm({ ...form, source_url: event.target.value, source_type: "manual", jd_provenance: {} }); }} placeholder="粘贴招聘链接" /><button type="button" disabled={webBusy || !form.source_url.trim()} onClick={importJobPage}>{webBusy ? <LoaderCircle className="spin" size={14} /> : <Globe2 size={14} />}读取网页</button></div>}
+        {inputMode === "text" && importedName && <div className="jd-file-import"><span>{importedName}</span></div>}
+        {importedJobs.length > 1 && <label className="jd-import-picker">检测到 {importedJobs.length} 个岗位<select aria-label="选择导入的岗位" value={importedIndex} onChange={(event) => chooseImportedJob(event.target.value)}>{importedJobs.map((job, index) => <option value={index} key={`${job.company}-${job.role}-${index}`}>{job.company} · {job.role}</option>)}</select></label>}
+        {importError && <div className="dialog-error" role="alert">{importError}</div>}
+        {preview && <><div className={`jd-web-preview${preview.usable ? "" : " preview-warning"}`} role="status"><strong>{preview.label}</strong><span>{preview.usable ? "预览尚未保存" : "请补充完整 JD 正文后再创建岗位"}</span></div>{preview.warningMessages.length > 0 && <p className="jd-preview-notice">{preview.warningMessages.join(" ")}</p>}</>}
+        <div className="form-row">
+          <label>公司<input required value={form.company} onChange={(event) => setForm({ ...form, company: event.target.value })} placeholder="例如：字节跳动" /></label>
+          <label>岗位<input required value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value })} placeholder="例如：AI 产品经理" /></label>
+        </div>
+        <label>岗位描述<textarea aria-label="岗位描述" required value={form.jd_raw} onChange={(event) => setForm({ ...form, jd_raw: event.target.value, context_json: normalizeJobContext(form.context_json, event.target.value) })} placeholder="岗位职责与任职要求" /></label>
+        <details className="job-context-disclosure" open={contextExpanded} onToggle={event => setContextExpanded(event.currentTarget.open)}>
+          <summary>补充信息</summary>
+          <JobContextEditor value={form.context_json} body={form.jd_raw} onChange={context_json => setForm(current => ({ ...current, context_json }))} disabled={busy || webBusy} />
+        </details>
       </div>
-      <label>岗位描述<textarea aria-label="岗位描述" required value={form.jd_raw} onChange={(event) => setForm({ ...form, jd_raw: event.target.value, context_json: normalizeJobContext(form.context_json, event.target.value) })} placeholder={inputMode === "url" ? "读取网页后会填充正文，也可以手动修正…" : "粘贴完整岗位职责与任职要求…"} /></label>
-      <JobContextEditor value={form.context_json} body={form.jd_raw} onChange={context_json => setForm(current => ({ ...current, context_json }))} disabled={busy || webBusy} />
-      <p className="jd-preview-notice">确认正文和岗位语境后创建项目；未知项可以保留为空。</p>
       <div className="modal-actions"><button type="button" className="text-button" disabled={busy} onClick={onClose}>取消</button><button className="primary-button" disabled={busy || webBusy || !form.candidate_id}>{busy && <LoaderCircle className="spin" size={15} />}创建项目</button></div>
     </motion.form>
   </div>;
 }
 
 function JobManageDialog({ job, busy, onClose, onSave, onDelete }) {
+  const { enter, transition } = useAgentMotion();
   const [form, setForm] = useState({ company: "", role: "", jd_raw: "", context_json: normalizeJobContext() });
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   useEffect(() => {
@@ -187,7 +202,7 @@ function JobManageDialog({ job, busy, onClose, onSave, onDelete }) {
   }, [job, busy, onClose]);
   if (!job) return null;
   return <div className="modal-layer" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}>
-    <motion.form className="job-modal job-manage-dialog job-context-modal" role="dialog" aria-modal="true" aria-labelledby="manage-job-title" initial={{ opacity: 0, scale: .98, y: 3 }} animate={{ opacity: 1, scale: 1, y: 0 }} transition={{duration:.2,ease:[.23,1,.32,1]}} onSubmit={(event) => { event.preventDefault(); onSave(form); }}>
+    <motion.form className="job-modal job-manage-dialog job-context-modal" role="dialog" aria-modal="true" aria-labelledby="manage-job-title" initial={enter()} animate={{ opacity: 1, y: 0 }} transition={transition("enter")} onSubmit={(event) => { event.preventDefault(); onSave(form); }}>
       <button type="button" className="modal-close" aria-label="关闭" disabled={busy} onClick={onClose}><X size={16} /></button>
       <p className="eyebrow">JOB PROJECT</p><h2 id="manage-job-title">管理岗位项目</h2><p>正文或关键语境改变后，旧岗位判断与面试简报会标为过期，需重新分析。</p>
       <div className="form-row"><label>公司<input required value={form.company} onChange={(event) => setForm({ ...form, company: event.target.value })} /></label><label>岗位<input required value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value })} /></label></div>
@@ -200,6 +215,7 @@ function JobManageDialog({ job, busy, onClose, onSave, onDelete }) {
 }
 
 function FreezeConfirm({ open, detail, busy, onClose, onConfirm }) {
+  const { enter, transition } = useAgentMotion();
   useEffect(() => {
     if (!open) return undefined;
     const close = (event) => event.key === "Escape" && !busy && onClose();
@@ -208,7 +224,7 @@ function FreezeConfirm({ open, detail, busy, onClose, onConfirm }) {
   }, [open, busy, onClose]);
   if (!open) return null;
   return <div className="modal-layer" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}>
-    <motion.section role="alertdialog" aria-modal="true" aria-labelledby="freeze-title" className="confirm-dialog" initial={{ opacity: 0, scale: .98 }} animate={{ opacity: 1, scale: 1 }}>
+    <motion.section role="alertdialog" aria-modal="true" aria-labelledby="freeze-title" className="confirm-dialog" initial={enter()} animate={{ opacity: 1, y: 0 }} transition={transition("enter")}>
       <span className="confirm-icon"><CheckCircle2 size={21} /></span><p className="eyebrow">SUBMISSION RECORD</p><h2 id="freeze-title">记录这次实际投递？</h2>
       <p>FetchCV 会为 <strong>{detail.job.company} · {detail.job.role}</strong> 保存当时使用的简历版本快照。这个动作不会阻止你继续修改和生成新版本。</p>
       <div className="confirm-assets"><span><FileText size={14} />{detail.resumes[0]?.name}</span>{detail.portfolios[0] && <span><Globe2 size={14} />岗位作品集</span>}</div>
@@ -218,6 +234,7 @@ function FreezeConfirm({ open, detail, busy, onClose, onConfirm }) {
 }
 
 export default function App() {
+  const motionStyle = useAgentMotion();
   const [conversations, setConversations] = useState([]);
   const [activeConversationId, setActiveConversationId] = useState(null);
   const [chatSelection, setChatSelection] = useState({key: "draft", id: null});
@@ -653,7 +670,7 @@ export default function App() {
     setActiveCandidateId(result.candidate_id); setActiveView("library");
     setWorkspace(await api.workspace());
     await loadLibrary(result.candidate_id);
-    setNotice({ type: "success", message: result.duplicate ? "这份 PDF 已在资料库中，完整经历已同步。" : `简历已导入，整理出 ${result.preview?.experiences?.length || result.facts_created} 项完整经历。` });
+    setNotice({ type: "success", message: result.duplicate ? "简历已存在，内容已同步。" : `简历已导入 · ${result.preview?.experiences?.length || result.facts_created} 项经历` });
     if (continueToJobAfterImport.current) { continueToJobAfterImport.current = false; setImportOpen(false); setNewOpen(true); }
   };
   const importWorkspaceMaterials = async () => {
@@ -841,6 +858,9 @@ export default function App() {
               events: mergeProcessingEvent(state.activity.events || [], payload.event),
             },
           } : state);
+          if (eventName === "context_usage") updateJobConversation(jobId, (state) => state.activity ? {
+            ...state, activity: { ...state.activity, contextUsage: payload.usage },
+          } : state);
           if (eventName === "user") updateJobDetail(jobId, (current) => ({ ...current, messages: [...current.messages.filter((item) => item.id !== payload.message.id), payload.message] }));
           if (eventName === "delta") queueStreamingDelta(jobId, payload.text, controller);
           if (eventName === "done") {
@@ -960,7 +980,7 @@ export default function App() {
       {offline
         ? <EmptyWorkspace offline />
         : activeView === "home"
-          ? <ConversationWorkspace key={chatSelection.key} sessionKey={chatSelection.key} conversationId={chatSelection.id} jobs={jobs} runtime={runtime} agentReady={backendStatus.agentReady} startupMessage={backendStatus.agentError} onCreated={id => { setActiveConversationId(id); refreshConversations(); }} onChanged={refreshConversations} onModelActivated={handleRuntimeChanged} onManageModels={() => setModelSettingsOpen(true)} onAnalyzeJob={openNewJob} hasProfile={workspace.candidates.some(item => item.fact_count > 0 || item.resume_count > 0)} />
+          ? <ConversationWorkspace key={chatSelection.key} sessionKey={chatSelection.key} conversationId={chatSelection.id} jobs={jobs} runtime={runtime} agentReady={backendStatus.agentReady} startupMessage={backendStatus.agentError} onCreated={id => { setActiveConversationId(id); refreshConversations(); }} onChanged={refreshConversations} onModelActivated={handleRuntimeChanged} onManageModels={(section = "models") => setModelSettingsOpen(section)} onAnalyzeJob={openNewJob} hasProfile={workspace.candidates.some(item => item.fact_count > 0 || item.resume_count > 0)} />
         : activeView === "knowledge"
           ? <InterviewKnowledgeView />
         : activeView === "library"
@@ -971,7 +991,7 @@ export default function App() {
             ? <main className="workspace-recovery" role="alert"><AlertCircle size={24} /><h2>岗位资料暂时无法读取</h2><p>{error}</p><button className="primary-button" onClick={() => selectJob(activeId)}>重试</button></main>
           : !detail
             ? <EmptyWorkspace onNew={openNewJob} onImport={() => setImportOpen(true)} offline={false} hasProfile={workspace.candidates.length > 0} busy={busy} />
-            : <AgentWorkspace key={detail.job.id} requestedTab={requestedTab} detail={detail} runtime={workspaceRuntime} agentReady={backendStatus.agentReady} startupMessage={backendStatus.agentError} busy={busy || activeConversationState.busy || !backendStatus.agentReady} error={activeConversationState.error || error} activity={activeConversationState.activity || (agentActivity?.jobId === detail.job.id ? agentActivity : null)} task={latestTask} onStart={start} onRestart={restart} onFactReview={reviewFacts} onReview={review} onRewriteProposals={rewriteProposals} onCancelProposalRewrite={cancelProposalRewrite} onResumeProposalRewrite={resumeProposalRewrite} onReloadReview={reloadProposalReview} onPublishApproval={approvePublish} onRetry={retryTask} onPauseTask={pauseTask} onResumeTask={resumeTask} onCancelTask={cancelTask} onResolveInvocation={resolveToolInvocation} onFinalize={() => setFreezeOpen(true)} onSendMessage={sendMessage} onResearchInterviews={researchInterviews} onCancelMessage={() => conversationControllers.current.get(detail.job.id)?.abort()} onAddMaterial={importWorkspaceMaterials} onApprovalDecision={decideToolApproval} onModelActivated={handleRuntimeChanged} onOpenModelSettings={() => setModelSettingsOpen(true)} onSaveResumeEditor={saveResumeEditor} onResumePdfSaved={refreshResumeArtifact} onEditJob={() => setManagedJob(detail.job)} />}
+            : <AgentWorkspace key={detail.job.id} requestedTab={requestedTab} detail={detail} runtime={workspaceRuntime} agentReady={backendStatus.agentReady} startupMessage={backendStatus.agentError} busy={busy || activeConversationState.busy || !backendStatus.agentReady} error={activeConversationState.error || error} activity={activeConversationState.activity || (agentActivity?.jobId === detail.job.id ? agentActivity : null)} task={latestTask} onStart={start} onRestart={restart} onFactReview={reviewFacts} onReview={review} onRewriteProposals={rewriteProposals} onCancelProposalRewrite={cancelProposalRewrite} onResumeProposalRewrite={resumeProposalRewrite} onReloadReview={reloadProposalReview} onPublishApproval={approvePublish} onRetry={retryTask} onPauseTask={pauseTask} onResumeTask={resumeTask} onCancelTask={cancelTask} onResolveInvocation={resolveToolInvocation} onFinalize={() => setFreezeOpen(true)} onSendMessage={sendMessage} onResearchInterviews={researchInterviews} onCancelMessage={() => conversationControllers.current.get(detail.job.id)?.abort()} onAddMaterial={importWorkspaceMaterials} onApprovalDecision={decideToolApproval} onModelActivated={handleRuntimeChanged} onOpenModelSettings={(section = "models") => setModelSettingsOpen(section)} onSaveResumeEditor={saveResumeEditor} onResumePdfSaved={refreshResumeArtifact} onEditJob={() => setManagedJob(detail.job)} />}
       {!offline && <InteractiveMilestone />}
       </Suspense></WorkspaceBoundary>
       {activeView === "library" ? <Suspense fallback={null}><LibraryRail library={library} /></Suspense> : activeView === "job" && !detail && !selectionLoading && !error ? <aside className="context-blank"><FolderKanban size={19} /><span>岗位上下文会显示在这里</span></aside> : null}
@@ -981,7 +1001,7 @@ export default function App() {
     <JobManageDialog job={managedJob} busy={busy} onClose={() => setManagedJob(null)} onSave={saveManagedJob} onDelete={deleteManagedJob} />
     {importOpen && <Suspense fallback={null}><ImportResumeDialog open={importOpen} candidates={workspace.candidates} preferredCandidateId={activeCandidateId} onClose={() => { continueToJobAfterImport.current = false; setImportOpen(false); }} onImported={handleImported} onLegacyImport={importLegacy} /></Suspense>}
     <FreezeConfirm open={freezeOpen} detail={detail} busy={busy} onClose={() => setFreezeOpen(false)} onConfirm={finalize} />
-    {modelSettingsOpen && <Suspense fallback={null}><ModelSettingsDialog open={modelSettingsOpen} user={currentUser} runtime={runtime} stats={{ jobs: workspace.jobs.filter((item) => item.candidate_id === currentUser?.id).length, resumes: currentUser?.resume_count, materials: currentUser?.material_count }} onClose={() => setModelSettingsOpen(false)} onSaved={handleRuntimeChanged} /></Suspense>}
-    {notice && <motion.div role="status" className={`app-notice ${notice.type}`} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}><span>{notice.type === "success" ? <CheckCircle2 size={15} /> : <AlertCircle size={15} />}{notice.message}</span><button onClick={() => setNotice(null)} aria-label="关闭通知"><X size={13} /></button></motion.div>}
+    {modelSettingsOpen && <Suspense fallback={null}><ModelSettingsDialog initialSection={typeof modelSettingsOpen === "string" ? modelSettingsOpen : "general"} open={Boolean(modelSettingsOpen)} user={currentUser} runtime={runtime} stats={{ jobs: workspace.jobs.filter((item) => item.candidate_id === currentUser?.id).length, resumes: currentUser?.resume_count, materials: currentUser?.material_count }} onClose={() => setModelSettingsOpen(false)} onSaved={handleRuntimeChanged} /></Suspense>}
+    {notice && <motion.div role="status" className={`app-notice ${notice.type}`} initial={motionStyle.enter()} animate={{ opacity: 1, y: 0 }} transition={motionStyle.transition("enter")}><span>{notice.type === "success" ? <CheckCircle2 size={15} /> : <AlertCircle size={15} />}{notice.message}</span><button onClick={() => setNotice(null)} aria-label="关闭通知"><X size={13} /></button></motion.div>}
   </div>;
 }

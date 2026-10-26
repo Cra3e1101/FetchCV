@@ -41,8 +41,8 @@
   --ui-composer-shadow:0 0 0 1px #ffffff12,0 2px 8px #0002;
 }
 body,#root {font:430 16px/24px var(--ui-font)}
-.app-shell button {transition:background-color .12s,color .12s,opacity .12s,transform .12s;}
-.app-shell button:active:not(:disabled) {transform:scale(.94)}
+.app-shell button {transition:background-color var(--theme-palette-duration, var(--button-transition-duration,var(--motion-duration-micro,120ms))) var(--motion-ease-enter,ease-out),color var(--theme-palette-duration, var(--button-transition-duration,var(--motion-duration-micro,120ms))) var(--motion-ease-enter,ease-out),opacity var(--button-transition-duration,var(--motion-duration-micro,120ms)) var(--motion-ease-enter,ease-out),transform var(--button-transition-duration,var(--motion-duration-micro,120ms)) var(--motion-ease-snap,ease-out);}
+.app-shell button:active:not(:disabled) {transform:scale(var(--motion-press-scale,.98));--button-transition-duration:var(--motion-duration-press,60ms);transition-timing-function:var(--motion-ease-snap,ease-out);}
 .app-shell button:disabled {opacity:.4;cursor:not-allowed}
 .app-grid.source-grid {grid-template-columns:52px var(--ui-sidebar-width) minmax(0,1fr) var(--context-rail-width,0px);padding:0 0 0 0;}
 .app-grid.source-grid.source-nav-closed {grid-template-columns:52px 0 minmax(0,1fr) var(--context-rail-width,0px)}
@@ -124,8 +124,8 @@ body,#root {font:430 16px/24px var(--ui-font)}
 .tool-output-card>small {display:block;padding:0 16px;font:430 12px/16px var(--ui-font);color:var(--ui-secondary);}
 .tool-output-card footer {display:flex;align-items:center;justify-content:flex-end;gap:4px;padding:4px 8px;color:var(--ui-muted);font:430 13px/18.57px var(--ui-font);}
 .tool-group-toggle:hover,.tool-detail-toggle:hover {color:var(--ui-ink)}
-.command-backdrop {position:fixed;inset:44px 0 0;z-index:1000;background:rgba(0,0,0,.04);}
-.command-menu {position:fixed;top:118px;left:50%;margin-left:-260px;width:520px;height:487px;border-radius:20px;background:var(--ui-popover);box-shadow:0 0 0 .5px var(--ui-popover-ring),var(--ui-overlay-shadow);backdrop-filter:blur(16px);display:flex;flex-direction:column;overflow:hidden;animation:ui-pop-enter .2s var(--ease-enter-snappy);color:var(--ui-ink);}
+.command-backdrop {position:fixed;inset:44px 0 0;z-index:1000;background:rgba(0,0,0,.04);animation:ui-command-backdrop-in var(--motion-duration-micro,120ms) var(--motion-ease-enter,ease-out);}
+.command-menu {position:fixed;top:118px;left:50%;margin-left:-260px;width:520px;height:487px;border-radius:20px;background:var(--ui-popover);box-shadow:0 0 0 .5px var(--ui-popover-ring),var(--ui-overlay-shadow);backdrop-filter:blur(16px);display:flex;flex-direction:column;overflow:hidden;animation:ui-pop-enter var(--motion-duration-enter,200ms) var(--motion-ease-enter,ease-out);color:var(--ui-ink);}
 .command-search {display:flex;align-items:center;gap:8px;min-height:52px;padding:0 16px;border-bottom:1px solid var(--ui-line);}
 .command-search input {flex:1;min-width:0;border:0;background:none;font:430 16px/24px var(--ui-font);color:inherit;outline:none;}
 .command-menu kbd {font:430 12px/16px var(--ui-font);color:var(--ui-muted);white-space:nowrap;}
@@ -153,8 +153,8 @@ body,#root {font:430 16px/24px var(--ui-font)}
 #root .settings-window.settings-window :is(.settings-capabilities,.settings-skill-list) small,.settings-window.settings-window .settings-pane>header>span {font:430 12px/16px var(--ui-font);margin-top:2.43px;color:var(--ui-secondary);}
 .settings-window .settings-skill-list>button>span {gap:0;}
 .settings-window.settings-window .settings-skill-list>button {text-align:left;}
-.settings-window.settings-window .skill-switches button i {position:relative;flex:none;width:32px;height:20px;border-radius:9999px;background:var(--ui-switch-off);transition:background-color .12s;}
-.settings-window.settings-window .skill-switches button i::after {content:"";position:absolute;left:2px;top:2px;width:16px;height:16px;border-radius:50%;background:#fff;transform:translateX(0);transition:transform .2s var(--ease-enter-snappy);}
+.settings-window.settings-window .skill-switches button i {position:relative;flex:none;width:32px;height:20px;border-radius:9999px;background:var(--ui-switch-off);transition:background-color var(--theme-palette-duration, var(--motion-duration-micro,120ms)) var(--motion-ease-enter,ease-out);}
+.settings-window.settings-window .skill-switches button i::after {content:"";position:absolute;left:2px;top:2px;width:16px;height:16px;border-radius:50%;background:#fff;transform:translateX(0);transition:transform var(--motion-duration-micro,120ms) var(--motion-ease-snap,ease-out);}
 .settings-window.settings-window .skill-switches button[aria-pressed=true] i {background:#3a83f7;}
 .settings-window.settings-window .skill-switches button[aria-pressed=true] i::after {transform:translateX(12px);}
 .interface-swatch.neutral-dark {background:#212121;}
@@ -166,6 +166,8 @@ body,#root {font:430 16px/24px var(--ui-font)}
 .app-shell :is(.job-modal,.import-dialog,.cover-letter-review) :is(h2,h3,p,label) {color:var(--ui-ink);}
 .app-shell .app-notice {background:var(--ui-surface);color:var(--ui-ink);border-color:var(--ui-line);}
 @keyframes ui-pop-enter {from{opacity:0;transform:translateY(3px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}
+/* Animate the scrim color separately so nested menu text fades only once. */
+@keyframes ui-command-backdrop-in {from{background-color:transparent}to{background-color:rgba(0,0,0,.04)}}
 @media(max-width:1279px) {
   .settings-window.settings-window .settings-pane {margin-inline:auto;max-width:calc(100% - 48px);}
 }
@@ -192,4 +194,4 @@ body,#root {font:430 16px/24px var(--ui-font)}
   .settings-window.settings-window .interface-theme-picker {display:grid;grid-template-columns:1fr 1fr;}
   .command-menu {width:calc(100vw - 32px);max-height:calc(100dvh - 150px);left:16px;margin-left:0;}
 }
-@media(prefers-reduced-motion:reduce){.ui-collapse,.command-menu,.app-shell button,.settings-window *{animation:none!important;transition:none!important;}}
+@media(prefers-reduced-motion:reduce){.ui-collapse,.command-backdrop,.command-menu,.app-shell button,.settings-window *,.settings-window *::after{animation:none!important;transition:none!important;}.app-shell button:active:not(:disabled){transform:none!important;}}

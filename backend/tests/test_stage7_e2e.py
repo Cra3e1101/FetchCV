@@ -78,7 +78,7 @@ def test_ready_resume_flow_builds_pdf_and_submitted_snapshot_without_forced_port
         resume = workspace["resumes"][0]
 
         rendered = client.post(f"/api/resumes/{resume['id']}/render", json={"run_id": run["id"]})
-        assert rendered.status_code == 200
+        assert rendered.status_code == 200, rendered.text
         pdf_path = Path(rendered.json()["resume"]["pdf_path"])
         assert pdf_path.read_bytes().startswith(b"%PDF")
         assert Path(rendered.json()["bridge_payload_path"]).is_file()

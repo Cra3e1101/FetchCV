@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createChatScrollFollower, isChatNearBottom, resolveChatScrollTop } from "../src/lib/chat-scroll.js";
+import { createChatScrollFollower, createChatScrollPinning, isChatNearBottom, resolveChatScrollTop } from "../src/lib/chat-scroll.js";
 
 test("only follows new messages while the reader is near the bottom", () => {
-  assert.equal(isChatNearBottom({ scrollHeight: 1000, scrollTop: 504, clientHeight: 400 }), true);
+  assert.equal(isChatNearBottom({ scrollHeight: 1000, scrollTop: 560, clientHeight: 400 }), true);
+  assert.equal(isChatNearBottom({ scrollHeight: 1000, scrollTop: 559, clientHeight: 400 }), false);
   assert.equal(isChatNearBottom({ scrollHeight: 1000, scrollTop: 420, clientHeight: 400 }), false);
 });
 
@@ -113,4 +114,147 @@ test("content shrinking during a follow clamps and settles without a stale desti
   assert.equal(element.scrollTop, 100);
   assert.equal(follower.isRunning, false);
   assert.equal(frames.size, 0);
+});
+
+function pinningFixture() {
+  let time = 0;
+  let nextId = 0;
+  const timers = new Map();
+  const frames = new Map();
+  const states = [];
+  const writes = [];
+  const positions = [];
+  const element = {
+    scrollHeight: 1200, clientHeight: 400, scrollTop: 800, isConnected: true,
+    scrollTo({ top }) { this.scrollTop = Math.round(Math.max(0, Math.min(top, this.scrollHeight - this.clientHeight))); writes.push(this.scrollTop); },
+  };
+  const pinning = createChatScrollPinning(element, {
+    now: () => time,
+    setTimer(callback, delay) { const id = ++nextId; timers.set(id, { callback, at: time + delay }); return id; },
+    clearTimer(id) { timers.delete(id); },
+    requestFrame(callback) { const id = ++nextId; frames.set(id, callback); return id; },
+    cancelFrame(id) { frames.delete(id); },
+    reducedMotion: () => false,
+    onStateChange: state => states.push(state),
+    onPositionChange: state => positions.push(state),
+  });
+  const step = (elapsed = 16) => {
+    time += elapsed;
+    for (const [id, timer] of timers) if (timer.at <= time) { timers.delete(id); timer.callback(); }
+    const pending = [...frames.values()];
+    frames.clear();
+    pending.forEach(callback => callback(time));
+  };
+  return { element, pinning, states, positions, writes, frames, timers, step };
+}
+
+test("pinned stream growth aligns immediately without a repeated smooth animation", () => {
+  const { element, pinning, states, frames } = pinningFixture();
+  for (let i = 0; i < 10; i += 1) {
+    element.scrollHeight += 60;
+    pinning.sync();
+    pinning.handleScroll();
+    assert.equal(element.scrollTop, element.scrollHeight - element.clientHeight);
+  }
+  assert.equal(frames.size, 0);
+  assert.deepEqual(states, [{ isPinned: true, showJumpControl: false }]);
+});
+
+test("tiny upward input wins a same-frame stream update and stays paused after cooldown", () => {
+  const { element, pinning, states, step } = pinningFixture();
+  pinning.sync(); // A no-op write must not swallow the next real scroll.
+  pinning.markUserInput();
+  element.scrollTop -= 24;
+  element.scrollHeight += 80;
+  pinning.sync();
+  pinning.handleScroll();
+  step(300);
+  element.scrollHeight += 100;
+  pinning.sync();
+  assert.equal(element.scrollTop, 776);
+  assert.deepEqual(states.at(-1), { isPinned: false, showJumpControl: true });
+});
+
+test("downward return uses the 40px tolerance and catches growth at the end of cooldown", () => {
+  const { element, pinning, states, timers, step } = pinningFixture();
+  pinning.markUserInput();
+  element.scrollTop = 300;
+  pinning.handleScroll();
+  pinning.markUserInput(true);
+  element.scrollTop = 765;
+  pinning.handleScroll();
+  element.scrollHeight += 90;
+  pinning.sync();
+  assert.equal(element.scrollTop, 765);
+  assert.equal(timers.size, 1);
+  step(149);
+  assert.equal(element.scrollTop, 765);
+  step(1);
+  assert.equal(element.scrollTop, 890);
+  assert.deepEqual(states.at(-1), { isPinned: true, showJumpControl: false });
+});
+
+test("downward input at the bottom never permanently disables streaming follow", () => {
+  const { element, pinning, step } = pinningFixture();
+  pinning.markUserInput(true);
+  element.scrollHeight += 120;
+  pinning.sync();
+  assert.equal(element.scrollTop, 800);
+  step(150);
+  assert.equal(element.scrollTop, 920);
+});
+
+test("explicit return follows a growing destination and can be interrupted", () => {
+  const { element, pinning, states, frames, step } = pinningFixture();
+  pinning.markUserInput();
+  element.scrollTop = 200;
+  pinning.handleScroll();
+  pinning.scrollToBottom();
+  step();
+  element.scrollHeight += 200;
+  pinning.sync();
+  assert.equal(frames.size, 1);
+  assert.deepEqual(states.at(-1), { isPinned: true, showJumpControl: false });
+  step();
+  pinning.markUserInput();
+  element.scrollTop -= 10;
+  pinning.handleScroll();
+  const paused = element.scrollTop;
+  step(500);
+  assert.equal(element.scrollTop, paused);
+  assert.equal(frames.size, 0);
+  pinning.scrollToBottom();
+  for (let i = 0; i < 100 && frames.size; i += 1) step();
+  assert.equal(element.scrollTop, 1000);
+});
+
+test("scrollbar drag owns the viewport until release and disposal cancels trailing work", () => {
+  const { element, pinning, timers, writes, step } = pinningFixture();
+  pinning.startDrag();
+  element.scrollTop = 500;
+  pinning.handleScroll();
+  element.scrollTop = 780;
+  pinning.handleScroll();
+  element.scrollHeight += 10;
+  pinning.sync();
+  step(200);
+  assert.equal(element.scrollTop, 780);
+  pinning.endDrag();
+  assert.equal(timers.size, 1);
+  pinning.dispose();
+  const count = writes.length;
+  step(300);
+  assert.equal(writes.length, count);
+  assert.equal(timers.size, 0);
+});
+
+test("cleanup retains the recorded reading position after React replaces the transcript", () => {
+  const { element, pinning, positions } = pinningFixture();
+  pinning.markUserInput();
+  element.scrollTop = 450;
+  pinning.handleScroll();
+  element.scrollHeight = 400;
+  element.scrollTop = 0;
+  pinning.dispose();
+  assert.deepEqual(positions.at(-1), { scrollTop: 450, isPinned: false });
 });

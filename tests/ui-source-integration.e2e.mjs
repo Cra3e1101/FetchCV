@@ -144,7 +144,7 @@ assert.equal(savedProfiles['test-model'].maxOutputTokens,'4096');
 assert.equal(savedProfiles['other-model'].maxOutputTokens,'8192');
 await page.screenshot({path:path.join(root,'model-parameters.png')});
 await page.getByRole('button',{name:'常规',exact:true}).click();
-for(const value of ['light','dark','white']){await page.getByRole('combobox',{name:'主题',exact:true}).selectOption(value);assert.equal(await page.locator('html').getAttribute('data-interface-theme'),value);await page.screenshot({path:path.join(root,`settings-theme-${value}.png`),animations:'disabled'});}
+for(const value of ['light','dark','white']){await page.getByRole('group',{name:'主题',exact:true}).getByRole('button',{name:{light:'暖色浅色',dark:'暖色深色',white:'简约白'}[value],exact:true}).click();assert.equal(await page.locator('html').getAttribute('data-interface-theme'),value);await page.screenshot({path:path.join(root,`settings-theme-${value}.png`),animations:'disabled'});}
 const settingsGeometry=[];
 for(const width of [1440,768,390]){
   await page.setViewportSize({width,height:900});

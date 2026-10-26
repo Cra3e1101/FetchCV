@@ -84,6 +84,10 @@ export async function startSidecar({ isPackaged, projectRoot, resourcesPath, use
   fs.mkdirSync(path.join(userDataPath, "artifacts"), { recursive: true });
   fs.mkdirSync(path.join(userDataPath, "workspace"), { recursive: true });
   const instanceNonce=randomUUID();
+  const defaultLatexRoot = path.join(projectRoot, "build", "resume-runtime");
+  const bundledLatexRoot = isPackaged
+    ? path.join(resourcesPath, "resume-runtime")
+    : (env.FETCHCV_LATEX_RUNTIME?.trim() || (fs.existsSync(defaultLatexRoot) ? defaultLatexRoot : ""));
   const childEnv = {
     ...env,
     FETCHCV_DATABASE_URL: env.FETCHCV_DATABASE_URL || databaseUrl(userDataPath),
@@ -97,9 +101,13 @@ export async function startSidecar({ isPackaged, projectRoot, resourcesPath, use
     // would create a second, behaviorally different production loop.
     FETCHCV_DISABLE_TASK_WORKER: "1",
     FETCHCV_INSTANCE_NONCE: instanceNonce,
+    FETCHCV_REQUIRE_BUNDLED_LATEX: isPackaged ? "1" : (env.FETCHCV_REQUIRE_BUNDLED_LATEX || "0"),
     ...(startupTrace ? { FETCHCV_STARTUP_TRACE_ID: startupTrace.id } : {}),
     PYTHONUNBUFFERED: "1",
   };
+  if (bundledLatexRoot) childEnv.FETCHCV_LATEX_RUNTIME = bundledLatexRoot;
+  else delete childEnv.FETCHCV_LATEX_RUNTIME;
+  if (isPackaged) delete childEnv.FETCHCV_XELATEX;
   let command;
   let args;
   let cwd;

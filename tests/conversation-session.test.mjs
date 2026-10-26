@@ -55,6 +55,21 @@ test('concurrent conversations remain isolated and explicit stop only cancels it
   assert.deepEqual(b.getSnapshot().messages.map(row => row.content), ['question b', 'answer b']);
 });
 
+test('context telemetry follows its conversation and ignores late stream updates', async () => {
+  const {registry, streams, finish} = fixture();
+  const a = registry.get('a', 'a'), b = registry.get('b', 'b');
+  await Promise.all([a.load(), b.load()]);
+  const first = a.send('a'), second = b.send('b');
+  const usage = {version: 1, model: 'test', used_tokens: 1200, source: 'estimated'};
+  streams[0].options.onEvent('context_usage', {usage});
+  assert.deepEqual(a.getSnapshot().messages.at(-1).metadata_json.context_usage, usage);
+  assert.equal(b.getSnapshot().messages.at(-1).metadata_json.context_usage, undefined);
+  finish(0, 'done a'); await first;
+  streams[0].options.onEvent('context_usage', {usage: {...usage, used_tokens: 9999}});
+  assert.equal(a.getSnapshot().messages.at(-1).metadata_json.context_usage, undefined);
+  finish(1, 'done b'); await second;
+});
+
 test('a new draft continues creating and streaming offscreen, then reopens by persisted ID', async () => {
   const {registry, streams, api, finish} = fixture();
   const create = deferred(), original = api.createConversation;

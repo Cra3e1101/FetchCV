@@ -6,9 +6,9 @@ import { motionTokens, useAgentMotion } from "../ui/motion";
 import "./AgentEffortControl.css";
 
 export const AGENT_EFFORT_LEVELS = [
-  { id: "quick", label: "快速", description: "直接回答，优先响应速度", apiLevel: "fast" },
-  { id: "balanced", label: "均衡", description: "兼顾速度、依据与可执行性", apiLevel: "balanced" },
-  { id: "deep", label: "深入", description: "比较方案并主动检查证据与风险", apiLevel: "deep" },
+  { id: "quick", label: "快速", englishLabel: "Low", description: "直接回答，优先响应速度", apiLevel: "fast" },
+  { id: "balanced", label: "均衡", englishLabel: "Medium", description: "兼顾速度、依据与可执行性", apiLevel: "balanced" },
+  { id: "deep", label: "深入", englishLabel: "High", description: "比较方案并主动检查证据与风险", apiLevel: "deep" },
 ];
 
 const STORAGE_KEY = "fetchcv.agent-effort";
@@ -56,7 +56,7 @@ export function AgentEffortControl({ disabled = false, value = "balanced", onCha
   return <section className="agent-effort-panel" aria-label="分析投入设置">
     <header>
       <span className="effort-control-spacer" aria-hidden="true" />
-      <button type="button" className="effort-model-menu" aria-label="打开模型选择" onClick={onModelMenu}><span className="effort-active-label"><AnimatePresence initial={false}><motion.strong key={active.id} initial={enter(motionTokens.distanceSubtle)} animate={{ opacity: 1, y: 0 }} exit={{ ...exit(), transition: transition("exit") }} transition={transition("micro")}>{active.label}</motion.strong></AnimatePresence></span><span className="effort-model-name">{model}<ChevronDown size={12}/></span></button>
+      <button type="button" className="effort-model-menu" aria-label="打开模型选择" onClick={onModelMenu}><span className="effort-active-label"><AnimatePresence initial={false}><motion.strong key={active.id} initial={enter(motionTokens.distanceSubtle)} animate={{ opacity: 1, y: 0 }} exit={{ ...exit(), transition: transition("exit") }} transition={transition("micro")}>{active.englishLabel}</motion.strong></AnimatePresence></span><span className="effort-model-name">{model}<ChevronDown size={12}/></span></button>
       <button type="button" className="effort-help" aria-label="分析投入说明" aria-expanded={showHelp} onClick={() => setShowHelp((current) => !current)}><HelpCircle size={15} /></button>
     </header>
     <AnimatedCollapse open={showHelp}><p className="effort-help-copy">仅影响下一条消息的分析投入，不会切换模型，也不会改变事实、权限或审批边界。</p></AnimatedCollapse>
@@ -64,5 +64,6 @@ export function AgentEffortControl({ disabled = false, value = "balanced", onCha
       <div className="effort-track-cells" aria-hidden="true">{AGENT_EFFORT_LEVELS.map((item, index) => <i key={item.id} className={index <= level ? "active" : ""} />)}</div>
       <input ref={range} type="range" min="0" max={AGENT_EFFORT_LEVELS.length - 1} step="1" value={level} disabled={disabled} onChange={(event) => update(Number(event.target.value))} aria-label="分析投入" aria-valuetext={`${active.label}：${active.description}`} />
     </div>
+    <p className="effort-description" aria-live="polite"><strong>{active.label}</strong> · {active.description}</p>
   </section>;
 }

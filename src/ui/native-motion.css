@@ -1,0 +1,54 @@
+/* Entry delays are progressive enhancement: unsupported browsers enter together.
+   Keep sibling-index() in @supports, never in a custom-property fallback. */
+.agent-stagger-in {
+  animation: agent-list-in var(--motion-duration-enter, 200ms) var(--motion-ease-enter, ease-out) backwards;
+}
+
+.agent-chip-in {
+  animation: agent-chip-in var(--motion-duration-enter, 200ms) var(--motion-ease-enter, ease-out) backwards;
+}
+
+@supports (animation-delay: calc(sibling-index() * 1ms)) {
+  .agent-stagger-in {
+    animation-delay: calc(min(sibling-index() - 1, 2) * var(--motion-duration-stagger, 40ms));
+  }
+
+  .agent-chip-in {
+    animation-delay: calc(var(--motion-chip-in-base-delay, 50ms) + min(sibling-index() - 1, 8) * 30ms);
+  }
+}
+
+/* translate composes with Framer's transform-based layout projection. */
+@keyframes agent-list-in {
+  from { opacity: 0; translate: 0 var(--motion-distance-sm, 4px); }
+  to { opacity: 1; translate: 0 0; }
+}
+
+@keyframes agent-chip-in {
+  from { opacity: 0; filter: blur(2px); transform: scale(.8); }
+  to { opacity: 1; filter: blur(0); transform: scale(1); }
+}
+
+.agent-pill-pop {
+  animation: agent-pill-pop-up calc(var(--motion-duration-enter, 200ms) * .4) var(--motion-ease-enter, ease-out),
+    agent-pill-pop-down calc(var(--motion-duration-enter, 200ms) * .6) var(--motion-ease-overshoot, cubic-bezier(.34, 1.56, .64, 1)) calc(var(--motion-duration-enter, 200ms) * .4);
+  /* No backwards fill on the delayed down phase: it would mask the up phase. */
+}
+
+@keyframes agent-pill-pop-up {
+  from { transform: scale(.9); }
+  to { transform: scale(1.06); }
+}
+
+@keyframes agent-pill-pop-down {
+  from { transform: scale(1.06); }
+  to { transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-stagger-in,
+  .agent-chip-in,
+  .agent-pill-pop {
+    animation: none !important;
+  }
+}

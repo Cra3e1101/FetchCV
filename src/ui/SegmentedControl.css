@@ -1,0 +1,128 @@
+/* The query container has no padding: 180/254px refer to its visible width. */
+.segmented-control[data-segmented],
+.source-grid .task-header .workspace-tabs.segmented-control,
+.settings-window.settings-window .mcp-transport-switch.segmented-control {
+  container: agent-segmented / inline-size;
+  box-sizing: border-box;
+  display: block;
+  min-width: 0;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.segmented-control[data-segmented] { width: 100%; }
+.source-grid .task-header .workspace-tabs.segmented-control {
+  position: static;
+  inset: auto;
+  flex: 0 1 276px;
+  width: 276px;
+  max-width: 50%;
+  min-width: 96px;
+  margin-left: auto;
+  transform: none;
+}
+.settings-window.settings-window .mcp-transport-switch.segmented-control { width: 224px; max-width: 100%; }
+
+.segmented-control > .segmented-control-track {
+  position: relative;
+  isolation: isolate;
+  box-sizing: border-box;
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  width: 100%;
+  height: 100%;
+  padding: 1px;
+  border-radius: inherit;
+  background: var(--ui-selection, var(--cream-soft, #f0efed));
+}
+
+.segmented-control .segmented-control-indicator {
+  position: absolute;
+  z-index: 0;
+  top: 1px;
+  bottom: 1px;
+  border-radius: 999px;
+  pointer-events: none;
+  background: var(--ui-surface, var(--paper, #fff));
+  box-shadow: inset 0 0 0 .5px var(--ui-line, var(--line, #00000014)), 0 1px 2px #0000000f, 0 2px 6px -1px #0000000d;
+  transition: left 120ms cubic-bezier(.2, 0, 0, 1);
+}
+
+/* Own button geometry despite the legacy workspace/settings button skins. */
+.segmented-control[data-segmented] > .segmented-control-track > button.segmented-control-item[aria-pressed] {
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  width: 0;
+  height: 100%;
+  margin: 0;
+  padding: 0 10px;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ui-secondary, var(--muted, #656560));
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1;
+  cursor: pointer;
+  transform: none;
+  transition: color var(--theme-palette-duration, 120ms) cubic-bezier(.2, 0, 0, 1);
+}
+.segmented-control[data-segmented] > .segmented-control-track > button.segmented-control-item:is([aria-pressed="true"], :hover:not(:disabled)) { color: var(--ui-ink, var(--ink, #22221f)); }
+.segmented-control[data-segmented] > .segmented-control-track > button.segmented-control-item[aria-pressed="true"] { font-weight: 500; }
+.segmented-control[data-segmented] > .segmented-control-track > button.segmented-control-item:focus-visible { outline: 2px solid var(--ui-blue, #587bb5); outline-offset: -2px; }
+.segmented-control[data-segmented] > .segmented-control-track > button.segmented-control-item:disabled { opacity: .45; cursor: not-allowed; }
+.segmented-control[data-segmented] .segmented-control-item > span { color: inherit; font-size: inherit; font-weight: inherit; }
+.segmented-control .segmented-control-label { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.segmented-control .segmented-control-icon { display: flex; flex: 0 0 auto; align-items: center; justify-content: center; }
+.segmented-control[data-segmented] .segmented-control-icon > svg { display: block; width: 14px; height: 14px; }
+
+/* Preview cards use the same single, instance-local sliding indicator. */
+.segmented-control[data-segmented][data-variant="preview"] { height: auto; border-radius: 13px; }
+.segmented-control[data-variant="preview"] > .segmented-control-track { height: auto; }
+.segmented-control[data-variant="preview"] .segmented-control-indicator { border-radius: 12px; }
+.segmented-control[data-segmented][data-variant="preview"] > .segmented-control-track > button.segmented-control-item[aria-pressed] {
+  flex-direction: column;
+  height: auto;
+  padding: 10px 8px;
+  gap: 10px;
+  border-radius: 12px;
+}
+.segmented-control[data-variant="preview"] .segmented-control-preview {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 160px;
+  aspect-ratio: 5 / 3;
+  overflow: hidden;
+  border: 1px solid var(--ui-line-strong, #0000001f);
+  border-radius: 7px;
+}
+.segmented-control[data-variant="preview"] .segmented-control-label { white-space: normal; overflow: visible; line-height: 1.4; text-align: center; }
+.segmented-control[data-variant="preview"] .segmented-control-preview > svg { display: block; width: 100%; height: 100%; }
+
+/* Collapse every label, including the selected one. Text-only groups stay readable. */
+@container agent-segmented (max-width: 180px) {
+  .segmented-control-track[data-count="2"][data-collapse-labels="true"] .segmented-control-label { display: none; }
+}
+@container agent-segmented (max-width: 254px) {
+  .segmented-control-track[data-count="3"][data-collapse-labels="true"] .segmented-control-label { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .segmented-control .segmented-control-indicator,
+  .segmented-control[data-segmented] > .segmented-control-track > button.segmented-control-item[aria-pressed] { transition: none; }
+}

@@ -7,6 +7,7 @@ import { openOriginalInterviewSource } from "../lib/interview-source-actions";
 import { formatInterviewSourceDate } from "../lib/interview-sources";
 import { ActivityIndicator } from "../ui/ActivityIndicator";
 import { useAgentMotion } from "../ui/motion";
+import { useModalFocusTrap } from "../lib/modal-focus";
 import "./InterviewSourceReader.css";
 
 export function sourceLabel(source) {
@@ -36,6 +37,8 @@ export function SourceReaderDialog({ source, onClose }) {
   const [confirmingOcr, setConfirmingOcr] = useState(false);
   const [openingOriginal, setOpeningOriginal] = useState(false);
   const onCloseRef = useRef(onClose);
+  const dialogRef = useRef(null);
+  useModalFocusTrap(dialogRef);
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -86,7 +89,7 @@ export function SourceReaderDialog({ source, onClose }) {
   };
   return (
     <motion.div className="interview-reader-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose?.(); }} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: transition("exit") }} transition={transition("enter")}>
-      <motion.section className="interview-reader" role="dialog" aria-modal="true" aria-label={`面经原文：${sourceLabel(source)}`} initial={enter()} animate={{ opacity: 1, y: 0 }} exit={{ ...exit(), transition: transition("exit") }} transition={transition("enter")}>
+      <motion.section ref={dialogRef} tabIndex={-1} className="interview-reader" role="dialog" aria-modal="true" aria-label={`面经原文：${sourceLabel(source)}`} initial={enter()} animate={{ opacity: 1, y: 0 }} exit={{ ...exit(), transition: transition("exit") }} transition={transition("enter")}>
         <header>
           <span><FileText size={16} /></span>
           <div>

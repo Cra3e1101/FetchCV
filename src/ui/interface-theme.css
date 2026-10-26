@@ -1,0 +1,3 @@
+/* Only palette transitions opt into this token. Never suppress slider, layout,
+   opacity or keyframe animations when applying a new global palette. */
+:root[data-interface-theme-changing] { --theme-palette-duration: 0s; }

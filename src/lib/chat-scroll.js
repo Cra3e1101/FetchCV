@@ -1,6 +1,105 @@
-export function isChatNearBottom(element, threshold = 96) {
+export function isChatNearBottom(element, threshold = 40) {
   if (!element) return true;
   return element.scrollHeight - element.scrollTop - element.clientHeight <= threshold;
+}
+
+// Pin streaming updates instantly; reserve animation for an explicit jump.
+// Input and pin state live outside React so a token arriving in the same frame
+// as an upward gesture cannot steal the reader's position.
+export function createChatScrollPinning(element, {
+  initialPinned = isChatNearBottom(element),
+  now = () => performance.now(),
+  setTimer = (callback, delay) => window.setTimeout(callback, delay),
+  clearTimer = (timer) => window.clearTimeout(timer),
+  requestFrame,
+  cancelFrame,
+  reducedMotion = () => Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches),
+  onStateChange = () => {},
+  onPositionChange = () => {},
+} = {}) {
+  let pinned = initialPinned;
+  let lastPosition = element.scrollTop;
+  let lastInputAt = -Infinity;
+  let cooldown = null;
+  let dragging = false;
+  let disposed = false;
+  let previousState;
+  const publish = () => {
+    const state = { isPinned: pinned, showJumpControl: !pinned && !isChatNearBottom(element, 2) };
+    onPositionChange({ scrollTop: element.scrollTop, isPinned: pinned });
+    if (!previousState || state.isPinned !== previousState.isPinned || state.showJumpControl !== previousState.showJumpControl) {
+      previousState = state;
+      onStateChange(state);
+    }
+  };
+  const follower = createChatScrollFollower(element, {
+    now, requestFrame, cancelFrame,
+    onPositionChange(position) { lastPosition = position; publish(); },
+  });
+  const cancelCooldown = () => {
+    if (cooldown !== null) clearTimer(cooldown);
+    cooldown = null;
+  };
+  const sync = () => {
+    if (disposed) return;
+    publish();
+    if (!pinned || dragging) return;
+    const remaining = 150 - (now() - lastInputAt);
+    if (remaining > 0) {
+      cancelCooldown();
+      cooldown = setTimer(() => { cooldown = null; sync(); }, remaining);
+      return;
+    }
+    // A manual jump already tracks the live bottom, even if it grows mid-jump.
+    if (!follower.isRunning || reducedMotion()) follower.follow({ immediate: true });
+  };
+  const markUserInput = (movingDown = false) => {
+    follower.stop();
+    cancelCooldown();
+    lastInputAt = now();
+    pinned = movingDown && isChatNearBottom(element);
+    sync();
+  };
+  publish();
+  return {
+    sync,
+    markUserInput,
+    handleScroll() {
+      const position = element.scrollTop;
+      const delta = position - lastPosition;
+      lastPosition = position;
+      // Writes from the follower have already updated lastPosition. Only an
+      // actual reader movement can release or restore the pin here.
+      if (delta < -0.5) {
+        follower.stop();
+        pinned = pinned && isChatNearBottom(element, 2);
+      } else if (delta > 0.5 && !follower.isRunning) {
+        pinned = isChatNearBottom(element);
+      }
+      sync();
+    },
+    startDrag() { dragging = true; markUserInput(); },
+    endDrag() {
+      if (!dragging) return;
+      dragging = false;
+      markUserInput(isChatNearBottom(element));
+    },
+    scrollToBottom({ smooth = true } = {}) {
+      if (disposed) return;
+      cancelCooldown();
+      lastInputAt = -Infinity;
+      pinned = true;
+      publish();
+      follower.follow({ immediate: !smooth || reducedMotion() });
+    },
+    dispose() {
+      disposed = true;
+      follower.stop();
+      cancelCooldown();
+      // Keep the position already published by writes/scroll events. React may
+      // have replaced the transcript (clamping scrollTop) before this cleanup.
+    },
+  };
 }
 
 export function resolveChatScrollTop(savedScrollTop, scrollHeight, clientHeight) {

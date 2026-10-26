@@ -170,6 +170,14 @@ for (const standalone of [false, true]) test(`Pi runtime owns tool execution and
   assert.equal(capturedHarnessOptions.systemPrompt({activeTools:capturedHarnessOptions.tools}), "Use real tools.");
   assert.equal(completedPayload.content, "已读取真实岗位信息。");
   assert.equal(completedPayload.usage.runtime, "pi");
+  assert.equal(completedPayload.usage.input_tokens, 20, "billing usage remains cumulative across both calls");
+  assert.equal(completedPayload.usage.context_usage.used_tokens, 10, "window occupancy is the latest request input, not both calls or generated output");
+  assert.equal(completedPayload.usage.context_usage.output_tokens, 5);
+  assert.equal(completedPayload.usage.context_usage.context_window, 8192);
+  assert.equal(completedPayload.usage.context_usage.source, "reported");
+  const contextEvents = events.filter(item => item.name === "context_usage");
+  assert.equal(contextEvents.length, 2);
+  assert.deepEqual(contextEvents.at(-1).payload.usage, completedPayload.usage.context_usage);
   assert.ok(completedPayload.processing_trace.some((item) => item.label === "读取岗位与简历上下文" && item.status === "completed"));
   assert.deepEqual(completedPayload.tool_receipts.map((item) => ({ tool_name: item.tool_name, summary: item.summary })), [
     { tool_name: "read_job_workspace_context", summary: "job loaded" },
@@ -258,6 +266,53 @@ for (const approved of [true, false]) test(`live tool receipts track web approva
     assert.equal(receipts.at(-1).summary, "Found fixture forecast");
     assert.deepEqual(receipts.at(-1).artifacts, ["fixture-source"]);
   }
+});
+
+test("context estimate is emitted from the final prepared request and replaced by provider prompt usage", async () => {
+  const events = [], requests = [];
+  class MeteredHarness extends FakeHarness {
+    async prompt() {
+      await this.emit({ type: "turn_start" });
+      await this.handlers.get("context")({ messages: [{ role: "user", content: [{ type: "text", text: "hello" }] }] });
+      await this.handlers.get("before_provider_payload")({ model: this.options.model, payload: {
+        messages: [{ role: "system", content: "test" }, { role: "user", content: "hello" }],
+        stream: true, max_tokens: 1024,
+      } });
+      const message = { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "Done" }], usage: { ...usage, input: 100, output: 80, cacheRead: 40, cacheWrite: 10, totalTokens: 230 } };
+      await this.emit({ type: "turn_end", message });
+      return message;
+    }
+  }
+  const runtime = new PiAgentRuntime({
+    getProviderConfig: () => ({ id: "profile-meter", protocol: "openai", baseUrl: "https://synthetic.invalid", model: "test", contextWindow: 8192, apiKey: "fake" }),
+    request: async (_base, _token, url, options) => {
+      requests.push({ url, body: JSON.parse(options.body) });
+      return {};
+    },
+    loadModules: async () => [{ AgentHarness: MeteredHarness, InMemorySessionRepo: FakeSessionRepo }, { NodeExecutionEnv: class {} },
+      { Type: { Unsafe: x => x }, createModels: () => ({ setProvider() {} }), createProvider: x => x },
+      { openAICompletionsApi: () => ({}) }, { anthropicMessagesApi: () => ({}) }],
+  });
+  await runtime.run({ requestId: "metered-request", bootstrap: { standalone: true, user: { id: "u" }, session_id: "s", prompt: "hello", system_prompt: "test", tools: [] } }, (name, payload) => events.push({ name, payload }));
+  const measured = events.filter(item => item.name === "context_usage").map(item => item.payload.usage);
+  assert.equal(measured.length, 2);
+  assert.equal(measured[0].source, "estimated");
+  assert.equal(measured[0].used_tokens, 15);
+  assert.equal(measured[0].request_sequence, 1);
+  assert.equal(measured[1].source, "reported");
+  assert.equal(measured[1].used_tokens, 150);
+  assert.equal(measured[1].output_tokens, 80);
+  assert.equal(measured[1].provider_id, "profile-meter");
+  assert.deepEqual(requests.find(item => item.url.endsWith("/complete")).body.usage.context_usage, measured[1]);
+  assert.equal(requests.find(item => item.url.endsWith("/requests")).body.record.sequence, 1);
+  await runtime.run({ requestId: "metered-next-turn", bootstrap: {
+    standalone: true, user: { id: "u-next" }, session_id: "s-next", prompt: "hello", system_prompt: "test", tools: [],
+    previous_context_usage: JSON.parse(JSON.stringify(measured[1])),
+  } }, (name, payload) => events.push({ name, payload }));
+  const nextEstimate = events.filter(item => item.name === "context_usage")[2].payload.usage;
+  assert.equal(nextEstimate.source, "estimated");
+  assert.equal(nextEstimate.used_tokens, 150, "next user turn reuses persisted provider calibration");
+  assert.equal(nextEstimate.calibrated, true);
 });
 
 test("cancelling while prompt resolves never commits completion or reuses a queued harness", async (t) => {

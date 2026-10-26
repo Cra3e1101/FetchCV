@@ -1,0 +1,112 @@
+.source-composer .composer-context-control {
+  position: static;
+  flex: 0 0 auto;
+  --context-clay: var(--ui-ink);
+  --context-read: #498675;
+  --context-write: #5b8caa;
+  --context-output: #9581ac;
+}
+.source-composer .composer-context-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ui-secondary, #655f59);
+  font: 500 12px/1 var(--ui-font, inherit);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.source-composer .composer-context-trigger:is(:hover, [aria-expanded=true]) {
+  color: var(--ui-ink, #282725);
+  background: var(--ui-hover, #f4f2ef);
+}
+.source-composer .composer-context-gauge { width: 16px; height: 16px; flex: none; }
+.source-composer .context-gauge-track { stroke: var(--ui-line-strong, #e5e5e3); }
+.source-composer .context-gauge-unknown { stroke: var(--ui-muted, #938d86); }
+.source-composer .context-gauge-fill { stroke: var(--ui-ink); transition: stroke-dashoffset 180ms ease, stroke 180ms ease; }
+.source-composer .composer-context-control[data-capacity-state=warning] .context-gauge-fill { stroke: #b88022; }
+.source-composer .composer-context-control[data-capacity-state=full] .context-gauge-fill { stroke: #c94f49; }
+.source-composer .composer-context-count {
+  display: grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--context-clay) 11%, transparent);
+  color: var(--context-clay);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.source-composer .composer-context-panel {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 75;
+  width: min(360px, 100%);
+  max-height: max(180px, calc(100dvh - var(--conversation-composer-height, 132px) - 88px));
+  overflow: auto;
+  overscroll-behavior: contain;
+  box-sizing: border-box;
+  padding: 16px;
+  border: 1px solid var(--ui-line, #e5e5e3);
+  border-radius: 18px;
+  background: var(--ui-surface, #fff);
+  color: var(--ui-ink, #282725);
+  box-shadow: 0 12px 32px #0000001a, 0 2px 6px #00000008;
+  font: 400 12px/1.5 var(--ui-font, inherit);
+  animation: context-panel-in 160ms ease-out;
+}
+.source-composer .context-panel-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 12px; padding: 0; border: 0; }
+.source-composer .context-panel-header strong { color: var(--ui-ink, #282725); font-size: 13px; font-weight: 600; }
+.source-composer :is(.context-panel-header, .context-reference-list) button {
+  display: grid; place-items: center; flex: none; width: 25px; height: 25px; padding: 0;
+  border: 0; border-radius: 7px; background: transparent; color: var(--ui-muted, #847e78); cursor: pointer;
+}
+.source-composer :is(.context-panel-header, .context-reference-list) button:hover { background: var(--ui-hover, #f4f2ef); color: var(--ui-ink, #282725); }
+.source-composer .context-window-card { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 16px; padding: 11px 12px; border-radius: 11px; background: var(--ui-tray, #f6f5f3); }
+.source-composer .context-window-card > div { display: grid; gap: 3px; min-width: 0; }
+.source-composer .context-window-card span { color: var(--ui-muted, #847e78); font-size: 11px; }
+.source-composer .context-window-card strong { color: var(--ui-ink, #282725); font-size: 14px; font-weight: 550; font-variant-numeric: tabular-nums; }
+.source-composer .context-window-status { display: grid; gap: 2px; text-align: right; white-space: nowrap; }
+.source-composer .context-window-status small { font-size: 10px; }
+.source-composer .context-window-section { margin-bottom: 16px; }
+.source-composer .context-window-section .context-window-card { margin-bottom: 8px; }
+.source-composer .context-capacity-bar { height: 6px; overflow: hidden; border-radius: 999px; background: var(--ui-tray, #f6f5f3); }
+.source-composer .context-capacity-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--context-read); transition: width 180ms ease, background 180ms ease; }
+.source-composer .composer-context-control[data-capacity-state=warning] .context-capacity-bar > span { background: var(--context-clay); }
+.source-composer .composer-context-control[data-capacity-state=full] .context-capacity-bar > span { background: #c94f49; }
+.source-composer .composer-context-control:is([data-capacity-state=warning], [data-capacity-state=full]) :is(.context-window-status, .context-usage-percentage) { color: var(--context-clay); }
+.source-composer .context-section-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.source-composer .context-section-heading strong { font-size: 12px; font-weight: 550; }
+.source-composer .context-section-heading > span { color: var(--ui-muted, #847e78); font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.source-composer .context-token-bar { display: flex; width: 100%; height: 6px; overflow: hidden; margin: 11px 0; border-radius: 999px; background: var(--ui-tray, #f6f5f3); }
+.source-composer .context-token-bar > span { flex-shrink: 0; }
+.source-composer .context-tone-input { background: var(--context-clay); }
+.source-composer .context-tone-output { background: var(--context-output); }
+.source-composer .context-tone-read { background: var(--context-read); }
+.source-composer .context-tone-write { background: var(--context-write); }
+.source-composer .context-token-breakdown { display: grid; grid-template-columns: 1fr 1fr; gap: 7px 18px; margin: 0; }
+.source-composer .context-token-breakdown > div { display: flex; justify-content: space-between; gap: 8px; min-width: 0; }
+.source-composer .context-token-breakdown dt { display: flex; align-items: center; gap: 5px; color: var(--ui-secondary, #655f59); font-size: 11px; }
+.source-composer .context-token-breakdown i { width: 6px; height: 6px; flex: none; border-radius: 50%; }
+.source-composer .context-token-breakdown dd { margin: 0; color: var(--ui-ink, #282725); font-size: 11px; font-variant-numeric: tabular-nums; }
+.source-composer .context-usage-model { margin: 9px 0 0; color: var(--ui-muted, #847e78); font-size: 10px; line-height: 1.6; }
+.source-composer .context-usage-model { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.source-composer .context-reference-section { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--ui-line, #e5e5e3); }
+.source-composer .context-reference-list { list-style: none; margin: 9px 0 0; padding: 0; }
+.source-composer .context-reference-list li { display: flex; align-items: center; gap: 9px; padding: 8px 0; }
+.source-composer .context-reference-list li > svg { flex: none; color: var(--context-clay); }
+.source-composer .context-reference-list li > div { flex: 1; min-width: 0; }
+.source-composer .context-reference-list strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ui-ink, #282725); font-size: 11px; font-weight: 500; }
+.source-composer .context-add-file { display: flex; justify-content: center; align-items: center; gap: 6px; width: 100%; min-height: 31px; margin-top: 10px; padding: 5px 10px; border: 1px solid var(--ui-line, #e5e5e3); border-radius: 8px; background: transparent; color: var(--ui-secondary, #655f59); font: 500 11px/1.5 var(--ui-font, inherit); cursor: pointer; }
+.source-composer .context-add-file:hover:not(:disabled) { color: var(--context-clay); background: color-mix(in srgb, var(--context-clay) 6%, transparent); border-color: color-mix(in srgb, var(--context-clay) 32%, transparent); }
+.source-composer .composer-context-control button:focus-visible { outline: 2px solid var(--ui-blue, #3a83f7); outline-offset: 3px; }
+@keyframes context-panel-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .source-composer .composer-context-panel { animation: none; } .source-composer .composer-context-trigger > svg:last-child { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .source-composer :is(.context-gauge-fill, .context-capacity-bar > span) { transition: none; } }

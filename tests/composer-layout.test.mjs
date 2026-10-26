@@ -16,11 +16,11 @@ test("composer exposes real task actions in a left and right control layout", ()
   const composer = source.slice(source.indexOf("function Composer"), source.indexOf("function ExperienceSelector"));
   assert.match(composer, /className="rp-controls-start"/);
   assert.match(composer, /className="rp-controls-end"/);
-  assert.match(composer, /aria-label="上传内容"[\s\S]*?onClick=\{addAttachments\}/);
+  assert.match(composer, /<ComposerAddMenu[\s\S]*?onUpload=\{addAttachments\}/);
   assert.match(composer, /<ApprovalModeMenu/);
   assert.match(approvals, /api\.updatePermissionSettings/);
   assert.doesNotMatch(approvals, /id:"full"/);
-  assert.match(composer, /<ArrowUp size=\{18\}/);
+  assert.match(composer, /<ArrowRight size=\{16\}/);
   assert.ok(composer.indexOf("rp-controls-start") < composer.indexOf("composer-model-wrap"));
   assert.match(app, /onAddMaterial=\{importWorkspaceMaterials\}/);
   assert.match(composer, /attachmentPaths/);

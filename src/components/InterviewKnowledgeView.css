@@ -46,7 +46,7 @@
 .ik-node-company .ik-node-ring { stroke-width:2.2; }
 .ik-node-role .ik-node-ring { stroke-width:1.8; }
 .ik-node-dot { fill:var(--ik-node-fill); }
-.ik-node text { fill:var(--ik-text); font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,system-ui,"Segoe UI",Roboto,"Inter","Microsoft YaHei",sans-serif; font-weight:400; pointer-events:none; }
+.ik-node text { fill:var(--ik-text); font-family:var(--ui-font); font-weight:400; pointer-events:none; }
 .ik-graph-controls { position:absolute; bottom:20px; left:20px; display:flex; align-items:center; gap:2px; padding:3px; border:1px solid var(--ui-line); border-radius:7px; color:var(--ui-muted); background:var(--ui-surface); }
 .ik-graph-controls button { display:grid; place-items:center; width:29px; height:29px; padding:0; border:0; border-radius:5px; color:inherit; background:none; }
 .ik-graph-controls button:hover { color:var(--ui-ink); background:var(--ui-selection); }

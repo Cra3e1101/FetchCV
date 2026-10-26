@@ -1,0 +1,26 @@
+.appearance-preview {
+  --preview-surface: var(--ui-surface, #fff);
+  --preview-sidebar: var(--ui-under, #f5f5f5);
+  --preview-ink: var(--ui-ink, #1a1c1f);
+  --preview-line: var(--ui-line-strong, #dedede);
+  --preview-selection: var(--ui-selection, #ededed);
+  --preview-accent: var(--ui-accent, #1a1c1f);
+}
+.appearance-preview[data-preview-theme="white"] {
+  --preview-surface: #fff; --preview-sidebar: #f9f9f9; --preview-ink: #1a1c1f;
+  --preview-line: #dedede; --preview-selection: #ededed; --preview-accent: #1a1c1f;
+}
+.appearance-preview[data-preview-theme="neutral-dark"] {
+  --preview-surface: #212121; --preview-sidebar: #191919; --preview-ink: #ececec;
+  --preview-line: #3a3a3a; --preview-selection: #353535; --preview-accent: #ececec;
+}
+.appearance-preview[data-preview-theme="light"] {
+  --preview-surface: #f5f4ee; --preview-sidebar: #eeede6; --preview-ink: #141413;
+  --preview-line: #d9d7cf; --preview-selection: #e4e2da; --preview-accent: #da7756;
+}
+.appearance-preview[data-preview-theme="dark"] {
+  --preview-surface: #262624; --preview-sidebar: #20201e; --preview-ink: #f5f4ee;
+  --preview-line: #47463f; --preview-selection: #3b3a35; --preview-accent: #cc785c;
+}
+
+.settings-window .rp-set-row.settings-appearance-row { display: flex; flex-direction: column; align-items: stretch; gap: 12px; padding: 16px; }

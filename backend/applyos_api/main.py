@@ -920,6 +920,7 @@ def create_app(database: Database | None = None) -> FastAPI:
 
         return LegacyWorkspaceImporter(request.app.state.database).import_file(payload.source_path)
 
+    @app.post("/api/imports/resume/preview", response_model=PdfResumePreviewRead)
     @app.post("/api/imports/resume-pdf/preview", response_model=PdfResumePreviewRead)
     def preview_pdf_resume(payload: PdfResumePreviewRequest, request: Request):
         try:
@@ -928,8 +929,9 @@ def create_app(database: Database | None = None) -> FastAPI:
                 ai_enhanced=payload.ai_enhanced,
             )
         except (ValueError, OSError) as exc:
-            raise HarnessError("pdf_import_invalid", str(exc)) from exc
+            raise HarnessError("resume_import_invalid", str(exc)) from exc
 
+    @app.post("/api/imports/resume", response_model=PdfResumeImportRead)
     @app.post("/api/imports/resume-pdf", response_model=PdfResumeImportRead)
     def import_pdf_resume(payload: PdfResumeImportRequest, request: Request):
         try:
@@ -942,7 +944,7 @@ def create_app(database: Database | None = None) -> FastAPI:
                 reviewed_preview=payload.reviewed_preview,
             )
         except (ValueError, OSError) as exc:
-            raise HarnessError("pdf_import_invalid", str(exc)) from exc
+            raise HarnessError("resume_import_invalid", str(exc)) from exc
 
     @app.post("/api/agent-runs", response_model=AgentRunRead, status_code=status.HTTP_201_CREATED)
     def create_agent_run(payload: AgentRunCreate, session: SessionDep, idempotency_key: Annotated[str, Header(alias="Idempotency-Key")]):
@@ -1277,9 +1279,14 @@ def create_app(database: Database | None = None) -> FastAPI:
         if str(resume.status) == "frozen":
             raise HarnessError("asset_frozen", "已冻结的历史快照不能编辑")
         content = dict(resume.content_json or {})
+        if canonical_hash(content.get("editor_snapshot") or {}) == canonical_hash(payload.editor_snapshot):
+            # Closing an unchanged editor is not a new document revision. Keep
+            # the exact PDF binding and quality results already attached to it.
+            return resume
         previous_semantics = canonical_hash(resume_semantic_payload(content))
         content["editor_snapshot"] = payload.editor_snapshot
-        if canonical_hash(resume_semantic_payload(content)) != previous_semantics:
+        text_changed = canonical_hash(resume_semantic_payload(content)) != previous_semantics
+        if text_changed:
             content["verification_status"] = "unverified"
             content["verification_issues"] = [{"code": "manual_content_changed", "message": "人工正文修改尚未绑定当前事实版本，需重新核验"}]
         content["editor_source"] = "resume-editor-prototype"
@@ -1294,11 +1301,38 @@ def create_app(database: Database | None = None) -> FastAPI:
             QualityReport.target_type == "resume_version", QualityReport.target_id == resume.id
         )):
             report.status = QualityStatus.PENDING
-            report.checks = [*report.checks, {"code": "content_changed", "passed": False, "status": "stale"}]
-            report.warnings = [*report.warnings, "简历已编辑，旧检查已失效，请重新验证"]
+            report.checks = [*report.checks, {"code": "content_changed" if text_changed else "layout_changed", "passed": False, "status": "stale"}]
+            report.warnings = [*report.warnings, "简历正文已修改，请重新核验" if text_changed else "简历版式已修改，请重新生成 PDF"]
         VersionService(session).snapshot_entity(resume, run_id=None, reason="save from embedded resume editor")
         session.flush()
         return resume
+
+    @app.get("/api/resumes/{resume_id}/source")
+    def get_resume_source(resume_id: str, session: SessionDep):
+        """Download the immutable imported source, separate from verified exports."""
+        resume = _require_resume(session, resume_id)
+        content = resume.content_json or {}
+        asset = session.get(MaterialAsset, content.get("source_asset_id")) if content.get("source_asset_id") else None
+        if asset is None or asset.candidate_id != resume.candidate_id:
+            raise HarnessError("resume_source_not_found", "未找到这份简历的导入原件")
+        source_path = Path(asset.source_path).resolve() if asset.source_path else None
+        source_root = (artifact_root() / "resumes").resolve()
+        if source_path is None or not source_path.is_relative_to(source_root) or not source_path.is_file():
+            raise HarnessError("resume_source_not_found", "简历导入原件不可用，请重新导入")
+        expected_hash = str((asset.metadata_json or {}).get("sha256") or "").lower()
+        resume_source_hash = str((content.get("source") or {}).get("sha256") or "").lower()
+        if not re.fullmatch(r"[a-f0-9]{64}", expected_hash) or expected_hash != resume_source_hash:
+            raise HarnessError("resume_source_unbound", "简历原件缺少有效的来源记录，请重新导入")
+        actual_hash = hashlib.sha256(source_path.read_bytes()).hexdigest()
+        if not hmac.compare_digest(expected_hash, actual_hash):
+            raise HarnessError("resume_source_changed", "简历原件已发生变化，请重新导入")
+        return FileResponse(
+            source_path,
+            media_type=asset.mime_type or "application/octet-stream",
+            filename=Path(asset.name).name or source_path.name,
+            content_disposition_type="attachment",
+            headers={"X-FetchCV-Artifact-Kind": "imported-source", "ETag": f'"{actual_hash}"'},
+        )
 
     @app.get("/api/resumes/{resume_id}/pdf")
     def get_resume_pdf(resume_id: str, session: SessionDep):
@@ -1317,6 +1351,40 @@ def create_app(database: Database | None = None) -> FastAPI:
             filename=f"{resume.name}.pdf",
             content_disposition_type="inline",
         )
+
+    @app.get("/api/resumes/{resume_id}/preview.pdf")
+    def preview_resume_pdf(resume_id: str, session: SessionDep):
+        """Render the actual template without publishing or relabeling a draft."""
+        from integrations.resume.native_artifacts import preview_artifact
+        from integrations.resume.latex_renderer import document_fingerprint
+
+        resume = _require_resume(session, resume_id)
+        artifact = preview_artifact(resume)
+        session.expire_all()
+        session.refresh(resume)
+        if document_fingerprint(resume.content_json.get("editor_snapshot") or {}) != artifact.layout_hash:
+            raise HarnessError("resume_pdf_revision_mismatch", "简历已修改，请刷新预览")
+        revision = canonical_hash(resume.content_json)
+        return FileResponse(artifact.path, media_type="application/pdf", content_disposition_type="inline",
+                            headers={"Cache-Control": "no-store", "X-FetchCV-Artifact-Kind": "layout-preview",
+                                     "X-FetchCV-Resume-Hash": revision, "X-FetchCV-Page-Count": str(artifact.pages),
+                                     "ETag": f'"{artifact.sha256}"'})
+
+    @app.post("/api/resumes/{resume_id}/pdf/render")
+    def render_native_resume_pdf(resume_id: str, request: Request, session: SessionDep):
+        from integrations.resume.native_artifacts import preview_artifact, attach_verified_artifact
+
+        resume = _require_resume(session, resume_id)
+        if str(resume.status) == "frozen":
+            raise HarnessError("asset_frozen", "已冻结的历史快照不能覆盖")
+        require_resume_exportable(session, resume)
+        expected = request.headers.get("X-FetchCV-Resume-Hash")
+        if not expected or expected != canonical_hash(resume.content_json):
+            raise HarnessError("resume_pdf_revision_mismatch", "简历版本已变化，请重新导出")
+        artifact = preview_artifact(resume)
+        quality = attach_verified_artifact(session, resume, artifact, expected_hash=expected)
+        return {"resume": _row(resume), "pdf_url": f"/api/resumes/{resume.id}/pdf", "page_count": artifact.pages,
+                "quality_report": _row(quality)}
 
     @app.get("/api/resumes/{resume_id}/docx")
     def get_resume_docx(resume_id: str, session: SessionDep):

@@ -6,11 +6,12 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
-    <title>简历编辑器原型</title>
+    <title>FetchCV 简历编辑器</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='5' y='4' width='4' height='24' fill='%23244766'/%3E%3Crect x='13' y='6' width='6' height='6' rx='2' fill='%23244766'/%3E%3Crect x='22' y='6' width='6' height='6' rx='2' fill='%238fa1b5'/%3E%3Crect x='13' y='17' width='6' height='6' rx='2' fill='%238fa1b5'/%3E%3Crect x='22' y='17' width='6' height='6' rx='2' fill='%23b7c4d2'/%3E%3C/svg%3E" />
     <link rel="stylesheet" href="./styles.css?v=20260719-layout-2" />
     <link rel="stylesheet" href="./editor-layout.css?v=20260719-2" />
     <link rel="stylesheet" href="./fetchcv-theme.css?v=8" />
+    <link rel="stylesheet" href="./didi-template.css?v=1" />
   </head>
   <body class="dashboard-mode">
     <section class="dashboard-shell" id="dashboardShell" aria-label="简历工作台">
@@ -224,6 +225,7 @@
                     <p><span>到岗情况</span><strong id="previewArrival">两周内到岗</strong></p>
                   </div>
                 </div>
+                <p id="previewSummary" class="profile-summary" hidden></p>
               </div>
           </div>
           <div id="resumeSections"></div>
@@ -304,13 +306,14 @@
         <div class="settings-panel" data-settings="type">
           <label class="stack-label">字体
             <select id="fontFamilyInput">
+              <option value="'Times New Roman', 'SimSun', 'Songti SC', serif">宋体 / Times New Roman</option>
               <option value="'Microsoft YaHei', 'PingFang SC', Arial, sans-serif">微软雅黑</option>
               <option value="'SimSun', serif">宋体</option>
               <option value="'KaiTi', serif">楷体</option>
             </select>
           </label>
           <label class="stack-label">字号
-            <input id="fontSizeRange" type="range" min="11" max="17" value="15" />
+            <input id="fontSizeRange" type="range" min="11" max="17" step="0.1" value="15" />
           </label>
           <label class="switch"><input id="languageInput" type="checkbox" /> 英文标签</label>
         </div>
@@ -417,10 +420,8 @@
             <div class="editor-panel" id="profilePanel">
               <div class="profile-panel-head">
                 <div>
-                  <small>个人资料</small>
                   <strong>基本信息</strong>
                 </div>
-                <span>默认保留，不随岗位改写</span>
               </div>
               <div class="form-grid">
                   <label class="field-short field-half">姓名<input id="nameInput" value="林予安" /></label>
@@ -429,6 +430,8 @@
                   <label class="field-medium field-half">政治面貌<input id="politicalInput" value="群众" /></label>
                   <label class="field-short">联系电话<input id="phoneInput" value="138****2468" /></label>
                   <label class="profile-email-field">邮箱<span class="field-input-line email-combo"><input id="emailInput" placeholder="例如：demo@mail.com" /></span></label>
+                  <label class="profile-website-field">个人网站<input id="websiteInput" type="text" /></label>
+                  <label class="profile-summary-field">个人概述<textarea id="summaryInput" rows="3"></textarea></label>
                   <label class="field-short">到岗情况<input id="arrivalInput" value="两周内到岗" /></label>
                   <label class="photo-upload-field">证件照上传
                     <button type="button" class="upload-field" id="photoUploadField">
@@ -455,7 +458,6 @@
               <div class="section-form">
                 <div class="section-form-head">
                   <div class="section-heading-copy">
-                    <small>当前编辑模块</small>
                     <h3 id="activeSectionTitle">教育背景</h3>
                   </div>
                   <label class="switch"><input type="checkbox" id="sectionVisibleInput" checked /> 显示模块</label>

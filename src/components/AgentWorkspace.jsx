@@ -2,29 +2,44 @@
 import {ApprovalModeMenu} from "../ui/ApprovalModeMenu";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  AlertCircle, ArrowDown, ArrowLeft, ArrowUp, Check, CheckCircle2, ChevronDown, ChevronRight,
+  AlertCircle, ArrowDown, ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight,
   BookOpenCheck, Copy, Download, FileSignature, FileText, Gauge, MessageSquare, Pencil, Quote,
-  PanelRightClose, PanelRightOpen, Pause, Play, Plus, RotateCcw, Settings2, ShieldCheck, Sparkles, Square, X, XCircle,
+  PanelRightClose, PanelRightOpen, Pause, Search, Settings2, ShieldCheck, Square, X, XCircle,
 } from "lucide-react";
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AgentActivity } from "./AgentActivity";
 import { AGENT_EFFORT_LEVELS, AgentEffortControl, getAgentEffortApiLevel, getStoredAgentEffort } from "./AgentEffortControl";
 import { AgentMessage } from "./AgentMessage";
+import { ComposerSuggestions, useComposerSuggestions } from "./ComposerSuggestions";
+import { ComposerAddMenu } from "./ComposerAddMenu";
+import { ContextManagement } from "./ContextManagement";
+import { getComposerContextUsage } from "../lib/composer-context";
+import "./ChatComposer.css";
+import { MAX_COMPOSER_FILES, MAX_COMPOSER_FILE_BYTES, formatComposerFileSize, formatComposerModelName, uniqueComposerFiles } from "../lib/composer-input";
 import { JobProgressPanel } from "./JobProgressPanel";
 import { JobContextSummary, JobInputStaleNotice } from "./JobContextCard";
 import { api } from "../lib/api";
-import { createChatScrollFollower, isChatNearBottom, resolveChatScrollTop } from "../lib/chat-scroll";
+import "./ResumeStudio.css";
+import { useChatScrollPinning } from "../lib/use-chat-scroll-pinning";
 import { useModalFocusTrap } from "../lib/modal-focus";
 import { resolveAgentRuntimeState } from "../lib/runtime-state";
 import { summarizeInterviewEvidence } from "../lib/interview-progress";
 import { ActivityIndicator } from "../ui/ActivityIndicator";
+import { ContentSkeleton } from "../ui/Skeleton";
 import { AnimatedCollapse } from "../ui/AnimatedCollapse";
+import { SegmentedControl } from "../ui/SegmentedControl";
+import { SelectorPopover } from "../ui/SelectorPopover";
 import { motionTokens, useAgentMotion } from "../ui/motion";
 
 const InterviewIntelligence = lazy(() => import("./InterviewIntelligence").then((module) => ({ default: module.InterviewIntelligence })));
 const InterviewRail = lazy(() => import("./InterviewIntelligence").then((module) => ({ default: module.InterviewRail })));
 
 const EMPTY_ITEMS = Object.freeze([]);
+const WORKSPACE_TABS = [
+  { id: "conversation", label: "对话", icon: <MessageSquare size={14} /> },
+  { id: "resume", label: "简历", icon: <FileText size={14} /> },
+  { id: "interview", label: "面试", icon: <BookOpenCheck size={14} /> },
+];
 
 const labels = {
   created: "准备任务", input_validating: "核对输入", jd_analyzing: "理解岗位",
@@ -84,7 +99,7 @@ const conversationScrollPositions = new Map();
 const workspaceTabs = new Map();
 
 function InterviewLoading({ compact = false }) {
-  return <div className={compact ? "interview-rail-loading" : "interview-workspace-loading"} aria-live="polite"><ActivityIndicator active priority={5} label="正在载入面试情报" /><span>正在载入面试情报…</span></div>;
+  return <div className={compact ? "interview-rail-loading" : "interview-workspace-loading"}><ContentSkeleton layout={compact ? "list" : "card"} label="正在载入面试情报…" /></div>;
 }
 
 function proposalEvidenceReview(item, factsById) {
@@ -399,7 +414,7 @@ function ResumeEditorOverlay({ resume, onClose, onSave, onPdfSaved }) {
   const latest = useRef(resume.content_json?.editor_snapshot || {});
   const saveTimer = useRef(null);
   const editorReady = useRef(false);
-  const [status, setStatus] = useState("正在载入原编辑器…");
+  const [status, setStatus] = useState("正在载入…");
   const editorSrc = `./resume-editor/index.html?embedded=1&resumeId=${encodeURIComponent(resume.id)}&apiBase=${encodeURIComponent(window.appRuntime?.apiBase || "http://127.0.0.1:8766")}&apiToken=${encodeURIComponent(window.appRuntime?.apiToken || "")}`;
   const loadSnapshot = useCallback(async () => {
     if (!hasUsableResumeSnapshot(latest.current)) {
@@ -428,6 +443,7 @@ function ResumeEditorOverlay({ resume, onClose, onSave, onPdfSaved }) {
         if (!result?.ok) throw new Error(result?.message || "PDF 生成失败");
         setStatus("正式 PDF 已保存，与当前预览一致");
         await onPdfSaved?.();
+        await window.appRuntime?.saveResumeFile?.(resume.id, "pdf");
       } catch (error) { setStatus(error.message || "PDF 生成失败"); }
     })();
   };
@@ -453,7 +469,7 @@ function ResumeEditorOverlay({ resume, onClose, onSave, onPdfSaved }) {
         setStatus("正在核验当前正文并生成 PDF…");
         void (async () => {
           try {
-            if (!window.appRuntime?.renderResumePdf) throw new Error("桌面 PDF 渲染器不可用，请返回 FetchCV 重试");
+            if (!window.appRuntime?.renderResumePdf) throw new Error("桌面 PDF 渲染器不可用，请返回简历 重试");
             const result = await window.appRuntime.renderResumePdf(resume.id, event.data.resumeHash);
             if (!result?.ok) throw new Error(result?.message || "PDF 事实核验失败");
             editorWindow.postMessage({ type: "fetchcv:verified-pdf-result", requestId, ...result }, "*");
@@ -474,7 +490,7 @@ function ResumeEditorOverlay({ resume, onClose, onSave, onPdfSaved }) {
         setStatus("正在保存…");
         clearTimeout(saveTimer.current);
         saveTimer.current = setTimeout(async () => {
-          try { await onSave(event.data.snapshot); setStatus("已自动保存 · 正文修改需重新核验后导出"); }
+          try { await onSave(event.data.snapshot); setStatus("已保存"); }
           catch (error) { setStatus(error.message || "正文保存失败，请重试"); }
         }, 700);
       }
@@ -494,85 +510,97 @@ function ResumeEditorOverlay({ resume, onClose, onSave, onPdfSaved }) {
     window.addEventListener("message", receive);
     return () => { window.clearInterval(bridgeTimer); window.removeEventListener("message", receive); clearTimeout(saveTimer.current); };
   }, [loadSnapshot, onPdfSaved, onSave, resume.id]);
-  const close = async () => { clearTimeout(saveTimer.current); await onSave(latest.current); onClose(); };
+  const close = async () => {
+    clearTimeout(saveTimer.current);
+    try { if (hasUsableResumeSnapshot(latest.current)) await onSave(latest.current); onClose(); }
+    catch (error) { setStatus(error.message || "保存失败，请重试"); }
+  };
   return <motion.div className="resume-editor-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: transition("exit") }} transition={transition("enter")}>
-    <header><div><button onClick={close}><ArrowLeft size={15} />返回 FetchCV</button><span /><strong>{resume.name}</strong><small>{status}</small></div><div><button onClick={exportPdf}><Download size={14} />导出 PDF</button><button aria-label="关闭编辑器" onClick={close}><X size={15} /></button></div></header>
+    <header><div><button onClick={close}><ArrowLeft size={15} />返回简历</button><span /><strong>{resume.name}</strong><small>{status}</small></div><div><button onClick={exportPdf}><Download size={14} />导出 PDF</button><button aria-label="关闭编辑器" onClick={close}><X size={15} /></button></div></header>
     <iframe ref={frame} title="FetchCV 简历编辑器" src={editorSrc} onLoad={loadSnapshot} />
   </motion.div>;
 }
 
-function CanonicalResumePreview({ pdfUrl, frameRef, onReady }) {
-  const pdfSrc = pdfUrl ? `${pdfUrl}#toolbar=0&navpanes=0&scrollbar=0&view=FitH` : "";
-  if (!pdfSrc) {
-    return <div className="canonical-preview-empty"><FileText size={22} /><strong>正式 PDF 尚未生成</strong><p>完成编辑后生成 PDF，这里只展示最终导出文件。</p></div>;
-  }
-  return <iframe ref={frameRef} className="canonical-resume-frame source-pdf-frame" title="FetchCV 正式 PDF 预览" src={pdfSrc} onLoad={() => onReady?.(true)} />;
+function CanonicalResumePreview({ resume }) {
+  const [blobUrl, setBlobUrl] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [attempt, setAttempt] = useState(0);
+  const version = encodeURIComponent(resume.content_hash || resume.updated_at || "current");
+  const previewUrl = api.assetUrl(`/api/resumes/${resume.id}/preview.pdf?v=${version}`);
+  useEffect(() => {
+    const controller = new AbortController();
+    let objectUrl;
+    setLoading(true); setBlobUrl(""); setError("");
+    void (async () => {
+      try {
+        const response = await fetch(previewUrl, { signal: controller.signal });
+        if (!response.ok || !(response.headers.get("content-type") || "").includes("application/pdf")) {
+          const payload = await response.json().catch(() => ({}));
+          throw new Error(payload?.error?.message || payload?.message || "PDF 排版暂不可用，请重试");
+        }
+        const blob = await response.blob();
+        if (await blob.slice(0, 5).text() !== "%PDF-") throw new Error("排版文件不完整，请重试");
+        if (controller.signal.aborted) return;
+        objectUrl = URL.createObjectURL(blob);
+        setBlobUrl(objectUrl);
+      } catch (failure) {
+        if (!controller.signal.aborted) { setError(failure.message || "排版失败，请重试"); setLoading(false); }
+      }
+    })();
+    return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [previewUrl, attempt]);
+  return <div className="resume-document-stage" aria-busy={loading}>
+    {loading && <div className="resume-preview-loading" role="status"><ActivityIndicator active label="正在排版" />正在排版</div>}
+    {error && <div className="resume-preview-failure" role="alert"><FileText size={26} /><p>{error}</p><button onClick={() => setAttempt(value => value + 1)}>重试</button></div>}
+    {blobUrl && <iframe key={blobUrl} className="canonical-resume-frame" title="FetchCV PDF 预览"
+      src={`${blobUrl}#toolbar=0&navpanes=0&view=FitH`} onLoad={() => setLoading(false)} />}
+  </div>;
 }
 
-function ResumeStudio({ detail, onSaveResumeEditor, onResumePdfSaved }) {
+function ResumeStudio({ detail, onSaveResumeEditor, onResumePdfSaved, onReview }) {
   const jobResume = detail.resumes?.[0];
   const resume = jobResume || detail.base_resumes?.[0];
   const isBaseResume = Boolean(resume && !jobResume);
+  const verified = resume?.content_json?.verification_status === "verified";
   const [editing, setEditing] = useState(false);
-  const [previewReady, setPreviewReady] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [previewError, setPreviewError] = useState("");
-  const previewFrame = useRef(null);
-  const autoRenderKey = useRef("");
-  const editorPdfVersion = Number(resume?.content_json?.pdf_renderer_version || 0);
-  const staleEditorPdf = resume?.content_json?.pdf_renderer === "resume-editor-prototype" && editorPdfVersion < 2;
-  const pdfSaved = useCallback(async () => { setExporting(false); await onResumePdfSaved?.(); }, [onResumePdfSaved]);
-  const saveSnapshot = useCallback((snapshotValue) => onSaveResumeEditor(resume?.id, snapshotValue), [onSaveResumeEditor, resume?.id]);
-  const handlePreviewReady = useCallback((ready, message) => {
-    setPreviewReady(ready);
-    if (message) { setPreviewError(message); setExporting(false); }
-  }, []);
-  useEffect(() => {
-    const needsRender = !resume?.pdf_path || staleEditorPdf;
-    const renderKey = `${resume?.id || ""}:${editorPdfVersion}`;
-    if (!resume?.id || !needsRender || autoRenderKey.current === renderKey) return;
-    if (!window.appRuntime?.renderResumePdf) return;
-    autoRenderKey.current = renderKey;
-    setExporting(true);
-    setPreviewError("");
-    void (async () => {
-      try {
-        const result = await window.appRuntime.renderResumePdf(resume.id);
-        if (!result?.ok) throw new Error(result?.message || "正式 PDF 生成失败");
-        setExporting(false);
-        await onResumePdfSaved?.();
-      } catch (error) {
-        autoRenderKey.current = "";
-        setExporting(false);
-        setPreviewError(error.message || "正式 PDF 生成失败");
-      }
-    })();
-  }, [editorPdfVersion, onResumePdfSaved, resume?.id, resume?.pdf_path, staleEditorPdf]);
-  if (!resume) return <div className="resume-empty"><FileText size={22} /><h3>还没有可预览的简历</h3><p>先在个人资料库导入基础简历；岗位版生成后会自动替换为本次定制版本。</p></div>;
-  const pdfVersion = encodeURIComponent(resume.updated_at || resume.content_hash || "current");
-  const pdfUrl = resume.pdf_path && !staleEditorPdf ? api.assetUrl(`/api/resumes/${resume.id}/pdf?v=${pdfVersion}`) : "";
-  const docxUrl = api.assetUrl(`/api/resumes/${resume.id}/docx?v=${pdfVersion}`);
-  const exportPdf = () => {
-    if (resume.content_json?.source_pdf_fidelity && !resume.content_json?.pdf_renderer && pdfUrl) {
-      window.open(pdfUrl, "_blank", "noopener,noreferrer");
-      return;
-    }
+  const saveSnapshot = useCallback((snapshot) => onSaveResumeEditor(resume?.id, snapshot), [onSaveResumeEditor, resume?.id]);
+  const pdfVersion = encodeURIComponent(resume?.updated_at || resume?.content_hash || "current");
+  useEffect(() => { setEditing(false); setPreviewError(""); }, [resume?.id]);
+  if (!resume) return <div className="resume-empty"><FileText size={28} /><h3>还没有可预览的简历</h3><p>在资料库导入 PDF、Word、LaTeX 或 JSON 简历。</p></div>;
+  const exportPdf = async () => {
     setExporting(true); setPreviewError("");
-    void (async () => {
-      try {
-        const result = await window.appRuntime?.renderResumePdf?.(resume.id);
-        if (!result?.ok) throw new Error(result?.message || "PDF 生成失败");
-        await pdfSaved();
-      } catch (error) { setExporting(false); setPreviewError(error.message || "PDF 生成失败"); }
-    })();
+    try {
+      if (!window.appRuntime?.renderResumePdf) throw new Error("请在桌面客户端中导出 PDF。");
+      const result = await window.appRuntime.renderResumePdf(resume.id, resume.content_hash);
+      if (!result?.ok) throw new Error(result?.message || "PDF 生成失败");
+      await onResumePdfSaved?.();
+      await window.appRuntime?.saveResumeFile?.(resume.id, "pdf");
+    } catch (error) { setPreviewError(error.message || "PDF 生成失败"); }
+    finally { setExporting(false); }
   };
-  const hasCanonicalPdf = Boolean(pdfUrl);
+  const sourceAvailable = Boolean(resume.source_asset_id || resume.content_json?.source_asset_id);
+  const docxUrl = api.assetUrl(`/api/resumes/${resume.id}/docx?v=${pdfVersion}`);
+  const exportWord = async (event) => {
+    if (!window.appRuntime?.saveResumeFile) return;
+    event.preventDefault(); setPreviewError("");
+    try { await window.appRuntime.saveResumeFile(resume.id, "docx"); }
+    catch (error) { setPreviewError(error.message || "Word 导出失败"); }
+  };
   return <div className="resume-studio-v2">
-    <div className="resume-toolbar-v2"><div><i />{isBaseResume ? "基础简历预览" : hasCanonicalPdf ? "岗位版 PDF 预览" : "等待岗位版 PDF"}<small>{isBaseResume ? "岗位版尚未生成；这里明确展示资料库原简历，不代表 Agent 已完成优化" : hasCanonicalPdf ? "这里只展示已生成的岗位版最终文件" : "编辑完成后生成岗位版 PDF"}</small></div><div>{hasCanonicalPdf && <a href={pdfUrl} target="_blank" rel="noreferrer"><FileText size={14} />打开已保存 PDF</a>}<a href={docxUrl} target="_blank" rel="noreferrer" title={isBaseResume ? "当前导出的是资料库基础简历" : "单栏可编辑岗位版本"}><FileSignature size={14} />{isBaseResume ? "基础 Word" : "岗位版 Word"}</a><button onClick={() => setEditing(true)}><Pencil size={14} />{isBaseResume ? "编辑基础简历" : "编辑内容与排版"}</button><button className="accent" disabled={!previewReady || exporting} onClick={exportPdf}>{exporting ? <ActivityIndicator active priority={10} label="正在生成 PDF" /> : <Download size={14} />}{exporting ? "正在生成" : isBaseResume ? "导出基础 PDF" : "导出岗位版 PDF"}</button></div></div>
-    {resume.content_json?.verification_status !== "verified" && <div className="canonical-preview-error" role="status"><ShieldCheck size={14} />未核验草稿：正文或事实版本需重新核验后才能导出。人工编辑不会自动成为已确认事实。</div>}
-    {resume.job_relevance?.analysis_status === "stale" && <div className="canonical-preview-error" role="status">岗位相关性已过期：这是依据旧 JD 或旧语境保存的简历，请按当前岗位重新复核。个人事实的核验状态单独保留。</div>}
-    {previewError && <div className="canonical-preview-error"><AlertCircle size={14} />{previewError}</div>}
-    <div className="canonical-resume-preview"><CanonicalResumePreview pdfUrl={pdfUrl} frameRef={previewFrame} onReady={handlePreviewReady} /></div>
+    <div className="resume-toolbar-v2">
+      <div className="resume-document-identity"><FileText size={17} /><strong>{isBaseResume ? "基础简历" : "岗位简历"}</strong>{verified ? <span className="resume-status verified agent-pill-pop">已核验</span> : <button className="resume-status draft agent-pill-pop" onClick={onReview} title="前往岗位流程核对事实，完成后可导出">待核对<ChevronRight size={11} /></button>}</div>
+      <div className="resume-document-actions">
+        {sourceAvailable && <a href={api.assetUrl(`/api/resumes/${resume.id}/source`)} target="_blank" rel="noreferrer" title="下载导入时的原始文件"><Download size={14} />原件</a>}
+        {verified ? <a href={docxUrl} target="_blank" rel="noreferrer" onClick={exportWord} aria-label={isBaseResume ? "基础 Word" : "岗位版 Word"}><FileSignature size={14} />Word</a> : <button disabled title="完成事实核验后可导出 Word"><FileSignature size={14} />Word</button>}
+        <button onClick={() => setEditing(true)}><Pencil size={14} />编辑</button>
+        <button className="accent" disabled={!verified || exporting} title={!verified ? "完成事实核验后可导出 PDF" : undefined} aria-label={isBaseResume ? "导出基础 PDF" : "导出岗位版 PDF"} onClick={exportPdf}>{exporting ? <ActivityIndicator active priority={10} label="正在生成 PDF" /> : <Download size={14} />}{exporting ? "生成中" : "导出 PDF"}</button>
+      </div>
+    </div>
+    {(previewError || resume.job_relevance?.analysis_status === "stale") && <div className="resume-notice" role="status"><AlertCircle size={14} /><span>{previewError || "岗位要求已更新，请重新核对简历。"}</span>{previewError && <button aria-label="关闭提示" onClick={() => setPreviewError("")}><X size={14} /></button>}</div>}
+    <div className="canonical-resume-preview"><CanonicalResumePreview resume={resume} /></div>
     <AnimatePresence>{editing && <ResumeEditorOverlay resume={resume} onClose={() => setEditing(false)} onSave={saveSnapshot} onPdfSaved={onResumePdfSaved} />}</AnimatePresence>
   </div>;
 }
@@ -601,8 +629,8 @@ function ToolApprovalInterrupt({ approvals, busy, onDecision }) {
   </motion.section>}</AnimatePresence>;
 }
 
-export function Composer({ busy, streaming, stopping = false, finishing = false, queued, runtime, agentReady = true, startupMessage, quote, onClearQuote, onSend, onCancel, onAddMaterial, onModelActivated, onManageModels, placeholder = "与 FetchCV 协作" }) {
-  const { reducedMotion, transition, enter, exit } = useAgentMotion();
+export function Composer({ busy, streaming, stopping = false, finishing = false, queued, runtime, contextMessages = EMPTY_ITEMS, liveContextUsage = null, agentReady = true, startupMessage, quote, onClearQuote, onSend, onCancel, onAddMaterial, onModelActivated, onManageModels, placeholder = "与 FetchCV 协作" }) {
+  const { reducedMotion, transition } = useAgentMotion();
   const [value, setValue] = useState("");
   const [attachments, setAttachments] = useState([]);
   const [attachmentBusy, setAttachmentBusy] = useState(false);
@@ -610,10 +638,29 @@ export function Composer({ busy, streaming, stopping = false, finishing = false,
   const [agentEffort, setAgentEffort] = useState(getStoredAgentEffort);
   const [modelBusy, setModelBusy] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [contextOpen, setContextOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState(null);
   const [modelError, setModelError] = useState("");
+  const [modelQuery, setModelQuery] = useState("");
+  const [profilesLoading, setProfilesLoading] = useState(true);
   const input = useRef(null);
   const controls = useRef(null);
+  const modelAnchor = useRef(null);
+  const switchingModel = useRef(false);
+  const settingsGeneration = useRef(0);
+  const settingsId = useId();
+  const [focusCommandModel, setFocusCommandModel] = useState(false);
+  const closeSettings = () => { settingsGeneration.current += 1; setSettingsOpen(false); setSettingsSection(null); };
+  const suggestions = useComposerSuggestions({
+    value, setValue, input, attachments, setAttachments, enabled: agentReady,
+    onAction: (action) => {
+      if (action === "model") { settingsGeneration.current += 1; setContextOpen(false); setFocusCommandModel(true); setModelQuery(""); setSettingsOpen(true); setSettingsSection("model"); }
+      if (action === "attach") void addAttachments();
+    },
+  });
+  useEffect(() => {
+    if (suggestions.menuProps.kind) { setContextOpen(false); setSettingsOpen(false); setSettingsSection(null); }
+  }, [suggestions.menuProps.kind]);
   useLayoutEffect(() => {
     const composer = controls.current;
     const workspace = composer?.closest("main");
@@ -627,54 +674,71 @@ export function Composer({ busy, streaming, stopping = false, finishing = false,
   }, []);
   useLayoutEffect(() => {
     if (!input.current) return;
+    // Use native field sizing when supported; retain the height fallback for
+    // older preview engines. Both paths share the CSS viewport height cap.
+    if (CSS.supports("field-sizing", "content")) {
+      input.current.style.height = "auto";
+      return;
+    }
     input.current.style.height = "0px";
-    input.current.style.height = `${Math.min(input.current.scrollHeight, 126)}px`;
+    input.current.style.height = `${Math.min(input.current.scrollHeight, 384)}px`;
   }, [value]);
   useEffect(() => {
-    window.appRuntime?.listModelProviders?.().then((store) => setProfiles(store?.profiles || [])).catch(() => {});
-  }, [runtime?.model]);
+    let cancelled = false;
+    setProfilesLoading(true);
+    Promise.resolve(window.appRuntime?.listModelProviders?.()).then((store) => {
+      if (!cancelled) setProfiles(store?.profiles || []);
+    }).catch(error => { if (!cancelled) setModelError(error.message || "模型连接读取失败"); })
+      .finally(() => { if (!cancelled) setProfilesLoading(false); });
+    return () => { cancelled = true; };
+  }, [runtime?.model, runtime?.provider_id, runtime?.provider_name]);
   useEffect(() => { input.current?.focus(); }, []);
   useEffect(() => { if (quote) input.current?.focus(); }, [quote]);
-  useEffect(() => {
-    if (!settingsOpen) return undefined;
-    const close = (event) => {
-      if (event.key === "Escape" || (event.type === "pointerdown" && !controls.current?.contains(event.target))) {
-        setSettingsOpen(false);
-        setSettingsSection(null);
-      }
-    };
-    window.addEventListener("pointerdown", close);
-    window.addEventListener("keydown", close);
-    return () => { window.removeEventListener("pointerdown", close); window.removeEventListener("keydown", close); };
-  }, [settingsOpen]);
+  useEffect(() => { if (!agentReady) { setSettingsOpen(false); setSettingsSection(null); } }, [agentReady]);
   const activeProfile = profiles.find((profile) => profile.id === runtime?.provider_id)
     || profiles.find((profile) => profile.providerName === runtime?.provider_name && profile.model === runtime?.model)
     || profiles.find((profile) => profile.model === runtime?.model)
     || null;
   const activeProfileId = activeProfile?.id || "";
+  const contextUsage = useMemo(() => getComposerContextUsage(contextMessages, runtime, activeProfile, liveContextUsage), [contextMessages, runtime, activeProfile, liveContextUsage]);
+  const modelGroups = profiles.map(profile => {
+    const models = profile.availableModels?.length ? profile.availableModels : [{ id: profile.model }];
+    const items = [...new Map(models.filter(item => item?.id).map(item => [item.id, item])).values()]
+      .filter(item => [profile.providerName, item.id, item.ownedBy, item.id === profile.model ? profile.displayName : ""].filter(Boolean).join(" ").toLowerCase().includes(modelQuery.trim().toLowerCase()));
+    return { profile, items };
+  }).filter(group => group.items.length);
+  const finishModelSelection = (ticket = settingsGeneration.current) => {
+    if (ticket !== settingsGeneration.current) return;
+    const panel = document.getElementById(settingsId);
+    if (panel && !panel.inert && (panel.contains(document.activeElement) || document.activeElement === document.body)) (focusCommandModel ? input : modelAnchor).current?.focus();
+    closeSettings();
+  };
   const selectModel = async (profile, model) => {
-    if (!agentReady || !profile?.id || !model || !window.appRuntime?.activateModelProvider) return;
-    if (profile.id === activeProfileId && model === runtime?.model) { setSettingsSection(null); return; }
+    if (!agentReady || switchingModel.current || !profile?.id || !model || !window.appRuntime?.activateModelProvider) return;
+    if (profile.id === activeProfileId && model === runtime?.model) { finishModelSelection(); return; }
+    switchingModel.current = true;
+    const ticket = settingsGeneration.current;
+    // Disabling a focused option otherwise sends focus to body while saving.
+    document.getElementById(settingsId)?.focus({ preventScroll: true });
     setModelBusy(true);
     setModelError("");
     try {
       const result = await window.appRuntime.activateModelProvider(profile.id, model);
       setProfiles(result.store?.profiles || profiles.map((item) => item.id === profile.id ? { ...item, model } : item));
       onModelActivated?.(result.runtime);
-      setSettingsSection(null);
-    } catch (error) { setModelError(error.message || "模型切换失败"); } finally { setModelBusy(false); }
+      finishModelSelection(ticket);
+    } catch (error) { if (ticket === settingsGeneration.current) setModelError(error.message || "模型切换失败"); } finally { switchingModel.current = false; setModelBusy(false); }
   };
   const thinkingLevel = getAgentEffortApiLevel(agentEffort);
   const submit = async () => {
-    if (!agentReady || (!value.trim() && !attachments.length) || streaming) return;
-    const content = value.trim() || "请读取并处理这些附件。";
+    if (!agentReady || suggestions.isComposing() || attachmentBusy || stopping || finishing || (!value.trim() && !attachments.length && !suggestions.activeCommand) || streaming) return;
+    const content = [suggestions.activeCommand?.prompt, value.trim()].filter(Boolean).join("\n\n") || "请读取并处理这些附件。";
     const attachmentPaths = attachments.map((item) => item.workspacePath);
     const submittedQuote = quote;
-    setValue(""); setAttachments([]); onClearQuote?.();
+    setValue(""); setAttachments([]); suggestions.reset(); onClearQuote?.();
     if (input.current) input.current.style.height = "";
     await onSend(content, { thinkingLevel, attachmentPaths, quote: submittedQuote });
   };
-  const update = (event) => setValue(event.target.value);
   const handlePaste = (event) => {
     // Electron normally forwards Cmd/Ctrl+V through the native window hook.
     // Keep a DOM fallback for browser preview and sandboxed iframe contexts.
@@ -689,8 +753,13 @@ export function Composer({ busy, streaming, stopping = false, finishing = false,
     }).catch(() => {});
   };
   const currentEffort = AGENT_EFFORT_LEVELS.find((item) => item.id === agentEffort) || AGENT_EFFORT_LEVELS[1];
-  const currentModel = modelBusy ? "正在切换" : activeProfile?.displayName || runtime?.model || activeProfile?.model || "选择模型";
+  const currentModel = modelBusy ? "Switching…" : formatComposerModelName(runtime?.model || activeProfile?.model);
   const openSettings = () => {
+    settingsGeneration.current += 1;
+    suggestions.close();
+    setContextOpen(false);
+    setFocusCommandModel(false);
+    setModelQuery("");
     setSettingsOpen((value) => {
       const next = !value;
       setSettingsSection(null);
@@ -699,18 +768,27 @@ export function Composer({ busy, streaming, stopping = false, finishing = false,
   };
   const addAttachments = async () => {
     if (!agentReady || attachmentBusy) return;
+    suggestions.close();
+    if (attachments.length >= MAX_COMPOSER_FILES) { setModelError(`最多引用 ${MAX_COMPOSER_FILES} 个文件，请先移除已有文件。`); return; }
     setAttachmentBusy(true);
+    setModelError("");
     try {
       const files = await onAddMaterial?.();
-      if (files?.length) setAttachments((current) => [...new Map([...current, ...files].map((item) => [item.workspacePath, item])).values()]);
+      if (files?.length) {
+        if (uniqueComposerFiles([...attachments, ...files]).length > MAX_COMPOSER_FILES) setModelError(`文件已导入，本次最多附加 ${MAX_COMPOSER_FILES} 个，其余可在下一条消息中用 @ 引用。`);
+        if (files.some((file) => file.sizeBytes > MAX_COMPOSER_FILE_BYTES)) setModelError("超过 50 MiB 的文件已导入工作区，但无法作为消息附件发送。");
+        setAttachments((current) => uniqueComposerFiles([...current, ...files.filter((file) => !(file.sizeBytes > MAX_COMPOSER_FILE_BYTES))]).slice(0, MAX_COMPOSER_FILES));
+      }
     } catch (error) { setModelError(error.message || "文件导入失败"); } finally { setAttachmentBusy(false); }
   };
-  return <section ref={controls} className={`agent-composer-v2 source-composer rp-composer-wrap ${busy ? "working" : ""}`} data-replica-part="composer">
+  return <section ref={controls} className={`agent-composer-v2 source-composer rp-composer-wrap claude-composer ${busy ? "working" : ""}`} data-replica-part="composer">
+    <ComposerSuggestions {...suggestions.menuProps} />
     <div className="rp-composer"><div className="source-composer-editor rp-editor">
     {quote && <div className="composer-quote"><span><Quote size={13} /></span><p><strong>引用 Agent</strong><small>{quote.text}</small></p><button type="button" aria-label="移除引用" onClick={onClearQuote}><X size={13} /></button></div>}
-    {!!attachments.length && <div className="composer-attachments">{attachments.map((file) => <span key={file.workspacePath}><FileText size={13} /><b>{file.name}</b><button type="button" aria-label={`移除 ${file.name}`} onClick={() => setAttachments((current) => current.filter((item) => item.workspacePath !== file.workspacePath))}><X size={12} /></button></span>)}</div>}
-    <textarea ref={input} value={value} onChange={update} onPaste={handlePaste} aria-keyshortcuts="Enter Shift+Enter" onKeyDown={(event) => {
-      if (event.nativeEvent.isComposing || event.isComposing) return;
+    {suggestions.activeCommand && <div className="composer-command"><strong>{suggestions.activeCommand.name}</strong><button type="button" aria-label="移除指令" onClick={suggestions.clearCommand}><X size={12} /></button></div>}
+    {!!attachments.length && <div className="composer-attachments">{attachments.map((file) => <span key={file.workspacePath} className="agent-chip-in" title={file.name}><FileText size={16} /><b>{file.name}</b>{formatComposerFileSize(file.sizeBytes) && <small>{formatComposerFileSize(file.sizeBytes)}</small>}<button type="button" aria-label={`移除 ${file.name}`} onClick={() => setAttachments((current) => current.filter((item) => item.workspacePath !== file.workspacePath))}><X size={12} /></button></span>)}</div>}
+    <textarea ref={input} rows={1} value={value} {...suggestions.inputProps} onPaste={handlePaste} aria-keyshortcuts="Enter Shift+Enter" onKeyDown={(event) => {
+      if (suggestions.onKeyDown(event)) return;
       if (event.key === "Enter" && !event.shiftKey && !event.altKey) {
         event.preventDefault();
         submit();
@@ -719,29 +797,32 @@ export function Composer({ busy, streaming, stopping = false, finishing = false,
     {!agentReady && <div role="status" className="composer-error">{startupMessage || "本地 Agent 正在准备，已有资料可浏览；就绪后即可发送。"}</div>}
     {modelError && <div className="composer-error"><AlertCircle size={12} />{modelError}</div>}
     </div>
-    <div className="rp-controls"><div className="rp-controls-start"><button type="button" className="composer-add" aria-label="上传内容" title="上传内容" disabled={!agentReady || attachmentBusy} onClick={addAttachments}>{attachmentBusy ? <ActivityIndicator active priority={10} label="正在导入附件" /> : <Plus size={18}/>}</button><ApprovalModeMenu disabled={!agentReady||busy||streaming}/></div>
-    <div className="rp-controls-end">
-        <div className="composer-control-wrap composer-model-wrap">
-        <button type="button" className="composer-control-button model-effort-trigger" aria-label="选择模型和推理强度" disabled={!agentReady} aria-haspopup="dialog" aria-expanded={settingsOpen} onClick={openSettings}>
-          <i className={runtime?.configured ? "online" : ""} />
-          <span className="composer-trigger-copy"><strong>{currentModel}</strong><small>{currentEffort.label}</small></span>
-          {modelBusy ? <ActivityIndicator active priority={10} label="正在切换模型" /> : <ChevronDown size={12} />}
-        </button>
-        <AnimatePresence>{settingsOpen && <motion.div role="dialog" aria-label="模型与推理设置" className="composer-popover model-effort-popover" data-view={settingsSection === "model" ? "models" : "effort"} initial={enter()} animate={{ opacity: 1, y: 0 }} exit={{ ...exit(), transition: transition("exit") }} transition={transition("enter")}>
-          {settingsSection !== "model" && <AgentEffortControl disabled={busy} value={agentEffort} onChange={setAgentEffort} model={currentModel} onModelMenu={() => {setSettingsSection("model");setModelError("");}} />}
-          {settingsSection === "model" && <button type="button" className="model-list-back" aria-label="收起模型选择" onClick={() => setSettingsSection(null)}><ChevronDown size={16}/>选择模型</button>}
-          {settingsSection === "model" && <div className="model-choice-list">{profiles.map((profile) => {
-            const models = profile.availableModels?.length ? profile.availableModels : [{ id: profile.model }];
-            const uniqueModels = [...new Map(models.filter((item) => item?.id).map((item) => [item.id, item])).values()];
-            return <section key={profile.id}><div className="model-choice-provider"><span className={`provider-status-dot ${profile.health}`} />{profile.providerName}<small>{uniqueModels.length > 1 ? `${uniqueModels.length} 个` : ""}</small></div>{uniqueModels.map((item) => {
-              const active = profile.id === activeProfileId && item.id === runtime?.model;
-              return <button type="button" role="menuitemradio" aria-checked={active} key={`${profile.id}-${item.id}`} onClick={() => selectModel(profile, item.id)}><span><strong>{item.id===profile.model && profile.displayName || item.id}</strong>{item.ownedBy && <small>{item.ownedBy}</small>}</span>{active && <Check size={13} />}</button>;
-            })}</section>;
-          })}{!profiles.length && <p className="model-menu-empty">还没有已保存的模型连接</p>}<button type="button" className="manage-models-button" onClick={() => { setSettingsOpen(false); setSettingsSection(null); onManageModels?.(); }}><Settings2 size={13} />管理模型连接</button></div>}
-          {!!modelError && <p className="settings-error"><AlertCircle size={12} />{modelError}</p>}
-        </motion.div>}</AnimatePresence>
+    <div className="rp-controls"><div className="rp-controls-start"><ComposerAddMenu disabled={!agentReady} loading={attachmentBusy} onUpload={addAttachments} onManage={onManageModels} onOpen={() => { suggestions.close(); setContextOpen(false); setSettingsOpen(false); setSettingsSection(null); }} />
+        <ApprovalModeMenu disabled={!agentReady||busy||streaming}/>
         </div>
-        <button className={`composer-send ${streaming ? "stop" : ""}`} disabled={!agentReady || stopping || finishing || (!streaming && !value.trim() && !attachments.length)} onClick={streaming ? onCancel : submit} aria-label={stopping ? "正在停止生成" : finishing ? "正在结束本轮" : streaming ? "停止生成" : queued ? "补充当前任务" : "发送消息"}><span className="composer-action-icon"><AnimatePresence initial={false}><motion.span key={streaming ? "stop" : "send"} initial={{ opacity: 0, scale: reducedMotion ? 1 : motionTokens.pressScale }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: reducedMotion ? 1 : motionTokens.pressScale }} transition={transition("micro")}>{streaming ? <Square size={11} fill="currentColor" /> : <ArrowUp size={18} strokeWidth={2.1} />}</motion.span></AnimatePresence></span></button>    </div></div></div>
+        <div className="rp-controls-end">
+        <div className="composer-control-wrap composer-model-wrap">
+        <button ref={modelAnchor} type="button" className="composer-control-button model-effort-trigger cds-btn-ghost cds-btn-squish" aria-label="选择模型和推理强度" disabled={!agentReady} aria-haspopup="dialog" aria-expanded={settingsOpen} aria-controls={settingsOpen ? settingsId : undefined} onClick={openSettings} onKeyDown={event => { if (!settingsOpen && ["ArrowDown", "ArrowUp"].includes(event.key)) { event.preventDefault(); openSettings(); } }}>
+          <span className="composer-trigger-copy"><strong>{currentModel}</strong><small>{currentEffort.englishLabel}</small></span>
+          {modelBusy && <ActivityIndicator active priority={10} label="正在切换模型" />}
+        </button>
+        <AnimatePresence>{settingsOpen && <SelectorPopover id={settingsId} anchorRef={modelAnchor} returnFocusRef={focusCommandModel ? input : modelAnchor} onClose={closeSettings} align="end" role="dialog" aria-label="模型与推理设置" className="composer-popover model-effort-popover" data-view={settingsSection === "model" ? "models" : "effort"} focusKey={settingsSection} focusTarget={settingsSection === "model" ? 'input[type="search"]' : 'input[type="range"]:not(:disabled)'}>
+          {settingsSection !== "model" && <AgentEffortControl disabled={busy} value={agentEffort} onChange={setAgentEffort} model={currentModel} onModelMenu={() => {setSettingsSection("model");setModelQuery("");}} />}
+          {settingsSection === "model" && <button type="button" className="model-list-back" aria-label="收起模型选择" onClick={() => setSettingsSection(null)}><ChevronDown size={16}/>选择模型</button>}
+          {settingsSection === "model" && <label className="selector-search"><Search size={14}/><input type="search" aria-label="搜索模型或服务商" placeholder="搜索模型或服务商…" value={modelQuery} onChange={event => setModelQuery(event.target.value)} /></label>}
+          {settingsSection === "model" && <div className="model-choice-list" role="menu" aria-label="可用模型" aria-busy={modelBusy || profilesLoading}>{modelGroups.map(({profile, items}) => {
+            return <section role="group" aria-label={profile.providerName} key={profile.id}><div className="model-choice-provider"><span className={`provider-status-dot ${profile.health}`} />{profile.providerName}<small>{items.length > 1 ? `${items.length} 个` : ""}</small></div>{items.map((item) => {
+              const active = profile.id === activeProfileId && item.id === runtime?.model;
+              return <button type="button" tabIndex={-1} role="menuitemradio" aria-checked={active} disabled={modelBusy} key={`${profile.id}-${item.id}`} onClick={() => selectModel(profile, item.id)}><span><strong title={item.id}>{item.id===profile.model && profile.displayName || item.id}</strong><small>{item.ownedBy || item.id}</small></span>{active && <Check size={14} />}</button>;
+            })}</section>;
+          })}{!modelGroups.length && <p className="model-menu-empty" role="status">{profilesLoading ? "正在读取模型连接…" : profiles.length ? "没有匹配的模型，试试其他关键词" : "还没有已保存的模型连接"}</p>}</div>}
+          {settingsSection === "model" && <button type="button" className="manage-models-button" disabled={modelBusy || !onManageModels} onClick={() => { closeSettings(); onManageModels?.(); }}><Settings2 size={13} />管理模型连接</button>}
+          {modelBusy && <p role="status" className="selector-status">正在切换模型…</p>}
+          {!!modelError && <p role="alert" className="settings-error"><AlertCircle size={12} />{modelError}</p>}
+        </SelectorPopover>}</AnimatePresence>
+        </div>
+        <ContextManagement open={contextOpen} onOpenChange={(open) => { setContextOpen(open); if (open) { suggestions.close(); setSettingsOpen(false); setSettingsSection(null); } }} usageSummary={contextUsage} attachments={attachments} quote={quote} onRemoveAttachment={(path) => setAttachments((current) => current.filter((file) => file.workspacePath !== path))} onClearQuote={onClearQuote} onAddMaterial={addAttachments} attachmentBusy={attachmentBusy} disabled={!agentReady} />
+        <button className={`composer-send cds-btn-squish ${streaming ? "stop" : ""}`} disabled={!agentReady || stopping || finishing || (!streaming && (attachmentBusy || (!value.trim() && !attachments.length && !suggestions.activeCommand)))} onClick={streaming ? onCancel : submit} aria-label={stopping ? "正在停止生成" : finishing ? "正在结束本轮" : streaming ? "停止生成" : queued ? "补充当前任务" : "发送消息"}><span className="composer-action-icon"><AnimatePresence initial={false}><motion.span key={streaming ? "stop" : "send"} initial={{ opacity: 0, scale: reducedMotion ? 1 : motionTokens.pressScale }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: reducedMotion ? 1 : motionTokens.pressScale }} transition={transition("micro")}>{streaming ? <Square size={11} fill="currentColor" /> : <ArrowRight size={16} strokeWidth={2.2} />}</motion.span></AnimatePresence></span></button>    </div></div></div>
   </section>;
 }
 
@@ -758,9 +839,8 @@ function ExperienceSelector({ detail, busy, onSubmit }) {
   const [selected, setSelected] = useState(() => new Set(initial.length ? initial : adjustable.slice(0, 3).map((item) => item.id)));
   const submit = () => onSubmit([...fixed, ...adjustable.filter((item) => selected.has(item.id))].flatMap(idsFor));
   return <div className="rail-selector">
-    <header><small>本次简历</small><strong>选择要重点表达的经历</strong><p>教育与基础信息固定保留；这里只决定哪些实习、项目和技能参与岗位化表达。</p></header>
     {!!fixed.length && <section><div className="rail-selector-title"><span>固定保留</span><small>{fixed.length}</small></div>{fixed.map((item) => <article className="fixed" key={item.id}><span><Check size={11} /></span><div><strong>{item.organization || item.title}</strong><small>{[item.start_date, item.end_date].filter(Boolean).join(" – ")}</small></div></article>)}</section>}
-    <section><div className="rail-selector-title"><span>岗位相关经历</span><small>{selected.size}/{adjustable.length}</small></div>{adjustable.map((item) => { const active = selected.has(item.id); const suggested = idsFor(item).some((id) => recommended.has(id)); return <button key={item.id} className={`rail-experience-choice ${active ? "active" : ""}`} onClick={() => setSelected((current) => { const next = new Set(current); active ? next.delete(item.id) : next.add(item.id); return next; })}><span>{active && <Check size={11} />}</span><div><strong>{item.organization || item.title}</strong><small>{item.role || item.kind}</small></div>{suggested && <em>建议</em>}</button>; })}</section>
+    <section><div className="rail-selector-title"><span>岗位相关经历</span><small>{selected.size}/{adjustable.length}</small></div>{adjustable.map((item) => { const active = selected.has(item.id); const suggested = idsFor(item).some((id) => recommended.has(id)); return <button type="button" key={item.id} aria-pressed={active} className={`rail-experience-choice ${active ? "active" : ""}`} onClick={() => setSelected((current) => { const next = new Set(current); active ? next.delete(item.id) : next.add(item.id); return next; })}><span>{active && <Check size={11} />}</span><div><strong>{item.organization || item.title}</strong>{item.role && <small>{item.role}</small>}</div>{suggested && <em>建议</em>}</button>; })}</section>
     <button className="rail-confirm" disabled={busy || !approval} onClick={submit}>{busy ? <ActivityIndicator active priority={10} label="正在处理已确认操作" /> : <Check size={14} />}确认并生成策略</button>
   </div>;
 }
@@ -869,40 +949,41 @@ function checkpointCopy(task) {
   return seconds < 8 ? "检查点刚刚保存" : `检查点 ${seconds}s 前保存`;
 }
 
-function StandardRail({ detail, runtime, runtimeState, busy, task, cancellingTask = false, onStart, onRestart, onOpenResume, onOpenInterview, onOpenReview, onPublishApproval, onFinalize, onRetry, onPauseTask, onResumeTask, onCancelTask, onResolveInvocation, onOpenModelSettings, onImproveAts, onGenerateCoverLetter, onOpenCoverLetter }) {
-  const run = detail.run;
+function StandardRail({ detail, runtime, busy, task, progressPanel, cancellingTask = false, onRestart, onOpenResume, onOpenInterview, onFinalize, onPauseTask, onCancelTask, onImproveAts, onGenerateCoverLetter, onOpenCoverLetter }) {
+  const stage = detail.run?.current_stage;
   const profile = detail.profile;
-  const stage = run?.current_stage;
-  const unknownInvocation = (detail.tool_invocations || []).find((item) => item.status === "outcome_unknown");
-  const canRun = runtime?.configured || runtime?.allow_mock_runtime;
-  let action = null;
-  if (!run && canRun) action = <section className="rail-next-action"><small>下一步</small><div><Sparkles size={15} /><strong>让 Agent 理解岗位</strong><p>读取 JD 并形成岗位重点与经历匹配。</p><button disabled={busy || !detail.job.jd_raw} onClick={onStart}>理解岗位</button></div></section>;
-  if (!run && !canRun) action = <section className="rail-next-action"><small>开始之前</small><div><Settings2 size={15} /><strong>连接一个模型</strong><p>岗位理解和简历改写必须由你选择的模型完成。</p><button disabled={busy} onClick={onOpenModelSettings}>连接模型</button></div></section>;
-  if (stage === "awaiting_user_review") action = <section className="rail-next-action"><small>需要确认</small><div><Pencil size={15} /><strong>审阅 {detail.proposals.length} 条改写建议</strong><p>建议不会自动覆盖基础简历。若岗位理解或经历组合不对，可以保留本轮并重新规划。</p><button onClick={onOpenReview}>打开改写审阅</button><button className="secondary" disabled={busy} onClick={onRestart}>重新选择经历</button></div></section>;
-  if (stage === "awaiting_publish_approval") action = <section className="rail-next-action"><small>下一步</small><div><ShieldCheck size={15} /><strong>事实检查已通过</strong><p>确认后进入简历编辑和导出；也可以保留当前草稿后重新规划。</p><button disabled={busy} onClick={onPublishApproval}>进入导出检查</button><button className="secondary" disabled={busy} onClick={onRestart}>重新规划新版本</button></div></section>;
-  if (["ready_to_publish", "published", "frozen"].includes(stage)) action = <section className="rail-next-action ready"><small>{stage === "ready_to_publish" ? "可用操作" : "投递记录"}</small><div><CheckCircle2 size={15} /><strong>{stage === "ready_to_publish" ? "草稿已保存，导出前复验" : "已保存本次投递快照"}</strong><p>当前版本会保留；完成简历后可以继续调研真实面经。</p><button onClick={onOpenResume}>打开简历</button><button className="secondary" onClick={onOpenInterview}><BookOpenCheck size={13} />准备面试</button><button className="secondary" disabled={busy} onClick={onRestart}>重新规划新版本</button>{stage === "ready_to_publish" && <button className="secondary" onClick={onFinalize}>记录为已投递</button>}</div></section>;
-  if (["failed", "blocked"].includes(stage)) action = <section className="rail-next-action error"><small>需要处理</small><div><AlertCircle size={15} /><strong>{labels[stage]}</strong><p>{(() => { try { return JSON.parse(run.error || "{}").message; } catch { return run.error || "本轮运行中断"; } })()}</p><button disabled={busy} onClick={onRetry}><RotateCcw size={13} />从中断处重试</button></div></section>;
-  if (stage === "cancelled") action = <section className="rail-next-action error"><small>本轮已结束</small><div><XCircle size={15} /><strong>任务已取消</strong><p>取消是终态，不会继续复用旧任务。你可以保留现有材料，基于同一岗位创建一轮新规划。</p><button disabled={busy} onClick={onRestart}><RotateCcw size={13} />创建新一轮任务</button></div></section>;
-  if (unknownInvocation) {
-    const target = unknownInvocation.arguments_summary?.path || unknownInvocation.arguments_summary?.resume_id || unknownInvocation.arguments_summary?.target_id || "外部目标";
-    const source = unknownInvocation.tool_name?.startsWith("mcp_") ? "MCP 工具" : unknownInvocation.tool_name === "read_skill" ? "Skill" : "FetchCV 内置工具";
-    const occurredAt = unknownInvocation.updated_at || unknownInvocation.created_at;
-    action = <section className="rail-next-action error invocation-unknown"><small>需要人工核对</small><div><AlertCircle size={15} /><strong>操作结果尚不确定</strong><p>应用在收到最终回执前中断。为避免重复写入，Agent 已停止自动重试。</p><dl><div><dt>操作</dt><dd>{unknownInvocation.tool_name}</dd></div><div><dt>来源</dt><dd>{source}</dd></div><div><dt>目标</dt><dd>{String(target)}</dd></div><div><dt>发生时间</dt><dd>{occurredAt ? new Date(occurredAt).toLocaleString() : "未记录"}</dd></div><div><dt>最后状态</dt><dd>请求可能已经发出，未保存完成回执</dd></div></dl><small>请先打开目标文件或系统记录核对：选择“已成功”会登记完成；选择“没有执行”才允许后续重试；不确定时保持停止最安全。</small><code>{unknownInvocation.operation_id}</code><button disabled={busy} onClick={() => onResolveInvocation(unknownInvocation.operation_id, "completed")}>已核对：操作成功</button><button className="secondary" disabled={busy} onClick={() => onResolveInvocation(unknownInvocation.operation_id, "not_executed")}>已核对：没有执行</button><button className="secondary" disabled={busy} onClick={() => onResolveInvocation(unknownInvocation.operation_id, "keep_stopped")}>尚不确定，保持停止</button></div></section>;
-  }
   const taskRunning = ["queued", "running"].includes(task?.status);
-  const visibleState = runtimeState?.active || runtimeState?.attention
-    ? runtimeState
-    : { label: run ? labels[stage] || run.status : "等待开始", detail: run ? `${detail.steps.filter((item) => item.event_type === "stage" || item.event_type === "tool").length} 条真实执行记录` : "提供 JD 后开始" };
-  return <div className="standard-rail"><section className="rail-runtime"><small>当前状态</small><div className={`rail-state ${runtimeState?.id || "idle"}`}><span>{runtimeState?.active ? <ActivityIndicator active priority={10} label={visibleState.label} /> : <Sparkles size={14} />}</span><div><strong>{visibleState.label}</strong><p>{taskRunning && runtimeState?.id === "running" ? checkpointCopy(task) : visibleState.detail}</p></div></div>{task && <div className="task-controls">{taskRunning && <button aria-label="暂停当前 Agent 任务" disabled={cancellingTask} onClick={onPauseTask} title="暂停任务"><Pause size={13} />暂停</button>}{task?.status === "paused" && !["awaiting_fact_review", "awaiting_user_review", "awaiting_publish_approval"].includes(stage) && <button aria-label="从最近检查点恢复任务" onClick={onResumeTask} title="恢复任务"><Play size={13} />恢复</button>}{taskRunning && <button aria-label={cancellingTask ? "正在请求取消" : "取消当前 Agent 任务"} className="danger" disabled={cancellingTask} onClick={onCancelTask} title="取消任务"><XCircle size={13} />{cancellingTask ? "正在请求取消" : "取消"}</button>}</div>}{taskRunning && runtime?.model && <div className="task-runtime-snapshot"><ShieldCheck size={13} /><span><small>本任务已锁定</small><strong>{runtime.provider_name || "当前连接"} · {runtime.model}</strong></span></div>}</section>{action}<AtsReadiness value={detail.ats_readiness} onImprove={onImproveAts} onOpenResume={onOpenResume} /><ApplicationCollateral detail={detail} busy={busy} onGenerate={onGenerateCoverLetter} onOpen={onOpenCoverLetter} /><ContextInventory detail={detail} /><RunEvidence evaluation={detail.run_evaluation} />{profile && <section><small>岗位重点</small><strong className="rail-heading">{profile.competencies?.slice(0, 3).join(" · ") || "等待形成岗位重点"}</strong><div className="rail-tags">{(profile.keywords || []).slice(0, 7).map((item) => <span key={item}>{item}</span>)}</div></section>}</div>;
+  const needsRecovery = (detail.tool_invocations || []).some((item) => item.status === "outcome_unknown");
+  const resumeReady = ["ready_to_publish", "published", "frozen"].includes(stage);
+  const canReplan = ["awaiting_user_review", "awaiting_publish_approval"].includes(stage) || resumeReady;
+  return <div className="standard-rail">
+    {progressPanel}
+    {taskRunning && <section className="rail-runtime">
+      <div className="task-controls" title={checkpointCopy(task)}>
+        <button type="button" aria-label="暂停当前 Agent 任务" disabled={cancellingTask} onClick={onPauseTask} title="暂停任务"><Pause size={13} />暂停</button>
+        <button type="button" aria-label={cancellingTask ? "正在请求取消" : "取消当前 Agent 任务"} className="danger" disabled={cancellingTask} onClick={onCancelTask} title="取消任务"><XCircle size={13} />{cancellingTask ? "正在请求取消" : "取消"}</button>
+      </div>
+      {runtime?.model && <div className="task-runtime-snapshot" title="本任务使用的模型"><ShieldCheck size={13} /><span><strong>{runtime.provider_name || "当前连接"} · {runtime.model}</strong></span></div>}
+    </section>}
+    {!needsRecovery && (canReplan || resumeReady) && <div className="rail-secondary-actions">
+      {resumeReady && <button type="button" onClick={onOpenInterview}><BookOpenCheck size={13} />准备面试</button>}
+      {canReplan && <button type="button" disabled={busy} onClick={onRestart}>{stage === "awaiting_user_review" ? "重新选择经历" : "重新规划新版本"}</button>}
+      {stage === "ready_to_publish" && <button type="button" onClick={onFinalize}>记录为已投递</button>}
+    </div>}
+    <AtsReadiness value={detail.ats_readiness} onImprove={onImproveAts} onOpenResume={onOpenResume} />
+    <ApplicationCollateral detail={detail} busy={busy} onGenerate={onGenerateCoverLetter} onOpen={onOpenCoverLetter} />
+    <ContextInventory detail={detail} />
+    <RunEvidence evaluation={detail.run_evaluation} />
+    {profile && <section><small>岗位重点</small><strong className="rail-heading">{profile.competencies?.slice(0, 3).join(" · ") || "等待形成岗位重点"}</strong><div className="rail-tags">{(profile.keywords || []).slice(0, 7).map((item) => <span key={item}>{item}</span>)}</div></section>}
+  </div>;
 }
 
 export function AgentWorkspace({ requestedTab, detail, runtime, agentReady = true, startupMessage, busy, error, activity, task, onStart, onRestart, onFactReview, onReview, onRewriteProposals, onCancelProposalRewrite, onResumeProposalRewrite, onReloadReview, onPublishApproval, onRetry, onPauseTask, onResumeTask, onCancelTask, onResolveInvocation, onFinalize, onSendMessage, onResearchInterviews, onCancelMessage, onAddMaterial, onApprovalDecision, onModelActivated, onOpenModelSettings, onSaveResumeEditor, onResumePdfSaved, onEditJob }) {
-  const { reducedMotion, transition, enter, exit } = useAgentMotion();
+  const { transition, enter, exit } = useAgentMotion();
   const [tab, setTab] = useState(() => workspaceTabs.get(detail.job.id) || "conversation");
   const [pendingPrompt, setPendingPrompt] = useState("");
   const [reviewOpen, setReviewOpen] = useState(false);
   const [workflowOverlay, setWorkflowOverlay] = useState(null);
-  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const [quotedReply, setQuotedReply] = useState(null);
   const [coverLetterOpen, setCoverLetterOpen] = useState(null);
   const [cancelRequest, setCancelRequest] = useState(null);
@@ -934,14 +1015,9 @@ export function AgentWorkspace({ requestedTab, detail, runtime, agentReady = tru
     const stored = Number(window.localStorage.getItem("fetchcv.context-rail-width"));
     return Number.isFinite(stored) && stored >= 268 && stored <= 420 ? stored : 306;
   });
-  const conversationScroll = useRef(null);
-  const conversationStream = useRef(null);
-  const userIsNearBottom = useRef(true);
-  const scrollFollower = useRef(null);
-  const touchPosition = useRef(null);
-  useEffect(() => {
-    if (reducedMotion && userIsNearBottom.current) scrollFollower.current?.follow({ immediate: true });
-  }, [reducedMotion]);
+  const { containerRef: conversationScroll, contentRef: conversationStream, showJumpControl: showJumpToLatest, scrollToBottom: scrollToLatest } = useChatScrollPinning({
+    scrollKey: detail.job.id, positions: conversationScrollPositions, enabled: tab === "conversation",
+  });
   const run = detail.run;
   useLayoutEffect(() => {
     const grid = document.querySelector(".app-grid");
@@ -980,77 +1056,9 @@ export function AgentWorkspace({ requestedTab, detail, runtime, agentReady = tru
     if (workflowOverlay === "approval" && !pendingToolApprovals(detail.approvals).length) setWorkflowOverlay(null);
     if (workflowOverlay === "recovery" && !(detail.tool_invocations || []).some(item => item.status === "outcome_unknown")) setWorkflowOverlay(null);
   }, [run?.current_stage, workflowOverlay, detail.approvals, detail.tool_invocations]);
-  const scrollToLatest = (behavior = "smooth") => {
-    const follower = scrollFollower.current;
-    if (!follower) return;
-    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
-    userIsNearBottom.current = true;
-    setShowJumpToLatest(false);
-    follower.follow({ immediate: reducedMotion || behavior !== "smooth" });
-  };
-  useLayoutEffect(() => {
-    if (tab !== "conversation") return undefined;
-    const node = conversationScroll.current;
-    const stream = conversationStream.current;
-    if (!node || !stream) return undefined;
-    const saved = conversationScrollPositions.get(detail.job.id);
-    node.scrollTo({ top: resolveChatScrollTop(saved, node.scrollHeight, node.clientHeight), behavior: "instant" });
-    userIsNearBottom.current = isChatNearBottom(node);
-    setShowJumpToLatest(!userIsNearBottom.current);
-    const follower = createChatScrollFollower(node, {
-      // Scroll events can arrive a frame later than a write. Save immediately
-      // so switching tabs mid-animation restores the last visible position.
-      onPositionChange: (position) => conversationScrollPositions.set(detail.job.id, position),
-    });
-    scrollFollower.current = follower;
-    const followGrowth = () => {
-      if (!userIsNearBottom.current) return;
-      follower.follow({ immediate: Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) });
-    };
-    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(followGrowth) : null;
-    observer?.observe(node);
-    observer?.observe(stream);
-    return () => {
-      observer?.disconnect();
-      follower.stop();
-      // A tab switch can detach the scroller before cleanup, at which point
-      // Chromium reports zero. Keep the position captured by onScroll instead.
-      if (node.isConnected) conversationScrollPositions.set(detail.job.id, node.scrollTop);
-      if (scrollFollower.current === follower) scrollFollower.current = null;
-      touchPosition.current = null;
-    };
-  }, [detail.job.id, tab]);
-  const handleConversationScroll = () => {
-    const node = conversationScroll.current;
-    if (!node) return;
-    conversationScrollPositions.set(detail.job.id, node.scrollTop);
-    if (scrollFollower.current?.isRunning) {
-      if (isChatNearBottom(node)) setShowJumpToLatest(false);
-      return;
-    }
-    // Once interrupted, do not pull the reader back while still within the
-    // normal 96px following threshold; resume only when they reach the bottom.
-    userIsNearBottom.current = isChatNearBottom(node, userIsNearBottom.current ? 96 : 2);
-    setShowJumpToLatest(!userIsNearBottom.current);
-  };
-  const stopAutoFollowing = (movingDown = false) => {
-    scrollFollower.current?.stop();
-    userIsNearBottom.current = movingDown && isChatNearBottom(conversationScroll.current, 2);
-    setShowJumpToLatest(!userIsNearBottom.current);
-  };
-  const handleConversationTouchMove = (event) => {
-    const nextY = event.touches[0]?.clientY;
-    if (touchPosition.current !== null && nextY !== undefined && nextY !== touchPosition.current) stopAutoFollowing(nextY < touchPosition.current);
-    touchPosition.current = nextY ?? null;
-  };
-  const handleConversationKeyDown = (event) => {
-    if (event.target.closest("input, textarea, select, [contenteditable='true']")) return;
-    if (["ArrowUp", "PageUp", "Home"].includes(event.key) || (event.key === " " && event.shiftKey)) stopAutoFollowing();
-    if (["ArrowDown", "PageDown", "End"].includes(event.key) || (event.key === " " && !event.shiftKey)) stopAutoFollowing(true);
-  };
   const send = async (content, options) => {
     setPendingPrompt(content);
-    scrollToLatest("smooth");
+    scrollToLatest();
     await onSendMessage(content, options);
     setPendingPrompt("");
   };
@@ -1068,11 +1076,11 @@ export function AgentWorkspace({ requestedTab, detail, runtime, agentReady = tru
   const factsById = new Map((detail.facts || []).map(item => [item.id, item]));
   const needsEvidenceCount = proposalEvidenceTodoCount(detail.proposals || [], factsById);
   const interviewProgress = summarizeInterviewEvidence(detail, { activity, busy, error });
-  const evidenceSummary = {
+  const evidenceSummary = (detail.interview_sources?.length || detail.interview_briefs?.length) ? {
     result: interviewProgress.summaryText,
     missing: interviewProgress.gapText,
-    status: `${interviewProgress.run.label} · ${interviewProgress.evidence.label}。来源情况与个人事实核验分别检查。`,
-  };
+    status: `${interviewProgress.run.label} · ${interviewProgress.evidence.label}`,
+  } : null;
   const openReview = () => {
     if (run?.current_stage === "awaiting_user_review") setReviewOpen(true);
     else setWorkflowOverlay("evidence");
@@ -1091,13 +1099,15 @@ export function AgentWorkspace({ requestedTab, detail, runtime, agentReady = tru
     if (key === "settings") return onOpenModelSettings();
   };
   const unknownInvocation = (detail.tool_invocations || []).find(item => item.status === "outcome_unknown");
+  const factReviewPending = run?.current_stage === "awaiting_fact_review";
+  const railNeedsAttention = Boolean(unknownInvocation || runtimeState.attention || factReviewPending || ["awaiting_user_review", "awaiting_publish_approval"].includes(run?.current_stage));
+  const progressPanel = <JobProgressPanel detail={detail} runtime={runtime} runtimeState={runtimeState} task={task} busy={busy} needsEvidenceCount={needsEvidenceCount} toolApprovalCount={pendingToolApprovals(detail.approvals).length} evidenceSummary={evidenceSummary} contextCard={<JobContextSummary job={detail.job} onEdit={onEditJob} disabled={busy} />} onAction={handleProgressAction} inlineFactReview={factReviewPending} />;
   return <>
     <main className="main-pane agent-workspace-v2">
-      <header className="task-header"><div><span>{detail.job.company}</span><h1>{detail.job.role}</h1></div><nav className="workspace-tabs"><button className={tab === "conversation" ? "active" : ""} onClick={() => setTab("conversation")}><MessageSquare size={14} />对话</button><button className={tab === "resume" ? "active" : ""} onClick={() => setTab("resume")}><FileText size={14} />简历</button><button className={tab === "interview" ? "active" : ""} onClick={() => setTab("interview")}><BookOpenCheck size={14} />面试</button></nav><button type="button" className="source-icon source-context-toggle" aria-label={railCollapsed ? "展开任务上下文" : "折叠任务上下文"} onClick={() => setRailCollapsed(value => !value)}>{railCollapsed ? <PanelRightOpen size={16}/> : <PanelRightClose size={16}/>}</button><div className={`task-meta runtime-${runtimeState.id}`} title={runtimeState.detail}><i className={runtimeState.active ? "running" : ""} />{runtimeState.active || runtimeState.attention ? runtimeState.label : run ? labels[run.current_stage] || run.status : "尚未开始"}</div></header>
+      <header className="task-header"><div><span>{detail.job.company}</span><h1>{detail.job.role}</h1></div><SegmentedControl className="workspace-tabs" aria-label="工作区视图" tabs={WORKSPACE_TABS} value={tab} onChange={setTab} /><button type="button" className="source-icon source-context-toggle" data-attention={railCollapsed && railNeedsAttention} aria-expanded={!railCollapsed} aria-controls="job-context-rail" title={railCollapsed ? (railNeedsAttention ? "有待处理事项 · 展开任务上下文" : "展开任务上下文") : "折叠任务上下文"} aria-label={railCollapsed ? "展开任务上下文" : "折叠任务上下文"} onClick={() => setRailCollapsed(value => !value)}>{railCollapsed ? <PanelRightOpen size={16}/> : <PanelRightClose size={16}/>}</button><div className={`task-meta runtime-${runtimeState.id}`} title={runtimeState.detail}><i className={runtimeState.active ? "running" : ""} />{runtimeState.active || runtimeState.attention ? runtimeState.label : run ? labels[run.current_stage] || run.status : "尚未开始"}</div></header>
       <JobInputStaleNotice detail={detail} />
-      {tab === "conversation" && <JobProgressPanel detail={detail} runtime={runtime} runtimeState={runtimeState} task={task} busy={busy} needsEvidenceCount={needsEvidenceCount} toolApprovalCount={pendingToolApprovals(detail.approvals).length} evidenceSummary={evidenceSummary} contextCard={<JobContextSummary job={detail.job} onEdit={onEditJob} disabled={busy} />} onAction={handleProgressAction} />}
-      {tab === "resume" ? <div className="content-scroll studio-scroll"><ResumeStudio detail={detail} onSaveResumeEditor={onSaveResumeEditor} onResumePdfSaved={onResumePdfSaved} /></div> : tab === "interview" ? <Suspense fallback={<InterviewLoading />}><InterviewIntelligence detail={detail} activity={activity} busy={busy} error={error} runtime={runtime} onResearch={onResearchInterviews} onOpenConversation={() => setTab("conversation")} /></Suspense> : <>
-        <div ref={conversationScroll} onScroll={handleConversationScroll} onWheel={(event) => { if (event.deltaY !== 0) stopAutoFollowing(event.deltaY > 0); }} onTouchStart={(event) => { touchPosition.current = event.touches[0]?.clientY ?? null; }} onTouchMove={handleConversationTouchMove} onTouchEnd={() => { touchPosition.current = null; }} onKeyDown={handleConversationKeyDown} onPointerDown={(event) => { if (event.target === event.currentTarget) stopAutoFollowing(); }} tabIndex={0} aria-label="Agent 对话记录" className="content-scroll conversation-scroll-v2"><div ref={conversationStream} className="conversation-stream">
+      {tab === "resume" ? <div className="content-scroll studio-scroll"><ResumeStudio detail={detail} onSaveResumeEditor={onSaveResumeEditor} onResumePdfSaved={onResumePdfSaved} onReview={() => { setTab("conversation"); setRailCollapsed(false); }} /></div> : tab === "interview" ? <Suspense fallback={<InterviewLoading />}><InterviewIntelligence detail={detail} activity={activity} busy={busy} error={error} runtime={runtime} waitingForApproval={pendingToolApprovals(detail.approvals).length > 0} onResearch={onResearchInterviews} onOpenConversation={() => setTab("conversation")} onEditJob={onEditJob} /></Suspense> : <>
+        <div ref={conversationScroll} tabIndex={0} aria-label="Agent 对话记录" className="content-scroll conversation-scroll-v2"><div ref={conversationStream} className="conversation-stream">
           {settledMessages.map((message) => <AgentMessage key={message.id} message={message} onQuote={setQuotedReply} interviewSources={detail.interview_sources || EMPTY_ITEMS} interviewBriefs={detail.interview_briefs || EMPTY_ITEMS} />)}
           {pendingPrompt && !pendingAlreadyStored && <AgentMessage message={{ id: "pending-user", role: "user", content: pendingPrompt }} pending animate />}
           <AgentActivity activity={displayActivity} run={run} task={task} steps={detail.steps} waitingForApproval={runtimeState.id === "awaiting_approval"} />
@@ -1106,8 +1116,8 @@ export function AgentWorkspace({ requestedTab, detail, runtime, agentReady = tru
           {streamingMessage && <AgentMessage key={streamingMessage.id} message={streamingMessage} animate onQuote={setQuotedReply} interviewSources={detail.interview_sources || EMPTY_ITEMS} interviewBriefs={detail.interview_briefs || EMPTY_ITEMS} />}
           {error && <div className="inline-error"><AlertCircle size={14} />{error}</div>}
         </div></div>
-        <AnimatePresence>{showJumpToLatest && <motion.button type="button" className="jump-to-latest" aria-label="返回最新消息" title="返回最新消息" onClick={() => scrollToLatest("smooth")} initial={enter()} animate={{ opacity: 1, y: 0 }} exit={{ ...exit(), transition: transition("exit") }} transition={transition("enter")}><ArrowDown size={14} /></motion.button>}</AnimatePresence>
-        {detail.job.jd_raw && <Composer busy={busy} agentReady={agentReady} startupMessage={startupMessage} streaming={activity?.kind === "chat"} stopping={Boolean(activity?.stopping)} finishing={Boolean(activity?.finished)} queued={taskRunning} runtime={runtime} quote={quotedReply} onClearQuote={() => setQuotedReply(null)} onSend={send} onCancel={onCancelMessage} onAddMaterial={onAddMaterial} onModelActivated={onModelActivated} onManageModels={onOpenModelSettings} />}
+        <AnimatePresence initial={false}>{showJumpToLatest && <motion.button type="button" className="jump-to-latest" aria-label="回到底部" title="回到底部并继续跟随新消息" onClick={scrollToLatest} initial={enter()} animate={{ opacity: 1, y: 0 }} exit={{ ...exit(), transition: transition("exit") }} transition={transition("enter")}><ArrowDown size={14} aria-hidden="true" /><span>回到底部</span></motion.button>}</AnimatePresence>
+        {detail.job.jd_raw && <Composer busy={busy} agentReady={agentReady} startupMessage={startupMessage} streaming={activity?.kind === "chat"} stopping={Boolean(activity?.stopping)} finishing={Boolean(activity?.finished)} queued={taskRunning} runtime={runtime} contextMessages={messages} liveContextUsage={activity?.contextUsage} quote={quotedReply} onClearQuote={() => setQuotedReply(null)} onSend={send} onCancel={onCancelMessage} onAddMaterial={onAddMaterial} onModelActivated={onModelActivated} onManageModels={onOpenModelSettings} />}
       </>}
       <AnimatePresence>{reviewOpen && <ProposalReviewOverlay detail={detail} busy={busy} replanningBusy={taskRunning} needsEvidenceCount={needsEvidenceCount} onAddMaterial={onAddMaterial} onRestart={onRestart} onClose={() => setReviewOpen(false)} onRewrite={onRewriteProposals} onCancelRewrite={onCancelProposalRewrite} onResumeRewrite={onResumeProposalRewrite} onReload={onReloadReview} onSubmit={async (decisions, context) => { const result = await onReview(decisions, context); if (result) setReviewOpen(false); }} />}</AnimatePresence>
       <AnimatePresence>{workflowOverlay && <WorkflowOverlay title={{ facts: "确认本次经历", evidence: needsEvidenceCount ? "处理待补证" : "改写证据记录", approval: "审阅待授权操作", recovery: "核对未完成操作", profile: "岗位重点与原始 JD" }[workflowOverlay]} busy={busy} onClose={() => setWorkflowOverlay(null)}>
@@ -1119,17 +1129,17 @@ export function AgentWorkspace({ requestedTab, detail, runtime, agentReady = tru
         {workflowOverlay === "profile" && <section className="workflow-profile">{detail.profile?.business_context?.analysis_status === "stale" && <p role="status">以下岗位重点已过期，保留供核对历史；请按当前 JD 与语境重新分析。</p>}{[["岗位职责", detail.profile?.responsibilities], ["任职要求", detail.profile?.hard_requirements], ["能力重点", detail.profile?.competencies], ["仍待确认", detail.profile?.uncertain_items]].map(([title, items]) => items?.length ? <div key={title}><h3>{title}</h3><ul>{items.map((item, index) => <li key={index}>{item}</li>)}</ul></div> : null)}<h3>当前 JD</h3><p style={{whiteSpace:"pre-wrap"}}>{detail.job.jd_raw}</p></section>}
       </WorkflowOverlay>}</AnimatePresence>
     </main>
-    <aside className={`context-rail agent-rail-v2 ${railCollapsed ? "collapsed" : ""}`}>
+    <aside id="job-context-rail" className={`context-rail agent-rail-v2 ${railCollapsed ? "collapsed" : ""}`}>
       {!railCollapsed && <button type="button" className="context-rail-resizer" aria-label="调整任务上下文宽度" title="拖动调整宽度" onPointerDown={beginRailResize} />}
       <div className="rail-head">
-        {!railCollapsed && <span>{tab === "interview" ? "面试情报" : run?.current_stage === "awaiting_fact_review" ? "经历决策" : "任务上下文"}</span>}
+        {!railCollapsed && <span>{tab === "interview" ? "面试情报" : run?.current_stage === "awaiting_fact_review" ? "确认经历" : "任务上下文"}</span>}
         <button type="button" className="context-rail-collapse" aria-label={railCollapsed ? "展开任务上下文" : "折叠任务上下文"} title={railCollapsed ? "展开任务上下文" : "折叠任务上下文"} onClick={() => setRailCollapsed((value) => !value)}>{railCollapsed ? <PanelRightOpen size={15} /> : <PanelRightClose size={15} />}</button>
       </div>
       {!railCollapsed && <motion.div className="rail-view-switch" key={tab === "interview" ? "interview" : run?.current_stage === "awaiting_fact_review" ? "facts" : "context"} initial={enter()} animate={{ opacity: 1, y: 0 }} transition={transition("enter")}>{tab === "interview"
         ? <Suspense fallback={<InterviewLoading compact />}><InterviewRail detail={detail} activity={activity} busy={busy} runtime={runtime} onResearch={onResearchInterviews} /></Suspense>
         : run?.current_stage === "awaiting_fact_review"
-          ? <ExperienceSelector key={run.id} detail={detail} busy={busy} onSubmit={onFactReview} />
-          : <StandardRail detail={detail} runtime={runtime} runtimeState={runtimeState} busy={busy} task={task} onStart={onStart} onRestart={onRestart} onOpenResume={() => setTab("resume")} onOpenInterview={() => setTab("interview")} onOpenReview={() => setReviewOpen(true)} onPublishApproval={onPublishApproval} onFinalize={onFinalize} onRetry={onRetry} onPauseTask={onPauseTask} onResumeTask={onResumeTask} onCancelTask={requestTaskCancellation} cancellingTask={cancellingTask} onResolveInvocation={onResolveInvocation} onOpenModelSettings={onOpenModelSettings} onImproveAts={() => void send("请读取当前 ATS 文本覆盖缺口，在不新增或夸大事实的前提下提出可审阅的简历改写建议；先说明哪些缺口可以由已有事实补强，哪些不能。", { thinkingLevel: "balanced" })} onGenerateCoverLetter={() => void send("请基于当前 JD、岗位简历和已确认事实生成一份克制、具体、非模板化的求职信草稿。必须调用 save_cover_letter_draft 保存；每段绑定支持它的 fact_id 和 JD 原文证据，不得新增任何数字、日期或经历。", { thinkingLevel: "balanced" })} onOpenCoverLetter={setCoverLetterOpen} />}</motion.div>}
+          ? <><ExperienceSelector key={run.id} detail={detail} busy={busy} onSubmit={onFactReview} />{progressPanel}</>
+          : <StandardRail progressPanel={progressPanel} detail={detail} runtime={runtime} busy={busy} task={task} onRestart={onRestart} onOpenResume={() => setTab("resume")} onOpenInterview={() => setTab("interview")} onFinalize={onFinalize} onPauseTask={onPauseTask} onCancelTask={requestTaskCancellation} cancellingTask={cancellingTask} onImproveAts={() => void send("请读取当前 ATS 文本覆盖缺口，在不新增或夸大事实的前提下提出可审阅的简历改写建议；先说明哪些缺口可以由已有事实补强，哪些不能。", { thinkingLevel: "balanced" })} onGenerateCoverLetter={() => void send("请基于当前 JD、岗位简历和已确认事实生成一份克制、具体、非模板化的求职信草稿。必须调用 save_cover_letter_draft 保存；每段绑定支持它的 fact_id 和 JD 原文证据，不得新增任何数字、日期或经历。", { thinkingLevel: "balanced" })} onOpenCoverLetter={setCoverLetterOpen} />}</motion.div>}
     </aside>
     <AnimatePresence>{coverLetterOpen && <CoverLetterReview material={coverLetterOpen} onClose={() => setCoverLetterOpen(null)} />}</AnimatePresence>
   </>;

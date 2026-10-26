@@ -22,7 +22,7 @@ test("all text controls have a shared select-all fallback", () => {
 
 test("composer sends with Enter and keeps Shift+Enter for multiline input", () => {
   const textarea = composer.slice(composer.indexOf("<textarea ref={input}"), composer.indexOf("{modelError"));
-  assert.match(textarea, /isComposing/);
+  assert.match(textarea, /suggestions\.onKeyDown\(event\)/);
   assert.match(textarea, /event\.key === "Enter" && !event\.shiftKey/);
   assert.match(textarea, /event\.preventDefault\(\)/);
 });

@@ -1,3 +1,5 @@
+import { saveResumeFile } from "./resume-files.mjs";
+import { listWorkspaceFiles } from "./workspace-files.mjs";
 import {probeProvider} from './pi/provider-probe.mjs';
 import {modelProfilesFor, resolveModelProfile} from '../shared/model-profile.mjs';
 import {normalizeProviderDetails, providerRequestHeaders, restoreSavedHeaders, SAVED_HEADER} from '../shared/provider-settings.mjs';
@@ -448,6 +450,21 @@ function registerIpc() {
     });
     return result.canceled ? null : result.filePaths[0];
   });
+  handle("dialog:select-resume-file", async () => {
+    const result = await dialog.showOpenDialog({
+      title: "导入简历",
+      buttonLabel: "选择简历",
+      properties: ["openFile"],
+      filters: [
+        { name: "简历文件", extensions: ["pdf", "docx", "tex", "json"] },
+        { name: "PDF", extensions: ["pdf"] },
+        { name: "Word", extensions: ["docx"] },
+        { name: "LaTeX", extensions: ["tex"] },
+        { name: "JSON", extensions: ["json"] },
+      ],
+    });
+    return result.canceled ? null : result.filePaths[0];
+  });
   handle("dialog:select-job-description", async () => {
     const result = await dialog.showOpenDialog({
       title: "导入岗位描述",
@@ -460,6 +477,10 @@ function registerIpc() {
     const stat = fs.statSync(sourcePath);
     if (stat.size > 2 * 1024 * 1024) throw new Error("岗位描述文件不能超过 2MB");
     return { name: path.basename(sourcePath), text: fs.readFileSync(sourcePath, "utf8") };
+  });
+  handle("workspace:list-files", async () => {
+    const files = await listWorkspaceFiles(path.join(app.getPath("userData"), "workspace"));
+    return files.map(file => ({ ...file, mimeType: importedFileMime(file.name) }));
   });
   handle("dialog:import-workspace-files", async () => {
     const result = await dialog.showOpenDialog({
@@ -500,76 +521,27 @@ function registerIpc() {
       headers: { "x-fetchcv-control-token": controlToken },
     });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload?.error?.message || payload?.detail || `读取简历失败 (${response.status})`);
+    if (!response.ok) throw new Error(payload?.error?.message || payload?.message || (typeof payload?.detail === "string" ? payload.detail : "") || `读取简历失败 (${response.status})`);
     const snapshot = payload?.content_json?.editor_snapshot;
     if (!snapshot?.profile || !Array.isArray(snapshot?.sections)) throw new Error("当前简历缺少可编辑快照");
     return withVersion ? { snapshot, contentHash: payload.content_hash || "" } : snapshot;
   };
   handle("resume:get-snapshot", (_event, resumeId) => fetchResumeSnapshot(resumeId));
+  handle("resume:save-file", (_event, resumeId, format) => saveResumeFile({
+    apiBase: sidecar?.apiBase, controlToken, resumeId, format,
+    downloadsPath: app.getPath("downloads"), showSaveDialog: options => dialog.showSaveDialog(options),
+  }));
   handle("resume:render-pdf", async (_event, resumeId, expectedHash) => {
-    const { snapshot, contentHash } = await fetchResumeSnapshot(resumeId, { withVersion: true });
+    const { contentHash } = await fetchResumeSnapshot(resumeId, { withVersion: true });
     if (!contentHash) throw new Error("当前简历缺少导出版本标识，请重新保存后重试");
     if (expectedHash && expectedHash !== contentHash) throw new Error("简历正文版本已变化，请重新核验并导出");
-    const renderWindow = new BrowserWindow({
-      width: 980,
-      height: 1320,
-      show: false,
-      backgroundColor: "#ffffff",
-      webPreferences: { contextIsolation: false, nodeIntegration: false, sandbox: false },
+    const response = await fetch(`${sidecar.apiBase}/api/resumes/${encodeURIComponent(String(resumeId))}/pdf/render`, {
+      method: "POST",
+      headers: { "x-fetchcv-resume-hash": contentHash, "x-fetchcv-control-token": controlToken },
     });
-    try {
-      const query = { embedded: "1", preview: "1", resumeId: String(resumeId), apiBase: sidecar.apiBase, apiToken: controlToken };
-      if (renderer.development) {
-        const editorURL = new URL("resume-editor/index.html", renderer.url);
-        editorURL.search = new URLSearchParams(query).toString();
-        await renderWindow.loadURL(editorURL.href);
-      } else {
-        await renderWindow.loadFile(path.join(projectRoot, "dist", "resume-editor", "index.html"), { query });
-      }
-      const serializedSnapshot = JSON.stringify(snapshot);
-      await renderWindow.webContents.executeJavaScript(`new Promise((resolve, reject) => {
-        const started = Date.now();
-        const timer = setInterval(() => {
-          const bridge = window.fetchCVBridge;
-          if (bridge) {
-            bridge.loadSnapshot(${serializedSnapshot});
-            const status = bridge.status();
-            const expectedName = ${JSON.stringify(String(snapshot.profile?.name || ""))};
-            if (status.loaded && document.querySelector('#previewName')?.textContent === expectedName) {
-              clearInterval(timer);
-              Promise.resolve(document.fonts?.ready).then(() => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-            } else if (status.error) {
-              clearInterval(timer);
-              reject(new Error(status.error));
-            }
-          }
-          if (Date.now() - started > 20000) { clearInterval(timer); reject(new Error('简历渲染器加载超时')); }
-        }, 80);
-      })`);
-      const metrics = await renderWindow.webContents.executeJavaScript(`(() => {
-        const page = document.querySelector('#resumePage');
-        if (!page) throw new Error('找不到正式简历页面');
-        const style = document.createElement('style');
-        style.textContent = '@page{size:A4;margin:0}html,body{margin:0!important;padding:0!important;background:#fff!important}.resume-section.selected-section{outline:none!important;box-shadow:none!important}.resume-section{cursor:default!important}section,article,.section-item{break-inside:avoid}';
-        document.head.appendChild(style);
-        document.body.replaceChildren(page);
-        Object.assign(document.body.style, { display:'block', width:'794px', height:'auto', minHeight:'1123px', overflow:'visible' });
-        Object.assign(page.style, { position:'relative', left:'auto', top:'auto', width:'794px', minHeight:'1123px', margin:'0', transform:'none', boxShadow:'none' });
-        return { height: Math.max(page.scrollHeight, 1123) };
-      })()`);
-      const pageCount = Math.max(1, Math.ceil(Number(metrics?.height || 1123) / 1123));
-      const pdf = await renderWindow.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true, pageSize: "A4", margins: { top: 0, bottom: 0, left: 0, right: 0 } });
-      const response = await fetch(`${sidecar.apiBase}/api/resumes/${encodeURIComponent(String(resumeId))}/pdf`, {
-        method: "PUT",
-        headers: { "content-type": "application/pdf", "x-fetchcv-page-count": String(pageCount), "x-fetchcv-resume-hash": contentHash, "x-fetchcv-control-token": controlToken },
-        body: pdf,
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload?.error?.message || payload?.detail || `正式 PDF 保存失败 (${response.status})`);
-      return { ok: true, pageCount, pdfUrl: payload.pdf_url };
-    } finally {
-      if (!renderWindow.isDestroyed()) renderWindow.destroy();
-    }
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload?.error?.message || payload?.message || "PDF 排版失败，请检查 XeLaTeX 环境");
+    return { ok: true, pageCount: payload.page_count, pdfUrl: payload.pdf_url };
   });
   handle("provider:get", async () => readProviderConfig() || { providerName: "", protocol: "openai", baseUrl: "", model: "", hasApiKey: false });
   handle("provider:list", async () => listProviderConfigs());
@@ -639,6 +611,7 @@ function registerIpc() {
 }
 
 function revealWindow(window) {
+  if (process.env.FETCHCV_E2E_USER_DATA && process.env.FETCHCV_E2E_HIDDEN === "1") return;
   if (!window || window.isDestroyed()) return;
   if (window.isMinimized()) window.restore();
   if (!window.isVisible()) window.show();

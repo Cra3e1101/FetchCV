@@ -46,6 +46,26 @@ def test_standalone_active_turn_and_restart(database):
         assert finish(c, next_turn).status_code >= 400
 
 
+def test_context_calibration_survives_reload_and_stays_in_its_conversation(database):
+    snapshot = {"version": 1, "model": "synthetic", "source": "reported", "used_tokens": 1200,
+                "calibration": {"prompt_tokens": 1200, "estimated_tokens": 300, "envelope_hash": "a" * 64}}
+    with TestClient(create_app(database)) as c:
+        chat = c.post("/api/conversations").json()["id"]
+        first = start(c, chat).json()
+        assert first["previous_context_usage"] is None
+        done = c.post(f"/api/pi/chat-turns/{first['user']['id']}/complete",
+                      json={"content": "已完成", "usage": {"context_usage": snapshot, "total_tokens": 9999}})
+        assert done.status_code == 200
+    with TestClient(create_app(database)) as c:
+        second = start(c, chat).json()
+        assert second["previous_context_usage"] == snapshot
+        assert "calibration" not in str(second["history"])  # Numeric telemetry is not model conversation data.
+        other = c.post("/api/conversations").json()["id"]
+        assert start(c, other).json()["previous_context_usage"] is None
+        finish(c, second["user"]["id"])
+        assert start(c, chat).json()["previous_context_usage"] is None  # Do not resurrect an older sample.
+
+
 def test_standalone_quote_and_link_scope(database):
     with TestClient(create_app(database)) as c:
         chat = c.post("/api/conversations").json()["id"]

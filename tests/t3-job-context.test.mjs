@@ -202,6 +202,7 @@ function modalHarness(name, end, globals = {}) {
   const icon = () => null;
   const component = vm.runInNewContext(`(() => { ${transformSync(source, { loader: "jsx", jsx: "transform" }).code}; return ${name}; })()`, {
     ...hooks, React, motion: { form: "form" }, window: { addEventListener() {}, removeEventListener() {} },
+    useAgentMotion: () => ({ enter: () => ({}), transition: () => ({}) }),
     normalizeJobContext, splitJobDescriptions: () => [], jobPostingPreviewState, JobContextEditor: () => null,
     AbortController, X: icon, FileUp: icon, Globe2: icon, LoaderCircle: icon, AlertCircle: icon, Trash2: icon, ...globals,
   });
@@ -225,11 +226,13 @@ test("actual new-job modal only saves after submit and forwards preview context 
   const props = { open: true, candidates: [{ id: "synthetic-candidate", name: "合成同学" }], onClose() {}, onCreate: value => created.push(value) };
   render(props);
   let tree = render(props);
+  assert.equal(find(tree, item => item.props?.className === "job-context-disclosure").props.open, false);
   find(tree, item => item.props?.["aria-label"] === "招聘网页 URL").props.onChange({ target: { value: posting.source_url } });
   tree = render(props);
   await find(tree, item => item.type === "button" && React.Children.toArray(item.props.children).includes("读取网页")).props.onClick();
   assert.equal(created.length, 0, "preview must not create a job");
   tree = render(props);
+  assert.equal(find(tree, item => item.props?.className === "job-context-disclosure").props.open, true, "populated context is visible for review");
   find(tree, item => item.type === "form").props.onSubmit({ preventDefault() {} });
   assert.equal(created.length, 1);
   assert.equal(created[0].jd_raw, body);

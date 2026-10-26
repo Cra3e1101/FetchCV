@@ -4,6 +4,18 @@ const EDITOR_SCHEMA_VERSION = 6;
 const builtinSectionIds = new Set(["education", "internship", "skills", "project", "awards", "self"]);
 const workbenchStorageKey = "resume-workbench-v1";
 const WORKBENCH_SCHEMA_VERSION = 3;
+// Typography and proportions measured from the user's didi/main.tex.
+// This preset contains layout only; the document always comes from its snapshot.
+const DIDI_TEMPLATE_SETTINGS = {
+  templatePreset: "didi-v2", margin: 48, spacing: 0.8 * 96 / 25.4, lineHeight: 14.6 / 10.2 * 100,
+  fontSize: 10.2 * 96 / 72.27, fontFamily: "'Times New Roman', 'SimSun', 'Songti SC', serif",
+  nameSize: 18 * 96 / 72.27, basicHeight: 100.8, infoColumns: 3, titleStyle: "line",
+  fitScale: 1, verticalFillGap: 0, photoX: 0, photoY: 0, nameX: 0, infoX: 0, infoY: 0,
+  customAccent: "#161616", customAccent2: "#161616", customStage: "#eeefed"
+};
+// Match the fixed native template's rich-text contract. Layout controls live
+// in the page settings; inline typography cannot override that template.
+const DIDI_RICH_COMMANDS = new Set(["undo", "redo", "bold", "italic", "superscript", "removeFormat"]);
 
 const section = (id, tab, metaLeft, metaRight, body, visible = true, builtin = false) => ({
   id,
@@ -24,6 +36,8 @@ const initialState = {
     political: "群众",
     phone: "138****2468",
     email: "demo***@mail.com",
+    website: "",
+    summary: "",
     arrival: "两周内到岗",
     workYears: "不填",
     marital: "不填",
@@ -98,6 +112,7 @@ const FETCHCV_API_HEADERS = FETCHCV_API_TOKEN ? { "X-FetchCV-Control-Token": FET
 let fetchCVPendingSnapshot = null;
 let fetchCVEditorInitialized = false;
 let fetchCVSnapshotLoaded = false;
+let fetchCVApplyingSnapshot = false;
 let fetchCVEditorError = "";
 
 function hasUsableFetchCVSnapshot(snapshot) {
@@ -550,7 +565,7 @@ function cacheRefs() {
   [
     "saveStatus", "previewStage", "previewViewport", "previewScaleFrame", "zoomOutBtn", "zoomInBtn", "zoomValue", "resumePage", "resumeHead", "previewName", "previewAge", "previewGender",
     "previewPolitical", "previewPhone", "previewEmail", "previewArrival",
-    "previewPhoto", "photoWrap", "infoGrid", "resumeSections", "coverSheet",
+    "previewPhoto", "photoWrap", "infoGrid", "previewSummary", "resumeSections", "coverSheet",
     "coverName", "coverContact", "letterSheet", "letterPreview", "settingsCard", "moduleAdjustCard",
     "moduleAdjustTitle", "selectedSectionXRange", "selectedSectionLineRange",
     "selectedSectionXNumber", "selectedSectionLineNumber",
@@ -2921,6 +2936,12 @@ function normalizeSkillTextPart(value = "") {
 }
 
 function mergeSkillsPlainBody(fields = {}, body = "") {
+  if (state.template === "didi") {
+    const legacyFields = [fields.skillCategory, fields.skillContent, fields.skillLevel].map(value => normalizeSkillTextPart(value || "")).filter(Boolean);
+    // Snapshot text already has intentional paragraph boundaries. Import-line
+    // reconstruction here used to merge skill rows and remove punctuation gaps.
+    return legacyFields.length ? [...legacyFields, String(body || "")].filter(Boolean).join("\n") : String(body || "");
+  }
   const merged = [
     normalizeSkillTextPart(fields.skillCategory || ""),
     normalizeSkillTextPart(fields.skillContent || ""),
@@ -3525,7 +3546,7 @@ function wordFontSizes() {
 }
 
 function wordLineHeights() {
-  return [
+  const values = [
     ["0.8", "紧凑 0.8"],
     ["0.9", "紧凑 0.9"],
     ["1", "单倍"],
@@ -3537,6 +3558,7 @@ function wordLineHeights() {
     ["2.5", "2.5"],
     ["3", "3.0"]
   ];
+  return state.template === "didi" ? values.filter(([value]) => Number(value) >= 1.05 && Number(value) <= 2.2) : values;
 }
 
 function formatIndentLabel(value = 0) {
@@ -3638,7 +3660,7 @@ function ensureSectionFields(sectionItem) {
   sectionItem.items.forEach((item) => {
     if (!item.richStyle) {
       item.richStyle = {
-        lineHeight: 1.65,
+        ...(state.template === "didi" ? {} : { lineHeight: 1.65 }),
         firstIndent: 0,
         hangingIndent: 0
       };
@@ -3835,9 +3857,14 @@ function applyParsedResumeData(parsed = {}) {
   renderAll();
 }
 
-function getItemTextBlockStyle(item) {
+function getItemTextBlockStyle(item, sectionItem) {
   const richStyle = item.richStyle || {};
-  const lineHeight = Number(richStyle.lineHeight || 1.65);
+  const templateLeading = state.template === "didi"
+    ? (sectionItem?.lineHeight ? Number(sectionItem.lineHeight) / 100 : sectionItem?.id === "education" ? 11.9 / 10.2 : Number(state.settings.lineHeight) / 100)
+    : 1.65;
+  // ctexart's default baselinestretch is 1.3, including explicit \fontsize.
+  const itemLeading = state.template === "didi" && isSkillsSection(sectionItem) ? undefined : richStyle.lineHeight;
+  const lineHeight = Number(itemLeading || templateLeading) * (state.template === "didi" ? 1.3 : 1);
   const firstIndent = Number(richStyle.firstIndent || 0);
   const hangingIndent = Number(richStyle.hangingIndent || 0);
   const textIndent = firstIndent - hangingIndent;
@@ -3881,12 +3908,33 @@ function getItemPreviewMeta(sectionItem, item) {
   };
 }
 
-function renderPreviewMeta(previewMeta) {
+function renderPreviewMeta(previewMeta, item = {}) {
   const rightParts = Array.isArray(previewMeta.rightParts)
     ? previewMeta.rightParts
     : (previewMeta.right ? [previewMeta.right] : []);
   const leftPart = safeText(previewMeta.left || "");
   const normalizedParts = rightParts.map((part) => safeText(part));
+  if (state.template === "didi") {
+    // Keep the title, role and dates in normal flow. Long titles wrap instead
+    // of being truncated by the legacy absolute-positioned metadata layout.
+    const dates = leftPart.replace(/(\d{4})-(\d{2})/g, "$1.$2").replace(/\s*[~～]\s*/g, "–");
+    const columns = [normalizedParts[0] || "", normalizedParts.slice(1).join(" | "), dates];
+    if (!columns.some(Boolean)) return "";
+    const comparable = value => plainFieldText(value).replace(/\s+/g, "").replace(/：/g, ":");
+    const metaRich = item.metaRich || {};
+    return `<div class="section-meta didi-meta">${columns.map((value, index) => {
+      const rich = index === 0 ? metaRich.title : index === 1 ? metaRich.role : "";
+      // Source emphasis is valid only while its text matches the editable
+      // fields. An edit must never resurrect old metadata from the import.
+      const matchesSource = rich && comparable(rich) === comparable(value);
+      let content = matchesSource ? sanitizeRich(rich) : escapeHtml(value);
+      const phantom = Number(metaRich.roleLeadingPhantomEm || 0);
+      if (index === 1 && matchesSource && Number.isFinite(phantom) && phantom > 0 && phantom <= 3) {
+        content = `<span aria-hidden="true" style="display:inline-block;width:${phantom}em"></span>${content}`;
+      }
+      return `<span class="didi-meta-part didi-meta-${index}">${content}</span>`;
+    }).join("")}</div>`;
+  }
   const slots = leftPart ? [leftPart, ...normalizedParts] : [...normalizedParts];
   const hasFilled = slots.some((part) => part !== "");
   if (!hasFilled) return "";
@@ -3925,6 +3973,7 @@ function computeInlineFieldAnchors(count, width) {
 }
 
 function applySectionMetaLayout(metaEl) {
+  if (metaEl.classList.contains("didi-meta")) return;
   const parts = Array.from(metaEl.querySelectorAll(".meta-part"));
   if (!parts.length) return;
   const containerWidth = Math.max(1, metaEl.clientWidth);
@@ -4066,12 +4115,14 @@ function renderProfile() {
   refs.coverName.textContent = state.profile.name || "未填写姓名";
   refs.coverContact.textContent = [state.profile.phone, state.profile.email].filter(Boolean).join(" · ") || "联系方式未填写";
   const labelSet = state.settings.englishLabels ? labels.en : labels.zh;
+  const age = state.profile.age || calculateAge(state.profile.birth);
   const fields = [
-    { label: labelSet[0], value: state.profile.age || calculateAge(state.profile.birth) },
+    { label: labelSet[0], value: /^\d+$/.test(age) ? `${age}岁` : age },
     { label: labelSet[1], value: state.profile.gender === "不填" ? "" : state.profile.gender },
     { label: labelSet[2], value: state.profile.political === "不填" ? "" : state.profile.political },
     { label: labelSet[3], value: state.profile.phone },
     { label: labelSet[4], value: state.profile.email },
+    { label: "网站", value: state.profile.website || state.profile.url },
     { label: labelSet[5], value: state.profile.arrival },
     { label: "工作年限", value: state.profile.workYears === "不填" ? "" : state.profile.workYears },
     { label: "婚姻状况", value: state.profile.marital === "不填" ? "" : state.profile.marital },
@@ -4090,6 +4141,8 @@ function renderProfile() {
     refs.infoGrid.appendChild(row);
   });
   syncHeadInfoRowGap();
+  refs.previewSummary.textContent = state.profile.summary || "";
+  refs.previewSummary.hidden = !hasValue(state.profile.summary);
 
   refs.photoWrap.classList.toggle("hide-photo", !state.profile.showPhoto);
   refs.photoWrap.classList.toggle("has-photo", Boolean(state.profile.photo));
@@ -4106,11 +4159,11 @@ function renderSections() {
         }
         const items = item.items.map((entry) => {
           const previewMeta = getItemPreviewMeta(item, entry);
-          const meta = renderPreviewMeta(previewMeta);
+          const meta = renderPreviewMeta(previewMeta, entry);
           const directEdit = FETCHCV_PREVIEW_ONLY
             ? ""
             : ` contenteditable="true" spellcheck="true" data-preview-body="true" data-item-id="${escapeAttr(entry.id)}" aria-label="直接编辑${escapeAttr(item.tab)}正文"`;
-          return `<div class="section-item">${meta}<div class="section-body"${directEdit} style="${escapeAttr(getItemTextBlockStyle(entry))}">${formatBody(entry.body)}</div></div>`;
+          return `<div class="section-item">${meta}<div class="section-body"${directEdit} style="${escapeAttr(getItemTextBlockStyle(entry, item))}">${state.template === "didi" ? formatDidiBody(entry.body, item) : formatBody(entry.body)}</div></div>`;
         }).join("");
       return `
         <section class="resume-section sortable-section ${item.id === state.activeSectionId ? "selected-section" : ""} ${item.id === state.draggingSectionId ? "is-dragging" : ""}" data-sortable-module="true" data-section-id="${item.id}" style="--module-x:${Number(item.offsetX || 0)}px; --module-line-height:${Number(item.lineHeight || state.settings.lineHeight) / 100}">
@@ -4147,7 +4200,7 @@ function renderExtras() {
 function renderTabs() {
   refs.tabStrip.innerHTML = [
     `<button type="button" class="module-nav-item ${state.activeTab === "profile" ? "active" : ""}" data-tab="profile">
-      <span>基本信息</span><small>固定</small>
+      <span>基本信息</span>
     </button>`,
     ...getRenderTabSections().map((item) => {
       if (item.type === "placeholder") {
@@ -4264,6 +4317,7 @@ function renderEditor() {
           <div class="toolbar-group toolbar-group-style">
           <button type="button" data-command="bold" data-command-label="加粗" data-shortcut="Ctrl+B" data-tooltip="加粗 Ctrl+B" aria-keyshortcuts="Control+B Meta+B" aria-label="加粗 Ctrl+B">B</button>
           <button type="button" data-command="italic" data-command-label="斜体" data-shortcut="Ctrl+I" data-tooltip="斜体 Ctrl+I" aria-keyshortcuts="Control+I Meta+I" aria-label="斜体 Ctrl+I"><i>I</i></button>
+          ${state.template === "didi" ? '<button type="button" data-command="superscript" data-command-label="上标" data-tooltip="上标" aria-label="上标">x<sup>2</sup></button>' : ""}
           <button type="button" data-command="underline" data-command-label="下划线" data-shortcut="Ctrl+U" data-tooltip="下划线 Ctrl+U" aria-keyshortcuts="Control+U Meta+U" aria-label="下划线 Ctrl+U"><u>U</u></button>
           <button type="button" data-command="strikeThrough" data-command-label="删除线" data-tooltip="删除线" aria-label="删除线"><s>S</s></button>
           <label class="toolbar-color-control" data-tooltip="文字颜色" aria-label="文字颜色"><span class="text-color-symbol">A</span><input type="color" data-command="foreColor" value="#17202a" /></label>
@@ -4291,7 +4345,7 @@ function renderEditor() {
             <span class="toolbar-shortcuts"><kbd>Ctrl+B</kbd><kbd>Ctrl+Z</kbd><kbd>Ctrl+Shift+7/8</kbd></span>
           </div>
         </div>
-        <div class="rich-editor" contenteditable="true" data-item-field="body" style="${escapeAttr(getItemTextBlockStyle(item))}">${formatBody(item.body)}</div>
+        <div class="rich-editor" contenteditable="true" data-item-field="body" style="${escapeAttr(getItemTextBlockStyle(item, active))}">${formatBody(item.body)}</div>
       </div>
   `).join("")}
     <div class="row-actions item-list-actions">
@@ -4300,6 +4354,20 @@ function renderEditor() {
       <button class="danger-btn" id="clearSectionBtn" type="button">清空内容</button>
     </div>
   `;
+  if (state.template === "didi") {
+    refs.itemList.querySelectorAll(".rich-toolbar").forEach(toolbar => {
+      toolbar.querySelectorAll("[data-command], [data-block-style]").forEach(control => {
+        const supported = control.dataset.command ? DIDI_RICH_COMMANDS.has(control.dataset.command) : control.dataset.blockStyle === "lineHeight" && !skillsLike;
+        control.hidden = !supported;
+        if (!supported) control.disabled = true;
+        const label = control.closest(".toolbar-color-control");
+        if (label) label.hidden = !supported;
+      });
+      toolbar.querySelectorAll(".toolbar-group").forEach(group => {
+        group.hidden = ![...group.children].some(child => !child.hidden);
+      });
+    });
+  }
   bindItemActionButtons();
   requestAnimationFrame(adjustFloatingPopovers);
 }
@@ -4410,6 +4478,7 @@ function renderSettings() {
   refs.settingsTitle.textContent = titleMap[state.activeSettings] || "设置";
   $$(".tool-btn[data-panel]").forEach((button) => button.classList.toggle("active", button.dataset.panel === state.activeSettings));
   $("#templateBtn").classList.toggle("active", state.template === "compact");
+  $("#templateBtn").title = `当前模板：${state.template === "didi" ? "极简单栏" : state.template === "compact" ? "紧凑" : "经典"}，点击切换`;
   $$(".settings-panel").forEach((panel) => panel.classList.toggle("active", panel.dataset.settings === state.activeSettings));
   if (panelChanged) {
     const activePanel = refs.settingsCard.querySelector(`.settings-panel[data-settings="${state.activeSettings}"]`);
@@ -4476,17 +4545,17 @@ function scheduleThemeCssRefresh() {
 
 function applyStyles() {
   applyThemeCssVariables();
-  const fitScale = clamp(Number(state.settings.fitScale || 1), 0.76, ONE_PAGE_FILL_LIMITS.fitScale);
+  const fitScale = state.template === "didi" ? 1 : clamp(Number(state.settings.fitScale || 1), 0.76, ONE_PAGE_FILL_LIMITS.fitScale);
   document.documentElement.style.setProperty("--fit-scale", String(fitScale));
   document.documentElement.style.setProperty("--paper-pad", `${Number(state.settings.margin || 0) * fitScale}px`);
   document.documentElement.style.setProperty("--section-gap", `${Number(state.settings.spacing || 0) * fitScale}px`);
-  document.documentElement.style.setProperty("--section-fill-gap", `${Math.max(0, Number(state.settings.verticalFillGap || 0))}px`);
-  document.documentElement.style.setProperty("--resume-line-height", state.settings.lineHeight / 100);
+  document.documentElement.style.setProperty("--section-fill-gap", `${state.template === "didi" ? 0 : Math.max(0, Number(state.settings.verticalFillGap || 0))}px`);
+  document.documentElement.style.setProperty("--resume-line-height", state.settings.lineHeight / 100 * (state.template === "didi" ? 1.3 : 1));
   document.documentElement.style.setProperty("--resume-font-size", `${Number(state.settings.fontSize || 15) * fitScale}px`);
-  document.documentElement.style.setProperty("--resume-font", state.settings.fontFamily);
+  document.documentElement.style.setProperty("--resume-font", state.template === "didi" ? "'Times New Roman', 'Didi SimSun', 'SimSun', 'Songti SC', serif" : state.settings.fontFamily);
   const basicHeight = Number(state.settings.basicHeight || 190);
   const scaledBasicHeight = basicHeight * fitScale;
-  const displayNameSize = basicHeight <= 112
+  const displayNameSize = state.template !== "didi" && basicHeight <= 112
     ? Math.min(Number(state.settings.nameSize || 28), 24)
     : Number(state.settings.nameSize || 28);
   document.documentElement.style.setProperty("--name-size", `${displayNameSize * fitScale}px`);
@@ -4514,6 +4583,12 @@ function applyStyles() {
   setPreviewZoom(state.previewZoom || 0.5, { render: false });
   applyPreviewOffset();
   refs.resumePage.classList.toggle("template-compact", state.template === "compact");
+  refs.resumePage.classList.toggle("template-didi", state.template === "didi");
+  document.body.classList.toggle("didi-editor", state.template === "didi");
+  if (refs.fitOnePageBtn) {
+    refs.fitOnePageBtn.hidden = state.template === "didi";
+    refs.fitOnePageBtn.disabled = state.template === "didi";
+  }
   refs.resumePage.classList.toggle("title-line", state.settings.titleStyle === "line");
   refs.resumePage.classList.toggle("title-plain", state.settings.titleStyle === "plain");
   refs.resumePage.classList.remove("show-guides");
@@ -4541,6 +4616,7 @@ function applyStyles() {
 }
 
 function syncHeadInfoRowGap() {
+  if (state.template === "didi") return;
   if (!refs.infoGrid) return;
   const totalRows = refs.infoGrid.querySelectorAll("p").length;
   if (!totalRows) return;
@@ -4570,7 +4646,7 @@ function setPreviewZoom(value, options = {}) {
 }
 
 function fitFetchCVCanonicalPreview() {
-  if ((!FETCHCV_PREVIEW_ONLY && state.drawerOpen) || !refs.previewViewport) return;
+  if (!refs.previewViewport) return;
   const availableWidth = Math.max(320, refs.previewViewport.clientWidth - 56);
   const scale = clamp(availableWidth / 794, 0.42, 0.86);
   state.previewOffsetX = 0;
@@ -5166,6 +5242,12 @@ function applyBalancedVerticalFill() {
 }
 
 async function fitResumeToOnePage(options = {}) {
+  // The supplied template has an explicit type scale. Never shrink or stretch
+  // it merely to make a page count pass; long documents continue on a new page.
+  if (state.template === "didi") {
+    const count = await getCurrentPreviewPageCountAfterLayout();
+    return { fit: count <= 1, changed: false, beforeCount: count, afterCount: count };
+  }
   const opts = options && typeof options === "object" ? options : {};
   const recoveredVisualStyle = recoverLegacyOnePageFitVisualStyle();
   if (recoveredVisualStyle) {
@@ -5306,6 +5388,7 @@ function applyHeadOffsetCssVars() {
 }
 
 function clampHeadBlocksIntoContainer() {
+  if (state.template === "didi") return;
   const head = refs.resumeHead;
   if (!head) return;
   const zoom = Math.max(0.01, Number(state.previewZoom || 1));
@@ -5438,6 +5521,8 @@ function scrollPendingItemIntoView() {
 }
 
 function persist(options = {}) {
+  // Viewing and loading a resume must not save it or invalidate its PDF.
+  if (FETCHCV_PREVIEW_ONLY || fetchCVApplyingSnapshot) return;
   // The embedded editor starts from an internal placeholder. Never allow that
   // placeholder to overwrite the job resume before its authoritative snapshot
   // has arrived from FetchCV or the resume API.
@@ -5500,7 +5585,7 @@ function ensureStateDefaults() {
   [
     "name", "age", "gender", "birth", "political", "phone", "email", "arrival",
     "workYears", "marital", "height", "weight", "ethnicity", "domicile",
-    "photo", "photoFileName"
+    "photo", "photoFileName", "website", "summary"
   ].forEach((key) => {
     state.profile[key] = String(state.profile[key] || "");
   });
@@ -5539,6 +5624,7 @@ function ensureStateDefaults() {
       const items = rawItems
         .filter((entry) => entry && typeof entry === "object")
         .map((entry, entryIndex) => ({
+          ...entry,
           id: String(entry.id || `${id}-item-${entryIndex + 1}`),
           metaLeft: String(entry.metaLeft || ""),
           metaRight: String(entry.metaRight || ""),
@@ -5554,7 +5640,7 @@ function ensureStateDefaults() {
         items: items.length ? items : [blankItem()]
       };
     });
-  if (!state.sections.length) state.sections = structuredClone(initialState.sections);
+  if (!state.sections.length && !FETCHCV_EMBEDDED) state.sections = structuredClone(initialState.sections);
 
   // Recover missing builtin sections from corrupted cache snapshots.
   const builtinDefaults = initialState.sections.filter((item) => builtinSectionIds.has(item.id));
@@ -5633,7 +5719,7 @@ function bindProfileInputs() {
     ["political", "#politicalInput"], ["phone", "#phoneInput"],
     ["arrival", "#arrivalInput"], ["workYears", "#workYearsInput"], ["marital", "#maritalInput"],
     ["height", "#heightInput"], ["weight", "#weightInput"], ["ethnicity", "#ethnicityInput"],
-    ["domicile", "#domicileInput"]
+    ["domicile", "#domicileInput"], ["website", "#websiteInput"], ["summary", "#summaryInput"]
   ];
   bindings.forEach(([key, selector]) => {
     const input = $(selector);
@@ -5652,7 +5738,7 @@ function bindProfileInputs() {
   $("#emailInput").addEventListener("input", syncEmail);
   $("#emailInput").addEventListener("focus", (event) => event.target.select());
   const emailLabel = document.getElementById("emailInput")?.closest("label");
-  if (emailLabel) {
+  if (emailLabel && !FETCHCV_EMBEDDED) {
     let suffixSelect = document.getElementById("emailSuffixPreset");
     if (!suffixSelect) {
       suffixSelect = document.createElement("select");
@@ -6634,6 +6720,7 @@ function selectionHasInlineFormat(editor, format) {
   const style = getComputedStyle(node || editor);
   if (format === "bold") return Number.parseInt(style.fontWeight, 10) >= 600 || /bold/i.test(style.fontWeight);
   if (format === "italic") return style.fontStyle === "italic";
+  if (format === "superscript") return Boolean(node?.closest?.("sup"));
   if (format === "underline") return String(style.textDecorationLine || style.textDecoration || "").includes("underline");
   if (format === "strikeThrough") return String(style.textDecorationLine || style.textDecoration || "").includes("line-through");
   return false;
@@ -6660,6 +6747,7 @@ function updateRichToolbarState(card) {
   };
   if (selectionHasInlineFormat(editor, "bold")) markActive("bold");
   if (selectionHasInlineFormat(editor, "italic")) markActive("italic");
+  if (selectionHasInlineFormat(editor, "superscript")) markActive("superscript");
   if (selectionHasInlineFormat(editor, "underline")) markActive("underline");
   if (selectionHasInlineFormat(editor, "strikeThrough")) markActive("strikeThrough");
   const selectionRange = getSelectionRangeInEditor(editor);
@@ -6683,7 +6771,7 @@ function updateRichToolbarState(card) {
   const presetSelect = toolbar.querySelector('.toolbar-paragraph-style[data-block-style="paragraphPreset"]');
   if (sizeSelect) sizeSelect.value = snapshot.fontSize || "";
   if (fontSelect) fontSelect.value = snapshot.fontFamily || "";
-  if (lineSelect) lineSelect.value = snapshot.lineHeight || "";
+  if (lineSelect) lineSelect.value = state.template === "didi" ? String(getItemFromCard(card)?.richStyle?.lineHeight || "") : snapshot.lineHeight || "";
   if (presetSelect) {
     const range = getSelectionRangeInEditor(editor);
     const node = range?.startContainer?.nodeType === Node.ELEMENT_NODE ? range.startContainer : range?.startContainer?.parentElement;
@@ -6915,6 +7003,7 @@ function applyRemoveFormat(card) {
 
 function enforceEditorDefaults(editor) {
   if (!editor) return;
+  if (state.template === "didi") return;
   const blocks = [...editor.querySelectorAll("p,div,li")];
   if (!blocks.length) return;
   blocks.forEach((block) => {
@@ -6968,6 +7057,7 @@ function removeLinksFromSelection(editor) {
 
 function applyRichCommand(card, command, value = null) {
   if (!card) return;
+  if (state.template === "didi" && !DIDI_RICH_COMMANDS.has(command)) return;
   if (command === "undo") {
     applyRichHistory(card, -1);
     return;
@@ -6983,7 +7073,15 @@ function applyRichCommand(card, command, value = null) {
   const range = getSelectionRangeInEditor(editor);
   const isCollapsed = !range || range.collapsed;
   let deferSync = false;
-  if (["bold", "italic", "underline", "strikeThrough"].includes(command)) {
+  if (state.template === "didi") {
+    // Native PDF reads semantic i/em/sup tags, not CSS font-style. Browser
+    // editing also splits existing tags correctly when toggling part of a run.
+    const styled = document.queryCommandState("styleWithCSS");
+    document.execCommand("styleWithCSS", false, false);
+    document.execCommand(command, false, value);
+    document.execCommand("styleWithCSS", false, styled);
+    deferSync = isCollapsed && command !== "removeFormat";
+  } else if (["bold", "italic", "underline", "strikeThrough"].includes(command)) {
     toggleInlineFormat(editor, command);
     deferSync = isCollapsed;
   } else if (command === "styleFontSize" && value) {
@@ -7036,6 +7134,7 @@ function applyRichBlockStyle(card, key, value) {
   const item = getItemFromCard(card);
   const editor = card?.querySelector(".rich-editor");
   if (!item || !editor) return;
+  if (state.template === "didi" && (key !== "lineHeight" || isSkillsSection(getActiveSection()))) return;
   restoreRichSelection(card);
   getRichHistory(editor);
   if (!item.richStyle) {
@@ -7046,8 +7145,17 @@ function applyRichBlockStyle(card, key, value) {
     };
   }
   if (key === "lineHeight") {
-    applyParagraphCommand(card, "lineHeight", Number(value || item.richStyle.lineHeight || 1.5));
-    editor.style.cssText = getItemTextBlockStyle(item);
+    if (state.template === "didi") {
+      const next = Number(value);
+      if (!Number.isFinite(next) || next < 1.05 || next > 2.2) return;
+      item.richStyle.lineHeight = next;
+      // The native renderer applies this to the whole entry. Do not leave
+      // paragraph CSS that would make only the HTML view appear different.
+      editor.querySelectorAll("[style]").forEach(node => node.style.removeProperty("line-height"));
+    } else {
+      applyParagraphCommand(card, "lineHeight", Number(value || item.richStyle.lineHeight || 1.5));
+    }
+    editor.style.cssText = getItemTextBlockStyle(item, getActiveSection());
     syncEditorBody(card);
     recordRichHistory(editor, key, true);
     updateRichToolbarState(card);
@@ -7194,7 +7302,9 @@ function bindSettings() {
   bindColorSetting("customAccent2", "customAccent2Picker", "customAccent2Input");
   bindColorSetting("customStage", "customStagePicker", "customStageInput");
   $("#templateBtn").addEventListener("click", () => {
-    state.template = state.template === "classic" ? "compact" : "classic";
+    const templates = ["didi", "classic", "compact"];
+    state.template = templates[(templates.indexOf(state.template) + 1) % templates.length];
+    if (state.template === "didi") Object.assign(state.settings, DIDI_TEMPLATE_SETTINGS);
     renderAll();
   });
   $("#closeModuleAdjustBtn").addEventListener("click", () => refs.moduleAdjustCard.classList.add("hidden"));
@@ -8251,6 +8361,8 @@ function syncInputsFromState() {
   $("#birthInput").value = normalizeMonthValue(state.profile.birth || "");
   $("#politicalInput").value = state.profile.political;
   $("#phoneInput").value = state.profile.phone;
+  $("#websiteInput").value = state.profile.website;
+  $("#summaryInput").value = state.profile.summary;
   const emailValue = String(state.profile.email || "");
   $("#emailInput").value = emailValue;
   const emailSuffix = emailValue.includes("@") ? emailValue.split("@")[1] : "";
@@ -8924,11 +9036,48 @@ function formatBody(value) {
     .join("");
 }
 
+function formatDidiBody(value, sectionItem) {
+  const raw = String(value || "");
+  const html = /<\/?[a-z][\s\S]*>/i.test(raw) ? sanitizeRich(raw) : escapeHtml(raw);
+  // Preserve explicit newlines even when a line also contains inline bold.
+  // Existing paragraph/list markup already defines its own line boundaries.
+  if (/<(?:p|div|ul|ol|li)\b/i.test(html)) return html;
+  const lines = html.split(/\r?\n|<br\s*\/?>/i).filter(line => line.trim());
+  const skills = isSkillsSection(sectionItem);
+  return lines.map(line => {
+    if (skills) {
+      const element = document.createElement("div");
+      element.innerHTML = line;
+      const label = element.textContent.match(/^\s*([^：:]{1,16}[：:])/);
+      if (label) {
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+        let node, remaining = label[0].length;
+        while ((node = walker.nextNode())) {
+          if (remaining <= node.textContent.length) break;
+          remaining -= node.textContent.length;
+        }
+        if (node) {
+          const range = document.createRange();
+          range.setStart(node, remaining);
+          range.setEnd(element, element.childNodes.length);
+          const body = document.createElement("span");
+          body.appendChild(range.cloneContents());
+          return `<div class="didi-skill-row"><strong class="didi-skill-label">${escapeHtml(label[0])}</strong><span class="didi-skill-body">${body.innerHTML}</span></div>`;
+        }
+      }
+    }
+    const bullet = line.match(/^\s*[•·●]\s*/);
+    return bullet
+      ? `<div class="didi-bullet">${line.slice(bullet[0].length)}</div>`
+      : `<div class="didi-paragraph">${line}</div>`;
+  }).join("");
+}
+
 function sanitizeRich(value) {
   const template = document.createElement("template");
   template.innerHTML = value;
   template.content.querySelectorAll("script,style,iframe,object,meta,link").forEach((node) => node.remove());
-  const allowedTags = new Set(["p", "div", "br", "span", "b", "strong", "i", "em", "u", "s", "strike", "a", "ul", "ol", "li"]);
+  const allowedTags = new Set(["p", "div", "br", "span", "b", "strong", "i", "em", "sup", "u", "s", "strike", "a", "ul", "ol", "li"]);
   const allowedStyles = new Set(["font-size", "font-family", "font-weight", "font-style", "text-decoration", "line-height", "text-align", "margin-left", "text-indent", "color", "background-color"]);
   const normalizeStyleValue = (prop, rawValue) => {
     const value = String(rawValue || "").trim();
@@ -8937,7 +9086,8 @@ function sanitizeRich(value) {
     if (prop === "font-size") {
       const n = Number.parseFloat(value);
       if (!Number.isFinite(n)) return "";
-      return `${clamp(n, 6, 40)}px`;
+      const pixels = /pt$/i.test(value) ? n * 96 / 72 : n;
+      return `${clamp(pixels, 6, 40)}px`;
     }
     if (prop === "font-family") {
       return normalizeAllowedFontFamily(value);
@@ -9287,7 +9437,21 @@ function applyFetchCVSnapshot(snapshot) {
   fetchCVPendingSnapshot = snapshot;
   if (!fetchCVEditorInitialized) return false;
   try {
+    fetchCVApplyingSnapshot = true;
     state = structuredClone(snapshot);
+    // Migrate presentation on a private copy; never rewrite source facts.
+    if (!state.settings?.templatePreset || state.settings.templatePreset === "didi-v1") {
+      state.template = "didi";
+      state.settings = { ...state.settings, ...DIDI_TEMPLATE_SETTINGS };
+      // v1 and the legacy one-page fitter wrote automatic leading into every
+      // item. Remove only those known defaults; keep deliberate custom styles.
+      for (const section of state.sections || []) {
+        if ([166, 165, 143.14, 116.667].some(value => Math.abs(Number(section.lineHeight) - value) < .001)) delete section.lineHeight;
+        for (const item of section.items || []) {
+          if (item.richStyle && [1.65, 1.4314, 1.16667].some(value => Math.abs(Number(item.richStyle.lineHeight) - value) < .0001)) delete item.richStyle.lineHeight;
+        }
+      }
+    }
     fetchCVSnapshotLoaded = true;
     ensureStateDefaults();
     normalizeSectionBuiltinFlags();
@@ -9305,6 +9469,8 @@ function applyFetchCVSnapshot(snapshot) {
     fetchCVSnapshotLoaded = false;
     reportFetchCVEditorError("apply-snapshot", error);
     return false;
+  } finally {
+    fetchCVApplyingSnapshot = false;
   }
 }
 

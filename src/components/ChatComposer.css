@@ -1,0 +1,156 @@
+/* UI reference: https://github.com/Caho1/open-claude-ui/blob/main/code-examples/ChatComposer.tsx
+   A compact 101px idle surface with 20px corners and a 32px send action.
+   Scope the restyle to the shell and triggers; existing model/approval panels keep
+   their own presentation and behavior. */
+.source-grid .source-composer.claude-composer {
+  --composer-accent: var(--ui-ink);
+  --composer-accent-hover: color-mix(in srgb, var(--ui-ink) 85%, var(--ui-surface));
+  --composer-border: color-mix(in srgb, var(--ui-ink) 12%, transparent);
+  --cds-dur-fast: 60ms;
+  --cds-dur-slow: .45s;
+  --cds-btn-spring: linear(0, .2459, .6526, .9468, 1.0764, 1.0915, 1.0585, 1.0219, .9993, .9914, .9921, .9957, .9988, 1.0004, 1);
+  --cds-fill-ghost-hover: color-mix(in srgb, var(--ui-ink) 5%, transparent);
+  border: 0;
+  border-radius: 20px;
+  background: transparent;
+  box-shadow: none;
+  container-type: inline-size;
+  overflow: visible;
+}
+.source-grid .source-composer.claude-composer:focus-within { border: 0; box-shadow: none; }
+.source-grid .source-composer.claude-composer .rp-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 20px;
+  background: var(--ui-surface);
+  box-shadow: 0 4px 20px #00000009, inset 0 0 0 1px var(--composer-border);
+  transition: box-shadow 180ms ease;
+}
+.source-grid .source-composer.claude-composer .rp-composer:hover {
+  box-shadow: 0 5px 24px #0000000d, inset 0 0 0 1px color-mix(in srgb, var(--ui-ink) 18%, transparent);
+}
+.source-grid .source-composer.claude-composer .rp-composer:focus-within {
+  box-shadow: 0 5px 22px #0000000b, inset 0 0 0 1px color-mix(in srgb, var(--ui-ink) 23%, transparent);
+}
+.source-grid .source-composer.claude-composer .source-composer-editor.rp-editor { padding: 0; min-height: 28px; }
+.source-grid .source-composer.claude-composer textarea {
+  height: 28px;
+  min-height: 28px;
+  max-height: min(384px, 40dvh);
+  padding: 0 0 0 6px;
+  font: 400 15px/1.4 var(--ui-font);
+  color: var(--ui-ink);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  field-sizing: content;
+}
+.source-grid .source-composer.claude-composer textarea::placeholder { color: var(--ui-muted); opacity: 1; }
+.source-grid .source-composer.claude-composer .rp-controls { gap: 8px; height: auto; min-height: 37px; padding: 4px 0 0; border-top: 1px solid transparent; align-items: flex-end; }
+.source-grid .source-composer.claude-composer .rp-controls-start { gap: 6px; flex: 1 1 auto; flex-wrap: wrap; }
+.source-grid .source-composer.claude-composer .rp-controls-end { gap: 8px; flex: 0 0 auto; align-self: flex-end; }
+.source-grid .source-composer.claude-composer :is(.composer-add, .composer-mode, .model-effort-trigger) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  gap: 6px;
+  width: auto;
+  height: 32px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--ui-secondary, var(--ui-ink));
+  background: transparent;
+  font: 400 14px/20px var(--ui-font);
+  white-space: nowrap;
+}
+.source-grid .source-composer.claude-composer .composer-add { width: 32px; min-width: 32px; padding: 0; flex: 0 0 auto; }
+.source-grid .source-composer.claude-composer .composer-add > svg { flex: none; }
+.source-grid .source-composer.claude-composer :is(.composer-add, .composer-mode) > span { color: inherit; font: inherit; }
+.source-grid .source-composer.claude-composer .model-effort-trigger { border: 0; max-width: 260px; padding-inline: 4px; color: var(--ui-ink); }
+.source-grid .source-composer.claude-composer .model-effort-trigger > i { display: block; width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; background: var(--ui-muted); }
+.source-grid .source-composer.claude-composer .model-effort-trigger > i.online { background: var(--composer-accent); }
+.source-grid .source-composer.claude-composer .composer-trigger-copy { display: flex; flex-direction: row; align-items: baseline; width: auto; max-width: 240px; gap: 7px; }
+#root .source-grid .source-composer.claude-composer .composer-trigger-copy :is(strong, small) { font: 400 14px/20px var(--ui-font); }
+.source-grid .source-composer.claude-composer .composer-trigger-copy strong { max-width: 170px; color: var(--ui-ink); }
+.source-grid .source-composer.claude-composer .composer-trigger-copy small { display: inline; flex: none; color: var(--ui-muted); }
+.source-grid .source-composer.claude-composer :is(.composer-add, .composer-mode, .model-effort-trigger):is(:hover, [aria-expanded="true"]):not(:disabled) { background: var(--ui-hover); color: var(--ui-ink); }
+.source-grid .source-composer.claude-composer :is(.composer-add, .composer-mode, .model-effort-trigger, .composer-send):focus-visible { outline: 2px solid var(--composer-accent); outline-offset: 3px; }
+.source-grid .source-composer.claude-composer .composer-model-wrap .model-effort-popover { left: auto; right: 0; transform-origin: right bottom; }
+.source-grid .source-composer.claude-composer .composer-send { width: 32px; height: 32px; flex: 0 0 32px; margin: 0; border: 0; border-radius: 8px; background: var(--composer-accent); color: var(--ui-surface); box-shadow: 0 1px 2px #00000012; }
+.source-grid .source-composer.claude-composer .composer-send:hover:not(:disabled) { background: var(--composer-accent-hover); color: var(--ui-surface); transform: none; }
+.source-grid .source-composer.claude-composer .composer-send:disabled { background: var(--composer-accent); color: var(--ui-surface); opacity: .35; box-shadow: none; }
+.source-grid .source-composer.claude-composer .composer-send.stop { background: var(--ui-ink); color: var(--ui-surface); }
+.source-grid .source-composer.claude-composer .composer-send span { color: inherit; }
+.source-grid .source-composer.claude-composer .composer-send svg { width: 16px; height: 16px; }
+.source-grid .source-composer.claude-composer .composer-attachments { display: flex; flex-wrap: nowrap; gap: 8px; padding: 2px 0 6px !important; margin: 0 0 8px; background: transparent; overflow-x: auto; scrollbar-width: thin; }
+.source-grid .source-composer.claude-composer .composer-attachments > span { flex: 0 0 auto; gap: 8px; height: 28px; max-width: 260px; padding: 4px 10px; border: 1px solid var(--composer-border); border-radius: 8px; background: var(--ui-tray); color: var(--ui-ink); box-shadow: 0 1px 2px #00000008; }
+.source-grid .source-composer.claude-composer .composer-attachments > span > svg { color: var(--composer-accent); }
+.source-grid .source-composer.claude-composer .composer-attachments b { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ui-ink); font-size: 12px; font-weight: 500; }
+.source-grid .source-composer.claude-composer .composer-attachments small { flex: none; color: var(--ui-muted); font: 400 10px/1 var(--mono, monospace); }
+.source-grid .source-composer.claude-composer .composer-attachments button { width: 16px; height: 16px; flex: none; border-radius: 50%; color: var(--ui-secondary); background: transparent; }
+.source-grid .source-composer.claude-composer .composer-quote { margin: 0 0 10px; border-color: var(--composer-border); background: var(--ui-tray); }
+.source-grid .source-composer.claude-composer .composer-quote strong { color: var(--ui-ink); }
+.source-grid .source-composer.claude-composer .composer-quote :is(small, button) { color: var(--ui-secondary); }
+
+/* CDS ghost paint stays separate from the button's layout and spring transform. */
+.source-grid .source-composer.claude-composer button.cds-btn-ghost {
+  position: relative;
+  isolation: isolate;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.source-grid .source-composer.claude-composer button.cds-btn-ghost::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background: transparent;
+  transition: background-color var(--cds-dur-fast) ease-out;
+}
+.source-grid .source-composer.claude-composer button.cds-btn-ghost:is(:hover, :active, :focus-visible, [aria-expanded="true"]):not(:disabled)::before {
+  background: var(--cds-fill-ghost-hover);
+}
+.source-grid .source-composer.claude-composer button.cds-btn-squish {
+  --cds-btn-press-sx: .975;
+  --cds-btn-press-sy: .975;
+  transform: none;
+  transform-origin: 50%;
+  transition: transform var(--cds-dur-slow) var(--cds-btn-spring);
+}
+.source-grid .source-composer.claude-composer button.cds-btn-squish:active:not(:disabled),
+.source-grid .source-composer.claude-composer :active > button.cds-btn-squish:not(:disabled) {
+  transform: scale(var(--cds-btn-press-sx), var(--cds-btn-press-sy));
+  transition: transform var(--cds-dur-fast) ease-out;
+}
+
+@container (max-width: 590px) {
+  .source-grid .source-composer.claude-composer .composer-add > span { display: none; }
+  .source-grid .source-composer.claude-composer .rp-controls-start { gap: 4px; }
+  .source-grid .source-composer.claude-composer .rp-controls-end { gap: 6px; }
+}
+@container (max-width: 450px) {
+  .source-grid .source-composer.claude-composer .composer-mode { padding-inline: 7px; }
+  .source-grid .source-composer.claude-composer .composer-mode > span { display: none; }
+  .source-grid .source-composer.claude-composer .model-effort-trigger { max-width: 170px; padding-inline: 4px; }
+  .source-grid .source-composer.claude-composer .composer-trigger-copy strong { max-width: 100px; }
+  .source-grid .source-composer.claude-composer .composer-model-wrap { position: static; }
+  .source-grid .source-composer.claude-composer .composer-model-wrap .model-effort-popover { left: 0; max-width: 100%; }
+  .source-grid .source-composer.claude-composer .rp-perm-wrap { position: static; }
+}
+@container (max-width: 290px) {
+  .source-grid .source-composer.claude-composer .rp-controls { flex-wrap: wrap; }
+  .source-grid .source-composer.claude-composer .rp-controls-start { flex: 1 1 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .source-grid .source-composer.claude-composer .rp-composer { transition: none; }
+  .source-grid .source-composer.claude-composer button.cds-btn-squish,
+  .source-grid .source-composer.claude-composer button.cds-btn-squish:active:not(:disabled),
+  .source-grid .source-composer.claude-composer :active > button.cds-btn-squish:not(:disabled) { transform: none; transition: none; }
+  .source-grid .source-composer.claude-composer button.cds-btn-ghost::before { transition: none; }
+}

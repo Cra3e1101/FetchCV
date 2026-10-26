@@ -33,7 +33,7 @@
 .settings-window.settings-window .provider-editor :is(input,select) {height:38px;font:430 14px/20px var(--ui-font);}
 .settings-window.settings-window .provider-editor textarea {font:400 12px/19px var(--ui-code-font);resize:vertical;min-height:132px;tab-size:2;}
 .settings-window.settings-window .provider-editor :is(input,select,textarea):focus-visible {outline:2px solid var(--ui-secondary);}
-.provider-editor button {color:var(--ui-ink);font:430 13px/20px var(--ui-font);transition:background .12s,transform .12s;}
+.provider-editor button {color:var(--ui-ink);font:430 13px/20px var(--ui-font);transition:background var(--theme-palette-duration, .12s),transform .12s;}
 .provider-editor button:active:not(:disabled) {transform:scale(.98);}
 .provider-editor button:disabled {cursor:default;opacity:.5;}
 .provider-key {display:flex;align-items:center;gap:4px;padding-right:8px;border:1px solid var(--ui-line-strong);border-radius:8px;}

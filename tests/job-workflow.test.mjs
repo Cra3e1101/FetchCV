@@ -29,7 +29,7 @@ test("unknown operation and pending tool permission precede factual and rewrite 
   assert.equal(progress(detail, { needsEvidenceCount: 1 }).action.key, "facts");
 });
 
-test("rewrite review has a central action and evidence gaps stay explicit", () => {
+test("rewrite review has a primary action and evidence gaps stay explicit", () => {
   const detail = fixture("awaiting_user_review");
   assert.equal(progress(detail).action.label, "审阅改写建议");
   const missing = progress(detail, { needsEvidenceCount: 2 });
@@ -106,7 +106,7 @@ function components() {
   const compiled = transformSync(source, { loader: "jsx", jsx: "transform" }).code;
   const icon = () => React.createElement("span");
   return vm.runInNewContext(`(() => { ${compiled}; return {JobStartPanel, JobProgressPanel}; })()`, {
-    React, deriveJobProgress, ArrowRight: icon, BriefcaseBusiness: icon, CheckCircle2: icon, CircleAlert: icon, LoaderCircle: icon,
+    React, deriveJobProgress, ArrowRight: icon, BriefcaseBusiness: icon, ChevronDown: icon, CircleAlert: icon, LoaderCircle: icon,
   });
 }
 
@@ -118,13 +118,15 @@ test("the first screen names the job path, explains its resume prerequisite, and
   assert.match(html, /也可以在下方继续聊天/);
 });
 
-test("central progress separates real saved products, evidence gaps and the next action", () => {
+test("compact sidebar progress retains saved products and evidence gaps in collapsed details", () => {
   const { JobProgressPanel } = components();
   const html = renderToStaticMarkup(React.createElement(JobProgressPanel, {
     detail: fixture("awaiting_user_review"), runtime, needsEvidenceCount: 1,
     evidenceSummary: { result: "已保存正文 0 篇", missing: "没有可用于当前问题的面经依据", status: "本轮已结束 · 当前证据不足" }, onAction() {},
   }));
   assert.match(html, /aria-label="岗位进度"/);
-  for (const label of ["当前阶段", "已有结果", "还缺什么", "下一步", "处理待补证", "已保存正文 0 篇", "本轮已结束 · 当前证据不足"]) assert.ok(html.includes(label));
+  assert.match(html, /<details class="job-progress-details">/);
+  for (const label of ["岗位详情", "已确认个人事实", "1 条改写待补证，当前不能直接采用", "处理待补证", "已保存正文 0 篇", "没有可用于当前问题的面经依据", "本轮已结束 · 当前证据不足"]) assert.ok(html.includes(label));
+  for (const label of ["当前阶段", "已有结果", "还缺什么", "下一步"]) assert.ok(!html.includes(label));
   assert.equal((html.match(/class="primary-button"/g) || []).length, 1);
 });

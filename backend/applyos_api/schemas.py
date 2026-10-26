@@ -200,6 +200,8 @@ class ResumeVersionRead(ApiModel):
     name: str
     status: str
     content_json: dict[str, Any]
+    content_hash: str | None = None
+    pdf_path: str | None = None
     source_fact_ids: list[str]
     created_at: datetime
     updated_at: datetime
@@ -308,7 +310,10 @@ class PdfResumePreviewRead(ApiModel):
     filename: str
     source_sha256: str
     size_bytes: int
-    page_count: int
+    source_format: str = "pdf"
+    source_photo_sha256: str = ""
+    mime_type: str = "application/pdf"
+    page_count: int | None = None
     text_length: int
     profile: dict[str, str]
     sections: list[dict[str, Any]]

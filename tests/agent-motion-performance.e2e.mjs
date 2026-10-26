@@ -129,8 +129,8 @@ try {
     await page.evaluate(() => window.control.emit("\n\n" + "New content while reading history.\n\n".repeat(30)));
     await page.waitForTimeout(350);
     check(`${mode}: upward input cancels follow within near-bottom threshold`, Math.abs(await scroll.evaluate(e=>e.scrollTop)-stoppedAt) < 2);
-    check(`${mode}: return latest remains available`, await page.getByRole("button", { name: "返回最新消息" }).count() === 1);
-    await page.getByRole("button", { name: "返回最新消息" }).click();
+    check(`${mode}: return latest remains available`, await page.getByRole("button", { name: "回到底部" }).count() === 1);
+    await page.getByRole("button", { name: "回到底部" }).click();
     if (mode === "job") {
       await page.waitForTimeout(20);
       await page.emulateMedia({ reducedMotion: "reduce" });

@@ -37,7 +37,7 @@ Object.assign(api, {
  updateMcpServer:async(id,patch)=>{calls.push({action:'mcp-update',id,patch});servers=servers.map(s=>s.id===id?{...s,...patch}:s);return servers.find(s=>s.id===id);},
 });
 window.appRuntime = {listModelProviders:async()=>({activeId:'saved',profiles:[{id:'saved',providerName:'现有连接',protocol:'openai',baseUrl:'https://example.invalid/v1',model:'synthetic-model',hasApiKey:true,health:'unknown'}]})};
-createRoot(document.getElementById('root')).render(<div className="source-grid"><ModelSettingsDialog open user={{name:'合成用户'}} runtime={{configured:true}} stats={{jobs:4,resumes:3,materials:8}} onClose={()=>{}} onSaved={()=>{}}/></div>);
+createRoot(document.getElementById('root')).render(<div className="source-grid"><ModelSettingsDialog open initialSection={new URLSearchParams(location.search).get("section") || "general"} user={{name:'合成用户'}} runtime={{configured:true}} stats={{jobs:4,resumes:3,materials:8}} onClose={()=>{}} onSaved={()=>{}}/></div>);
 `;
 await build({stdin:{contents:fixture,resolveDir:root,loader:'jsx'},outfile:path.join(output,'fixture.js'),bundle:true,format:'esm',platform:'browser',jsx:'automatic',
   define:{'process.env.NODE_ENV':'"production"','import.meta.env':'{}'},loader:{'.woff2':'file','.woff':'file','.png':'file','.svg':'file'},alias:{'lucide-react':path.join(root,'src/ui/lucide-compat.js')}});
@@ -60,14 +60,47 @@ try {
   const navigate=async name=>{await page.locator('.settings-sidebar').getByRole('button',{name,exact:true}).click();await page.locator('.settings-content').evaluate(el=>{el.scrollTop=0;});};
   const shot=async name=>{await page.waitForTimeout(250);await page.screenshot({path:path.join(evidence,name)});report.screenshots.push(name);};
   const noOverflow=()=>page.locator('.settings-content').evaluate(el=>el.scrollWidth<=el.clientWidth+1 && document.documentElement.scrollWidth<=innerWidth);
+  const themePicker=()=>page.getByRole('group',{name:'主题',exact:true});
+  const densityPicker=()=>page.getByRole('group',{name:'界面密度',exact:true});
+  const themes=[['white','简约白'],['neutral-dark','简约深色'],['light','暖色浅色'],['dark','暖色深色']];
+  const activeLabel=group=>group.locator('button[aria-pressed="true"]').getAttribute('aria-label');
+  const previewLabelsVisible=group=>group.locator('.segmented-control-label').evaluateAll(nodes=>nodes.every(node=>getComputedStyle(node).display!=='none'&&node.getBoundingClientRect().width>0));
+  for(const section of ['skills','mcp','mcp-add']){
+    await page.goto(url+'/?section='+section);
+    await page.locator(section==='skills'?'#settings-skills-title':'#settings-mcp-title').waitFor();
+    check('composer shortcut opens '+section+' directly',await page.locator('.settings-sidebar [aria-current="page"]').innerText()===(section==='skills'?'Skills':'MCP Servers'));
+    if(section==='mcp-add'){
+      await page.waitForFunction(()=>document.activeElement?.getAttribute('aria-label')==='MCP 名称');
+      check('add connector focuses the actual MCP configuration form',await page.getByRole('textbox',{name:'MCP 名称',exact:true}).evaluate(node=>node===document.activeElement));
+    }
+  }
   for(const width of [1360,600]) for(const theme of ['white','neutral-dark']){
     const prefix=`${width}-${theme}`;
     await page.setViewportSize({width,height:960});await page.goto(url);
     await page.getByRole('heading',{name:'常规',exact:true}).waitFor();
-    await page.evaluate(theme=>{document.documentElement.dataset.interfaceTheme=theme;document.documentElement.dataset.colorScheme=theme==='white'?'light':'dark';},theme);
+    await themePicker().getByRole('button',{name:themes.find(([value])=>value===theme)[1],exact:true}).click();
+    check(`${prefix}: theme and density expose their own preview options`,await themePicker().locator('.segmented-control-preview').count()===4&&await densityPicker().locator('.segmented-control-preview').count()===2);
+    check(`${prefix}: preview labels remain visible`,await previewLabelsVisible(themePicker())&&await previewLabelsVisible(densityPicker()));
+    check(`${prefix}: theme and density each own one selection block`,await themePicker().locator('.segmented-control-indicator').count()===1&&await densityPicker().locator('.segmented-control-indicator').count()===1);
+    check(`${prefix}: appearance controls have no horizontal overflow`,await noOverflow());
     await shot(`general-${prefix}.png`);
-    await page.getByLabel('界面密度',{exact:true}).selectOption('compact');
+    if(width===1360&&theme==='white'){
+      await page.locator('.settings-group').filter({has:page.getByRole('heading',{name:'外观',exact:true})}).screenshot({path:path.join(evidence,'appearance-preview.png')});report.screenshots.push('appearance-preview.png');
+      const densityBefore=await activeLabel(densityPicker());
+      await themePicker().getByRole('button',{name:'暖色深色',exact:true}).click();
+      for(const [value,label] of themes){
+        await themePicker().getByRole('button',{name:label,exact:true}).click();
+        check(`theme ${value}: applies immediately and persists`,await page.evaluate(value=>document.documentElement.dataset.interfaceTheme===value&&localStorage.getItem('fetchcv.interface-theme')===value,value)&&await activeLabel(themePicker())===label);
+      }
+      check('theme changes do not change density or call its API',await activeLabel(densityPicker())===densityBefore&&await page.evaluate(()=>!window.settingsFixture.calls.some(c=>c.action==='general')));
+      await page.reload();
+      await themePicker().waitFor();
+      check('theme selection restores after reload',await activeLabel(themePicker())==='暖色深色'&&await page.locator('html').getAttribute('data-interface-theme')==='dark');
+      await themePicker().getByRole('button',{name:'简约白',exact:true}).click();
+    }
+    await densityPicker().getByRole('button',{name:'紧凑',exact:true}).click();
     check(`${prefix}: density changes still save`,await page.evaluate(()=>window.settingsFixture.calls.some(c=>c.action==='general'&&c.patch.density==='compact')));
+    check(`${prefix}: density applies immediately without moving theme selection`,await page.locator('html').getAttribute('data-density')==='compact'&&await activeLabel(themePicker())===themes.find(([value])=>value===theme)[1]);
     await navigate('模型 API');
     check(`${prefix}: existing connection opens without exposing saved credentials`,await page.getByLabel('API Key',{exact:true}).getAttribute('placeholder')==='已安全保存；留空继续使用');
     await page.getByRole('button',{name:'新连接',exact:true}).click();
@@ -113,6 +146,20 @@ try {
     await page.getByLabel('网页访问权限',{exact:true}).selectOption('ask');
     check(`${prefix}: permission changes still save`,await page.evaluate(()=>window.settingsFixture.calls.some(c=>c.action==='permissions'&&c.patch.web_access==='ask')));
   }
+  await page.setViewportSize({width:390,height:900});await page.goto(url);
+  await page.getByRole('heading',{name:'常规',exact:true}).waitFor();
+  await themePicker().getByRole('button',{name:'简约白',exact:true}).click();
+  check('narrow appearance preview remains within the screen',await noOverflow());
+  check('narrow preview controls retain every option label',await previewLabelsVisible(themePicker())&&await previewLabelsVisible(densityPicker()));
+  await shot('general-390-white.png');
+  await densityPicker().getByRole('button',{name:'舒适',exact:true}).focus();
+  await page.keyboard.press('End');
+  check('density keyboard selection saves through the existing API',await activeLabel(densityPicker())==='紧凑'&&await page.evaluate(()=>window.settingsFixture.calls.some(c=>c.action==='general'&&c.patch.density==='compact')));
+  await themePicker().getByRole('button',{name:'简约白',exact:true}).focus();
+  await page.keyboard.press('ArrowRight');
+  check('theme keyboard selection remains independent of density',await activeLabel(themePicker())==='简约深色'&&await activeLabel(densityPicker())==='紧凑');
+  await page.emulateMedia({reducedMotion:'reduce'});
+  check('appearance selection blocks respect reduced motion',await page.locator('.segmented-control[data-variant="preview"] .segmented-control-indicator').evaluateAll(nodes=>nodes.length===2&&nodes.every(node=>getComputedStyle(node).transitionDuration.split(',').every(value=>parseFloat(value)===0))));
   check('no browser errors',report.errors.length===0);report.pass=true;
 } catch(error){report.pass=false;report.error=error.stack;if(page)await page.screenshot({path:path.join(evidence,'failure.png')});throw error;}
 finally{await fs.writeFile(path.join(evidence,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({pass:report.pass,checks:report.checks.length,evidence}));await browser.close();await new Promise(resolve=>server.close(resolve));}

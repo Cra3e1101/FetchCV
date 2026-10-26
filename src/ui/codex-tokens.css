@@ -4,8 +4,8 @@
  */
 :root[data-interface-theme] {
   font-size: 16px;
-  --ui-font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
-  --ui-code-font: ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --ui-font: var(--font-sans);
+  --ui-code-font: var(--font-mono);
   --ui-font-size: 16px;
   --ui-font-small: 13px;
   --ui-font-caption: 12px;
@@ -42,6 +42,7 @@
   --ui-radius-panel: 12.5px;
   --openbitfun-font-family-sans: var(--ui-font);
   --openbitfun-font-family-control: var(--ui-font);
+  --openbitfun-font-family-mono: var(--ui-code-font);
   --openbitfun-layout-navigation-panel-inline-size: var(--ui-sidebar-width);
   --openbitfun-layout-navigation-panel-item-height: 32px;
   --openbitfun-layout-navigation-panel-content-gap: 20px;
@@ -58,14 +59,12 @@
 /* Existing user-requested warm themes remain available, separate from the
  * measured neutral desktop defaults. These are FetchCV theme adaptations. */
 :root[data-interface-theme=light] {
-  --ui-font: ui-serif, Georgia, Cambria, "Times New Roman", Times, "Noto Serif SC", serif;
   --ui-surface: #f5f4ee;
   --ui-under: #eeede6;
   --ui-ink: #141413;
   --ui-accent: #da7756;
 }
 :root[data-interface-theme=dark] {
-  --ui-font: ui-serif, Georgia, Cambria, "Times New Roman", Times, "Noto Serif SC", serif;
   --ui-surface: #262624;
   --ui-under: #20201e;
   --ui-ink: #f5f4ee;

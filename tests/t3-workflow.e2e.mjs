@@ -44,6 +44,20 @@ async function capture(filename,description){
   await page.screenshot({path:path.join(screenshots,filename),fullPage:true});
   report.screenshots.push({file:filename,description,provenance:'Actual production App browser screenshot; isolated SQLite and production API; synthetic library/web IO/analysis fixture'});
 }
+async function openJobProgress(){
+  const toggle=page.locator('.source-context-toggle');
+  await toggle.waitFor();
+  if(await toggle.getAttribute('aria-expanded')==='false')await toggle.click();
+  const progress=page.locator('.agent-rail-v2').getByRole('region',{name:'岗位进度',exact:true});
+  await progress.waitFor();
+  return progress;
+}
+async function openJobDetails(){
+  const progress=await openJobProgress();
+  const details=progress.locator('.job-progress-details');
+  if(!await details.evaluate(node=>node.open))await details.locator(':scope > summary').click();
+  return progress;
+}
 function stop(child){
   if(!child||child.exitCode!==null||child.signalCode!==null)return;
   if(process.platform==='win32')spawnSync(path.join(process.env.SystemRoot||'C:\\Windows','System32/taskkill.exe'),['/PID',String(child.pid),'/T','/F'],{windowsHide:true,timeout:5000});
@@ -109,15 +123,15 @@ try{
   const created=page.waitForResponse(response=>response.url()===apiBase+'/api/jobs'&&response.request().method()==='POST');
   await modal.getByRole('button',{name:'创建项目',exact:true}).click();
   const receipt=await created;assert.equal(receipt.status(),201);const job=await receipt.json();
-  await page.getByRole('region',{name:'岗位进度',exact:true}).waitFor();
+  await openJobDetails();
   assert.equal(job.context_json.fields.recruitment_type.value,'social');
   assert.equal(job.context_json.fields.recruitment_type.basis,'user_confirmed');
   assert.equal(job.context_json.fields.business_unit.value,'合成风控事业部');
   await page.locator('.job-context-summary > summary').click();
-  await capture('02-saved-context.png','实际POST=201后中央岗位语境显示已保存字段及用户确认basis');
+  await capture('02-saved-context.png','实际POST=201后展开右栏岗位详情与岗位语境，显示已保存字段及用户确认basis');
   await page.reload({waitUntil:'domcontentloaded'});
   await page.getByRole('button',{name:'合成科技 数据分析',exact:true}).click();
-  await page.getByRole('region',{name:'岗位进度',exact:true}).waitFor();
+  await openJobDetails();
   await page.locator('.job-context-summary > summary').click();
   await page.getByRole('button',{name:'编辑岗位与语境',exact:true}).click();
   const manage=page.getByRole('dialog',{name:'管理岗位项目',exact:true});await manage.waitFor();
@@ -126,7 +140,7 @@ try{
   await capture('03-reopened-context.png','刷新真实App后重开管理对话框；语境从真实API持久化重读');
   await manage.getByRole('button',{name:'取消',exact:true}).click();
   assert.equal((await request(`/fixture/analysis/${job.id}`,{})).status,200);
-  await page.reload({waitUntil:'domcontentloaded'});await page.getByRole('button',{name:'合成科技 数据分析',exact:true}).click();await page.getByRole('region',{name:'岗位进度',exact:true}).waitFor();
+  await page.reload({waitUntil:'domcontentloaded'});await page.getByRole('button',{name:'合成科技 数据分析',exact:true}).click();await openJobDetails();
   await page.locator('.job-context-summary > summary').click();
   await page.getByRole('button',{name:'编辑岗位与语境',exact:true}).click();await manage.waitFor();
   await manage.getByLabel('岗位描述',{exact:true}).fill(job.jd_raw+'\n新增职责：核对合成报表。');
@@ -136,7 +150,7 @@ try{
   const patch=await patched;assert.equal(patch.status(),200);const modified=await patch.json();assert.equal(modified.input_revision,job.input_revision+1);
   await page.getByRole('status',{name:'岗位结果过期提示',exact:true}).waitFor();
   await page.getByRole('button',{name:'重新分析当前岗位',exact:true}).waitFor();
-  await capture('04-edited-results-stale.png','实际编辑正文和招聘类型并PATCH；旧Profile/Brief显示过期，中央提供重新分析');
+  await capture('04-edited-results-stale.png','实际编辑正文和招聘类型并PATCH；旧Profile/Brief显示过期，右栏提供重新分析');
   await page.locator('.workspace-tabs').getByRole('button',{name:'面试',exact:true}).click();
   await page.getByRole('status',{name:'岗位结果过期提示',exact:true}).waitFor();
   assert.equal(await page.getByText('旧简报不得继续作为当前成果',{exact:false}).count(),0);
@@ -149,11 +163,13 @@ try{
   assert.equal(noop.body.input_revision,modified.input_revision);
   assert.equal((await request(`/fixture/new-profile/${job.id}`,{})).status,200);
   await page.reload({waitUntil:'domcontentloaded'});await page.getByRole('button',{name:'合成科技 数据分析',exact:true}).click();
-  await page.getByRole('region',{name:'岗位进度',exact:true}).waitFor();
+  const progress=await openJobDetails();
   await page.getByRole('button',{name:'查看并更新面试简报',exact:true}).waitFor();
-  assert.match(await page.getByRole('region',{name:'岗位进度',exact:true}).innerText(),/岗位相关性已过期/);
+  assert.match(await progress.innerText(),/岗位相关性已过期/);
   await capture('06-new-profile-old-draft-stale.png','合成Suite通过真实AgentService重做Profile；旧简历相关性仍过期，Brief仍待更新');
-  assert.equal(await page.getByRole('button',{name:'展开任务上下文',exact:true}).count(),1,'central T3 actions remain usable with right rail collapsed');
+  assert.equal(await page.locator('.agent-workspace-v2 .job-progress-panel').count(),0,'job progress stays outside the conversation');
+  await page.locator('.source-context-toggle').click();
+  assert.equal(await page.locator('.source-context-toggle').getAttribute('aria-expanded'),'false','right rail remains collapsible after context actions');
   report.checks.push('Production create=201; reload and real manage dialog preserves confirmed fields; production PATCH=200 marks profile and brief stale; reload and interview tab preserve stale; identical PATCH does not increment revision');
   assert.deepEqual(report.page_errors,[]);assert.deepEqual(report.external_requests,[]);
   report.source_changed_during_run=report.source_hashes.filter(item=>hashFile(item.path)!==item.sha256).map(item=>item.path);

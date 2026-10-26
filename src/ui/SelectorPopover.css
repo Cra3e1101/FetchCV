@@ -1,0 +1,42 @@
+/* Shared surfaces for model, permission and attachment menus. */
+#root .source-composer .selector-popover.selector-popover {
+  position: fixed; inset: auto; margin: 0; z-index: 100;
+  box-sizing: border-box; min-width: 0; max-width: calc(100vw - 24px);
+  height: auto; padding: 6px; overflow: auto; overscroll-behavior: contain;
+  border: 1px solid var(--ui-popover-ring, var(--ui-line)); border-radius: 14px;
+  color: var(--ui-ink); background: var(--ui-surface);
+  box-shadow: 0 8px 28px #00000018, 0 2px 6px #0000000a;
+  font: 400 13px/1.5 var(--ui-font);
+  animation: none; translate: none; scale: none; transition: none;
+  scrollbar-width: thin; backdrop-filter: none;
+}
+.selector-popover::backdrop { background: transparent; pointer-events: none; }
+#root .source-composer .selector-popover [role^=menuitem] {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 36px; height: auto;
+  padding: 8px 10px; border: 0; border-radius: 8px;
+  color: var(--ui-ink); background: transparent; text-align: left;
+  font: 400 13px/20px var(--ui-font); transform: none;
+  transition: background-color var(--theme-palette-duration, 120ms);
+}
+#root .source-composer .selector-popover [role^=menuitem][aria-checked=true] { background: var(--ui-selection); }
+#root .source-composer .selector-popover [role^=menuitem]:is(:hover,:focus-visible):not(:disabled) { background: var(--ui-hover); }
+#root .source-composer .selector-popover [role^=menuitem]:focus-visible { outline: 2px solid var(--ui-secondary); outline-offset: -2px; }
+#root .source-composer .selector-popover [role^=menuitem]:disabled { opacity: .45; cursor: wait; }
+.selector-popover [role^=menuitem] > svg { flex: none; }
+#root .source-composer .selector-popover .model-choice-list { padding: 0; flex: 1 1 auto; min-height: 0; max-height: none; overflow-y: auto; border: 0; }
+#root .source-composer .selector-popover[data-view=models] { display: flex; flex-direction: column; }
+#root .source-composer .selector-popover .model-list-back { flex: none; min-height: 36px; height: 36px; padding: 6px 8px; font-weight: 500; }
+#root .source-composer .selector-popover .model-choice-provider { min-height: 30px; padding: 8px 10px 4px; color: var(--ui-muted); font-weight: 400; }
+#root .source-composer .selector-popover .model-choice-list section > button > span { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; }
+#root .source-composer .selector-popover .model-choice-list strong { max-width: 100%; font-size: 13px; font-weight: 500; }
+#root .source-composer .selector-popover .model-choice-list small { font-size: 11px; color: var(--ui-muted); overflow-wrap: anywhere; }
+#root .source-composer .selector-popover .manage-models-button { flex: none; width: 100%; min-height: 36px; margin: 6px 0 0; border: 0; border-top: 1px solid var(--ui-line); background: transparent; border-radius: 0 0 8px 8px; }
+#root .source-composer .selector-search { display: flex; align-items: center; gap: 7px; flex: none; margin: 4px 4px 8px; padding: 6px 8px; border: 1px solid var(--ui-line-strong); border-radius: 8px; color: var(--ui-muted); }
+#root .source-composer .selector-search input { min-width: 0; width: 100%; padding: 0; border: 0; background: transparent; color: var(--ui-ink); font: 400 13px/20px var(--ui-font); outline: none; }
+#root .source-composer .selector-search:focus-within { outline: 2px solid var(--ui-secondary); outline-offset: 1px; }
+.selector-popover .selector-status, .selector-popover .settings-error { flex: none; margin: 6px 8px; font-size: 12px; line-height: 18px; }
+.selector-popover .selector-status { color: var(--ui-muted); }
+.selector-popover .effort-description { margin: 10px 0 0; color: var(--ui-secondary); font: 400 12px/18px var(--ui-font); }
+@media (prefers-reduced-motion: reduce) {
+  #root .source-composer .selector-popover [role^=menuitem] { transition: none; }
+}

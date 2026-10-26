@@ -87,7 +87,7 @@ try {
   await page.getByRole('switch').click();await page.waitForTimeout(350);equal('switch real update',skill.enabled,true);equal('switch on color',(await read('.settings-skill-list i')).backgroundColor,'rgb(58, 131, 247)');
   motion.switchEvents=await page.evaluate(()=>window.switchMotion);
   motion.switch=await page.locator('.settings-skill-list i').evaluate(e=>({transform:getComputedStyle(e,'::after').transform,transition:getComputedStyle(e,'::after').transition}));
-  await page.getByRole('button',{name:'常规',exact:true}).click();await page.getByRole('combobox',{name:'主题',exact:true}).selectOption('neutral-dark');await page.waitForTimeout(250);equal('dark navigation text',(await read('.settings-sidebar nav button')).color,'rgb(236, 236, 236)');await page.screenshot({path:path.join(output,'settings-dark.png')});
+  await page.getByRole('button',{name:'常规',exact:true}).click();await page.getByRole('group',{name:'主题',exact:true}).getByRole('button',{name:'简约深色',exact:true}).click();await page.waitForTimeout(250);equal('dark navigation text',(await read('.settings-sidebar nav button')).color,'rgb(236, 236, 236)');await page.screenshot({path:path.join(output,'settings-dark.png')});
   equal('neutral dark surface',(await read('.settings-content')).backgroundColor,'rgb(33, 33, 33)');
   await page.getByRole('button',{name:'关闭',exact:true}).click();await page.getByRole('dialog',{name:'设置',exact:true}).waitFor({state:'hidden'});
   await page.screenshot({path:path.join(output,'conversation-dark.png')});

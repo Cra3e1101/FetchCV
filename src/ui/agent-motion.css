@@ -16,20 +16,24 @@
 .source-grid .processing-detail .activity-line.failed :is(.activity-line-icon, .activity-line-state),
 .source-grid .tool-receipt-detail.failed :is(.replica-activity-label, .shell-status) {
   color: #ae5f4e;
-  transition: color var(--motion-duration-micro) var(--motion-ease-enter);
+  transition: color var(--theme-palette-duration, var(--motion-duration-micro)) var(--motion-ease-enter);
 }
 :root:is([data-interface-theme="dark"], [data-interface-theme="neutral-dark"]) .source-grid .processing-disclosure.failed .processing-summary,
 :root:is([data-interface-theme="dark"], [data-interface-theme="neutral-dark"]) .source-grid .processing-detail .activity-line.failed :is(.activity-line-icon, .activity-line-state),
 :root:is([data-interface-theme="dark"], [data-interface-theme="neutral-dark"]) .source-grid .tool-receipt-detail.failed :is(.replica-activity-label, .shell-status) { color: #d28a79; }
 
 .app-shell :is(.agent-workspace-v2, .standalone-chat, .agent-rail-v2) button {
-  transition: color var(--motion-duration-micro) var(--motion-ease-enter),
-    background-color var(--motion-duration-micro) var(--motion-ease-enter),
-    border-color var(--motion-duration-micro) var(--motion-ease-enter),
-    opacity var(--motion-duration-micro) var(--motion-ease-enter),
-    transform var(--motion-duration-micro) var(--motion-ease-enter);
+  transition: color var(--theme-palette-duration, var(--button-transition-duration, var(--motion-duration-micro))) var(--motion-ease-enter),
+    background-color var(--theme-palette-duration, var(--button-transition-duration, var(--motion-duration-micro))) var(--motion-ease-enter),
+    border-color var(--theme-palette-duration, var(--button-transition-duration, var(--motion-duration-micro))) var(--motion-ease-enter),
+    opacity var(--button-transition-duration, var(--motion-duration-micro)) var(--motion-ease-enter),
+    transform var(--button-transition-duration, var(--motion-duration-micro)) var(--motion-ease-enter);
 }
-.app-shell :is(.agent-workspace-v2, .standalone-chat, .agent-rail-v2) button:active:not(:disabled) { transform: scale(var(--motion-press-scale)); }
+.app-shell :is(.agent-workspace-v2, .standalone-chat, .agent-rail-v2) button:active:not(:disabled) {
+  transform: scale(var(--motion-press-scale));
+  --button-transition-duration: var(--motion-duration-press);
+  transition-timing-function: var(--motion-ease-snap);
+}
 .source-grid .processing-disclosure.rp-actgroup button.processing-summary > svg,
 .source-grid .fold-group .replica-activity-header .fold-chev > svg,
 .rail-evidence-toggle svg { transition: transform var(--motion-duration-micro) var(--motion-ease-enter), opacity var(--motion-duration-micro) var(--motion-ease-enter); }
@@ -39,7 +43,7 @@
 .source-grid .processing-disclosure.rp-actgroup button.processing-summary[aria-expanded="true"] > svg,
 .source-grid .fold-group .replica-activity-header > button.fold-toggle[aria-expanded="true"] ~ span.fold-chev > svg { transform: rotate(0deg); }
 .fold-chev { transition: opacity var(--motion-duration-micro) var(--motion-ease-enter); }
-.source-grid .fold-group .replica-activity-header { transition: background-color var(--motion-duration-micro) var(--motion-ease-enter); }
+.source-grid .fold-group .replica-activity-header { transition: background-color var(--theme-palette-duration, var(--motion-duration-micro)) var(--motion-ease-enter); }
 
 .composer-send { position: relative; }
 .composer-action-icon { position: absolute; inset: 0; display: grid; place-items: center; }
@@ -61,7 +65,7 @@
 .source-composer .rp-permmenu { animation: none; }
 .message-interview-sources > div > article,
 .interview-evidence-card,
-.rail-cover-letter { transition: background-color var(--motion-duration-micro) var(--motion-ease-enter), border-color var(--motion-duration-micro) var(--motion-ease-enter); }
+.rail-cover-letter { transition: background-color var(--theme-palette-duration, var(--motion-duration-micro)) var(--motion-ease-enter), border-color var(--theme-palette-duration, var(--motion-duration-micro)) var(--motion-ease-enter); }
 .interview-evidence-card:hover { transform: none; }
 
 @media (prefers-reduced-motion: reduce) {

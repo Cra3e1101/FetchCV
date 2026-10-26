@@ -1,0 +1,60 @@
+.skeleton-group {
+  --skeleton-base: color-mix(in oklab, var(--ui-ink, #1a1c1f) 9%, var(--ui-surface, #fff));
+  --skeleton-sheen: color-mix(in oklab, var(--ui-surface, #fff) 80%, transparent);
+  --skeleton-play-state: paused;
+  min-width: 0;
+}
+:root:is([data-interface-theme="dark"], [data-interface-theme="neutral-dark"]) .skeleton-group {
+  --skeleton-sheen: color-mix(in oklab, var(--ui-ink) 12%, transparent);
+}
+.skeleton-group[data-motion-active="true"] { --skeleton-play-state: running; }
+.skeleton-block {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  width: 100%;
+  height: 14px;
+  border-radius: 6px;
+  background: var(--skeleton-base);
+}
+.skeleton-group[data-motion="lockstep"] > .skeleton-content {
+  animation: skeleton-breathe 2s ease-in-out infinite;
+  animation-play-state: var(--skeleton-play-state);
+}
+.skeleton-group[data-motion="wave"] .skeleton-block {
+  animation: skeleton-breathe 2s ease-in-out infinite;
+  animation-delay: calc(var(--cds-skel-i, 0) * 90ms);
+  animation-play-state: var(--skeleton-play-state);
+}
+/* Sweep geometry follows open-claude-ui's StatusIndicators.tsx. */
+.skeleton-group[data-motion="wave"] .skeleton-block::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(105deg, transparent 35%, var(--skeleton-sheen) 50%, transparent 65%);
+  transform: translateX(-100%);
+  animation: cds-skeleton-sweep 2s linear infinite;
+  animation-delay: calc(var(--cds-skel-i, 0) * 90ms);
+  animation-play-state: var(--skeleton-play-state);
+}
+@keyframes skeleton-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .6; } }
+@keyframes cds-skeleton-sweep { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+.skeleton-label { display: block; margin-top: 16px; color: var(--ui-secondary); font: 400 13px/1.6 var(--ui-font); }
+.content-skeleton { width: 100%; }
+.skeleton-list { display: grid; gap: 12px; }
+.skeleton-row { display: flex; align-items: center; gap: 14px; min-height: 70px; padding: 12px 16px; border: 1px solid var(--ui-line); border-radius: 11px; }
+.skeleton-avatar { flex: 0 0 36px; width: 36px; height: 36px; border-radius: 8px; }
+.skeleton-lines { display: grid; gap: 10px; flex: 1; min-width: 0; }
+.skeleton-card { display: grid; gap: 22px; padding: 24px; border: 1px solid var(--ui-line); border-radius: var(--ui-radius-panel, 12px); }
+.skeleton-card-heading { display: flex; align-items: center; gap: 14px; }
+.skeleton-card-media { height: 112px; border-radius: 8px; }
+.interview-workspace-loading > .content-skeleton { width: min(640px, calc(100% - 48px)); margin: 24px auto; }
+.interview-rail-loading > .content-skeleton { width: calc(100% - 32px); margin: 16px auto; }
+.interview-workspace-loading:has(> .content-skeleton) { overflow: auto; justify-content: flex-start; align-items: safe center; }
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-group > .skeleton-content,
+  .skeleton-group .skeleton-block,
+  .skeleton-group .skeleton-block::after { animation: none !important; }
+  .skeleton-group .skeleton-block::after { content: none; }
+}

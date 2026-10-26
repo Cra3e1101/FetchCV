@@ -24,7 +24,7 @@ function subscribe(callback) {
 const getOwner = () => owner;
 const noOwner = () => null;
 
-export function ActivityIndicator({ active = true, priority = 20, label = "正在处理" }) {
+export function ActivityIndicator({ active = true, priority = 20, label = "正在处理", variant = "dots", className = "" }) {
   const id = useId();
   const ref = useRef(null);
   const { reducedMotion } = useAgentMotion();
@@ -48,7 +48,7 @@ export function ActivityIndicator({ active = true, priority = 20, label = "正�
     return () => { candidates.delete(id); updateOwner(); };
   }, [active, id, pageVisible, priority, reducedMotion, visible]);
   const playing = active && visible && pageVisible && !reducedMotion && currentOwner === id;
-  return <span ref={ref} className="activity-indicator" role="img" aria-label={label} data-motion-active={playing}>
-    <i /><i /><i />
+  return <span ref={ref} className={`activity-indicator ${className}`} role="img" aria-label={label} data-variant={variant} data-motion-active={playing}>
+    <i aria-hidden="true" />{variant === "dots" && <><i aria-hidden="true" /><i aria-hidden="true" /></>}
   </span>;
 }

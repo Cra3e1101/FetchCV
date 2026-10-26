@@ -8,7 +8,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { chronologicalProcessingEvents, formatProcessingDuration, mergeProcessingEvent } from "../lib/processing";
 import { AnimatedCollapse } from "../ui/AnimatedCollapse";
 import { ActivityIndicator } from "../ui/ActivityIndicator";
-import { motionTokens, useAgentMotion } from "../ui/motion";
+import { useAgentMotion } from "../ui/motion";
 import { receiptActivity } from "../../shared/tool-activity.mjs";
 import "../ui/agent-links.css";
 
@@ -167,7 +167,7 @@ function eventFromStep(step) {
   };
   return {
     id: step.id,
-    kind: step.event_type === "tool" ? "tool" : step.event_type?.startsWith("task_") ? "control" : "system",
+    kind: step.event_type === "tool" ? "tool" : step.event_type === "model_turn" ? "model" : step.event_type?.startsWith("task_") ? "control" : "system",
     sequence: step.sequence,
     run_id: step.run_id,
     label: eventLabels[step.event_type] || step.stage || "运行步骤",
@@ -187,8 +187,11 @@ function ActivityIcon({ label, size = 16 }) {
   return <Icon size={size} strokeWidth={1.8} />;
 }
 
-function ActivityLine({ item, detail = false, parentStatus, indicator = false, animateEntry = false, index = 0 }) {
+function ActivityLine({ item, detail = false, parentStatus, indicator = false, animateEntry = false }) {
   const animation = useAgentMotion();
+  // Seen-event bookkeeping updates immediately; retain entry eligibility for
+  // this mount so the CSS delay can finish without replaying historical rows.
+  const [enterOnMount] = useState(animateEntry);
   const recordedActive = item.status === "active";
   const active = recordedActive && parentStatus === "running";
   const stopped = recordedActive && !active;
@@ -199,8 +202,7 @@ function ActivityLine({ item, detail = false, parentStatus, indicator = false, a
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
   const transition = animation.transition("enter");
-  const delay = animation.reducedMotion ? 0 : Math.min(index, 2) * motionTokens.stagger / 1000;
-  return <motion.div layout={animation.reducedMotion ? false : "position"} initial={animateEntry ? animation.enter() : false} animate={{ opacity: 1, y: 0 }} transition={{ ...transition, delay, layout: transition }} className={`activity-line ${active ? "active" : stopped ? "stopped" : item.status || "unknown"}`} data-recorded-status={item.status}>
+  return <motion.div layout={animation.reducedMotion ? false : "position"} initial={false} transition={{ layout: transition }} className={`activity-line ${active ? "active" : stopped ? "stopped" : item.status || "unknown"}${enterOnMount ? " agent-stagger-in" : ""}`} data-recorded-status={item.status}>
     <motion.span key={iconState} className="activity-line-icon" initial={mounted ? { opacity: 0 } : false} animate={{ opacity: 1 }} transition={animation.transition("micro")}>
       {detail ? (active && indicator ? <ActivityIndicator priority={item.id === "active-model-summary" ? 20 : 30} label="正在处理" /> : item.status === "completed" ? <Check size={12} /> : <Circle size={12} />) : <ActivityIcon label={item.label} />}
     </motion.span>
@@ -256,7 +258,9 @@ export function ProcessingDisclosure({ status = "completed", startedAt, duration
     });
   }, [compactedEvents]);
   if (!compactedEvents.length && !running && !(durationMs > 0) && status === "completed") return null;
-  const current = [...compactedEvents].reverse().find((item) => item.status === "active") || compactedEvents.at(-1);
+  const activeEvent = [...compactedEvents].reverse().find((item) => item.status === "active");
+  const current = activeEvent || compactedEvents.at(-1);
+  const indicatorVariant = activeEvent?.kind === "tool" ? "running" : activeEvent?.kind === "model" ? "dots" : "breathe";
   // Keep the latest steps compact without hiding an open result or a pending
   // decision as new events arrive. The full chronology remains one click away.
   const recentEvents = compactedEvents.filter((item, index) => index >= compactedEvents.length - 4
@@ -273,21 +277,21 @@ export function ProcessingDisclosure({ status = "completed", startedAt, duration
   return <section className={`processing-disclosure fold-group ${status} rp-actgroup`} data-open={expanded} aria-busy={running || stopping}>
     <div className="outline-none"><div className="min-w-0 text-size-chat"><div className="flex min-w-0 flex-col"><div className="group/activity-header">
     <button type="button" className="processing-summary _summary_1qt3f_2 text-text/40 font-sans text-codex-description" onClick={hasDetails ? toggleExpanded : undefined} disabled={!hasDetails} aria-expanded={hasDetails ? expanded : undefined} aria-controls={hasDetails ? bodyId : undefined}>
-      <span className="inline-flex min-w-0 gap-1.5"><time>用时 {formatProcessingDuration(elapsed).replace("m", "分").replace("s", "秒")}</time></span>
+      <span className="inline-flex min-w-0 gap-1.5">{running && <ActivityIndicator variant={indicatorVariant} priority={30} label="正在处理" />}<time>用时 {formatProcessingDuration(elapsed).replace("m", "分").replace("s", "秒")}</time></span>
       {hasDetails && <ChevronDown size={16} />}
     </button></div></div></div></div>
     <FoldBody open={hasDetails && expanded} id={bodyId}><div className="processing-detail" aria-live="polite" aria-atomic="false">
-      {(running || stopping || waiting || status === "failed" || status === "cancelled") && <div className="processing-current" role="status">{running && <ActivityIndicator priority={30} label="正在处理" />}<span>{running ? currentLabel || current?.label || summary : summary}</span></div>}
+      {(running || stopping || waiting || status === "failed" || status === "cancelled") && <div className="processing-current" role="status"><span>{running ? currentLabel || current?.label || summary : summary}</span></div>}
       {hiddenCount > 0 && <button type="button" className="processing-history-toggle" aria-expanded={showHistory} aria-controls={historyId} onClick={() => setShowHistory(value => !value)}>
         <ChevronDown size={12} aria-hidden="true"/><span>{showHistory ? '收起较早记录' : `较早的 ${hiddenCount} 步`}</span>
       </button>}
-      <div id={historyId} className="processing-events">{visibleEvents.map((item, index) => item.receipt
+      <div id={historyId} className="processing-events">{visibleEvents.map((item) => item.receipt
         ? <ReceiptDetail key={item.id} item={item.receipt} open={expandedIds.has(item.id)} onToggle={() => setExpandedIds(previous => {
           const next = new Set(previous);
           if (next.has(item.id)) next.delete(item.id); else next.add(item.id);
           return next;
         })} />
-        : <ActivityLine key={item.id} item={item} detail parentStatus={status} indicator={false} animateEntry={running && expanded && !seenEvents.has(item.id)} index={index} />)}</div>
+        : <ActivityLine key={item.id} item={item} detail parentStatus={status} indicator={false} animateEntry={running && expanded && !seenEvents.has(item.id)} />)}</div>
     </div></FoldBody>
   </section>;
 }

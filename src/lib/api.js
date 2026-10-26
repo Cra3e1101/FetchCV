@@ -90,6 +90,8 @@ export const api = {
   deleteInterviewBrief: (briefId) => request(`/api/interview-briefs/${briefId}`, { method: "DELETE" }),
   createMaterial: (candidateId, body) => request(`/api/candidates/${candidateId}/materials`, json("POST", body)),
   importLegacyWorkspace: (sourcePath) => request("/api/imports/legacy-resume", json("POST", { source_path: sourcePath })),
+  previewResume: (sourcePath, options = {}) => request("/api/imports/resume/preview", { ...json("POST", { source_path: sourcePath, ai_enhanced: options.aiEnhanced ?? false }), signal: options.signal, timeoutMs: options.aiEnhanced ? 65000 : 30000 }),
+  importResume: (body) => request("/api/imports/resume", json("POST", body)),
   previewResumePdf: (sourcePath, options = {}) => request("/api/imports/resume-pdf/preview", { ...json("POST", { source_path: sourcePath, ai_enhanced: options.aiEnhanced ?? false }), signal: options.signal }),
   importResumePdf: (body) => request("/api/imports/resume-pdf", json("POST", body)),
   jobWorkspace: (jobId) => request(`/api/jobs/${jobId}/workspace`),

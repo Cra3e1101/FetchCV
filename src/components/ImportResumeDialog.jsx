@@ -1,11 +1,13 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowDown, ArrowLeft, ArrowUp, Check, FileText, FolderArchive, LoaderCircle, ShieldCheck, Sparkles, Trash2, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, Check, FileText, LoaderCircle, Sparkles, Trash2, Upload, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 import { useModalFocusTrap } from "../lib/modal-focus";
+import { useAgentMotion } from "../ui/motion";
 import "./ImportResumeDialog.css";
 
 export function ImportResumeDialog({ open, candidates, preferredCandidateId, onClose, onImported, onLegacyImport }) {
+  const { enter, transition } = useAgentMotion();
   const [phase, setPhase] = useState("select");
   const [preview, setPreview] = useState(null);
   const [candidateId, setCandidateId] = useState(preferredCandidateId || "new");
@@ -43,24 +45,28 @@ export function ImportResumeDialog({ open, candidates, preferredCandidateId, onC
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [open, phase, onClose]);
 
-  const choosePdf = async () => {
+  const chooseFile = async () => {
     setError(""); setNotice("");
-    if (!window.appRuntime?.selectResumePdf) { setError("请在桌面客户端中选择 PDF 简历。"); return; }
-    const path = await window.appRuntime.selectResumePdf();
+    const selectFile = window.appRuntime?.selectResumeFile || window.appRuntime?.selectResumePdf;
+    if (!selectFile) { setError("请在桌面客户端中选择简历文件。"); return; }
+    let path;
+    try { path = await selectFile(); } catch (err) { setError(err.message || "无法打开文件选择器"); return; }
     if (!path) return;
     previewController.current?.abort();
     const controller = new AbortController();
     previewController.current = controller;
     const timeout = window.setTimeout(() => controller.abort("timeout"), 25000);
-    setPhase("working");
+    setPreview(null); setPhase("working");
     try {
       // Parse locally first. Optional model enhancement is a separate action
       // after the user has inspected the exact redacted outbound text.
-      const result = await api.previewResumePdf(path, { aiEnhanced: false, signal: controller.signal });
+      const result = await api.previewResume(path, { aiEnhanced: false, signal: controller.signal });
+      if (controller.signal.aborted) return;
       setPreview({ ...result, experiences: (result.experiences || []).map((item, index) => ({ ...item, _source_index: index })) }); setName(result.profile.name || ""); setTitle(result.profile.title || ""); setPhase("review");
     } catch (err) {
+      if (previewController.current !== controller) return;
       if (!controller.signal.aborted) setError(err.message);
-      else if (controller.signal.reason === "timeout") setError("本地解析超时，请检查 PDF 是否包含可提取文本。");
+      else if (controller.signal.reason === "timeout") setError("读取超时，请检查文件是否包含可提取文本。");
       setPhase("select");
     } finally {
       window.clearTimeout(timeout);
@@ -82,7 +88,8 @@ export function ImportResumeDialog({ open, candidates, preferredCandidateId, onC
     previewController.current = controller;
     const timeout = window.setTimeout(() => controller.abort("timeout"), 60000);
     try {
-      const result = await api.previewResumePdf(preview.source_path, { aiEnhanced: true, signal: controller.signal });
+      const result = await api.previewResume(preview.source_path, { aiEnhanced: true, signal: controller.signal });
+      if (controller.signal.aborted) return;
       setPreview({ ...result, experiences: (result.experiences || []).map((item, index) => ({ ...item, _source_index: index })) });
       setNotice(result.recognition_mode === "ai_enhanced" ? "AI 增强识别完成；请继续核对结构和字段。" : "模型结果未通过原文证据校验，已保留本地解析结果。");
     } catch (err) {
@@ -98,7 +105,7 @@ export function ImportResumeDialog({ open, candidates, preferredCandidateId, onC
     if (!preview || !name.trim()) return;
     setError(""); setPhase("working");
     try {
-      const result = await api.importResumePdf({ source_path: preview.source_path, ai_enhanced: preview.recognition_mode === "ai_enhanced", candidate_id: candidateId === "new" ? null : candidateId, candidate_name: name.trim(), candidate_title: title.trim() || null, reviewed_preview: { source_sha256: preview.source_sha256, profile: { ...preview.profile, name: name.trim(), title: title.trim() }, experiences: preview.experiences } });
+      const result = await api.importResume({ source_path: preview.source_path, ai_enhanced: preview.recognition_mode === "ai_enhanced", candidate_id: candidateId === "new" ? null : candidateId, candidate_name: name.trim(), candidate_title: title.trim() || null, reviewed_preview: { source_sha256: preview.source_sha256, source_photo_sha256: preview.source_photo_sha256, profile: { ...preview.profile, name: name.trim(), title: title.trim() }, experiences: preview.experiences } });
       setPhase("done"); await onImported(result);
     } catch (err) { setError(err.message); setPhase("review"); }
   };
@@ -113,53 +120,51 @@ export function ImportResumeDialog({ open, candidates, preferredCandidateId, onC
     [experiences[index], experiences[target]] = [experiences[target], experiences[index]];
     return { ...current, experiences };
   });
-  const sectionTotal = preview?.sections.reduce((sum, item) => sum + item.entry_count, 0) || 0;
   return <div className="modal-layer import-layer" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && phase !== "working" && onClose()}>
-    <motion.section ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="import-title" className="import-dialog" initial={{ opacity: 0, y: 3, scale: .98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 8 }} transition={{ duration: .2, ease: [.23, 1, .32, 1] }}>
-      <header className="import-head"><h2 id="import-title">导入基础简历</h2><button type="button" className="modal-close" onClick={onClose} disabled={phase === "working"} aria-label="关闭"><X size={16} /></button></header>
-      <div className="import-steps" aria-label="导入进度"><span className={phase !== "select" ? "done" : "current"}><b>{phase !== "select" ? <Check size={11} /> : "1"}</b>选择 PDF</span><i /><span className={phase === "review" ? "current" : ["working", "done"].includes(phase) && preview ? "done" : ""}><b>{phase === "done" ? <Check size={11} /> : "2"}</b>核对内容</span><i /><span className={phase === "done" ? "done" : ""}><b>{phase === "done" ? <Check size={11} /> : "3"}</b>建立资料库</span></div>
-      <AnimatePresence mode="wait">
-        {phase === "select" && <motion.div key="select" className="import-select" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-          <button className="pdf-drop" onClick={choosePdf}><span><Upload size={21} /></span><strong>选择 PDF 简历</strong><small>支持带文本层的 PDF，最大 20MB</small></button>
-          <div className={`ai-recognition-option ${aiEnhanced ? "enabled" : ""}`}>
-            <span className="ai-recognition-icon">{aiEnhanced ? <Sparkles size={16} /> : <ShieldCheck size={16} />}</span>
-            <div><strong>AI 增强识别</strong><small>{modelAvailable ? "仅发送脱敏文本，发送前可核对；不会上传 PDF 或头像。" : "需先连接模型；当前仅在本地解析。"}</small></div>
-            <button type="button" role="switch" aria-checked={aiEnhanced} aria-label="AI 增强识别" disabled={!modelAvailable} onClick={() => setAiEnhanced((value) => !value)}><i /></button>
-          </div>
-          <div className="legacy-import"><div><FolderArchive size={16} /><strong>旧版 JSON 工作区</strong></div><button onClick={onLegacyImport}>导入</button></div>
+    <motion.section ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="import-title" className={`import-dialog ${phase === "review" ? "is-review" : ""}`} initial={enter()} animate={{ opacity: 1, y: 0 }} transition={transition("enter")}>
+      <header className="import-head"><h2 id="import-title">{phase === "review" ? "核对简历" : "导入简历"}</h2><button type="button" className="modal-close" onClick={onClose} disabled={phase === "working"} aria-label="关闭"><X size={17} /></button></header>
+      <AnimatePresence initial={false} mode="wait">
+        {phase === "select" && <motion.div key="select" className="import-select" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: transition("exit") }} transition={transition("micro")}>
+          <button className="resume-file-picker" onClick={chooseFile}><Upload size={25} strokeWidth={1.4} /><strong>选择简历文件</strong><span>PDF · Word (.docx) · LaTeX · JSON</span><small>最大 20 MB</small></button>
+          <div className="import-select-footer"><span>在本地读取</span><button onClick={onLegacyImport}>迁移旧版工作区</button></div>
         </motion.div>}
-        {phase === "working" && <motion.div key="working" className="import-working" initial={{ opacity: 0 }} animate={{ opacity: 1 }}><LoaderCircle className="spin" size={24} /><h3>{preview ? "正在建立个人资料库" : "正在本地读取简历"}</h3><p>{preview ? "保存原始 PDF，并把经历拆成可追溯条目…" : "此阶段不会向模型发送任何内容；完成后再由你决定是否增强识别。"}</p>{!preview && <button type="button" className="text-button" onClick={cancelPreview}>停止识别并返回</button>}</motion.div>}
-        {phase === "review" && preview && <motion.div key="review" className="import-review" initial={{ opacity: 0, x: 8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }}>
-          <div className="file-summary"><span><FileText size={18} /></span><div><strong>{preview.filename}</strong><small>{preview.page_count} 页 · {(preview.size_bytes / 1024).toFixed(0)} KB · 提取 {preview.text_length} 个字符</small></div><button onClick={choosePdf}>重新选择</button></div>
-          <div className={`recognition-result ${preview.recognition_mode === "ai_enhanced" ? "enhanced" : "local"}`}><span>{preview.recognition_mode === "ai_enhanced" ? <Sparkles size={14} /> : <ShieldCheck size={14} />}</span><div><strong>{preview.recognition_mode === "ai_enhanced" ? "AI 增强识别" : aiEnhanced ? "本地解析完成 · 等待外发确认" : "本地解析"}</strong><small>{preview.recognition_mode === "ai_enhanced" ? `已在本地脱敏 ${preview.redacted_fields.join("、") || "直接身份信息"}，并完成原文证据校验。` : "简历内容尚未发送给外部模型。"}</small></div></div>
-          {aiEnhanced && preview.recognition_mode !== "ai_enhanced" && <section className="outbound-preview">
-            <header><div><ShieldCheck size={15} /><span><strong>发送前核对</strong><small>以下是将发给当前模型的脱敏文本，共 {preview.outbound_text_length || 0} 字{preview.outbound_truncated ? "（已按 30,000 字上限截断）" : ""}</small></span></div><b>PDF 与头像不会上传</b></header>
-            <details><summary>展开查看实际外发内容</summary><pre>{preview.outbound_preview || "当前没有可发送的文本"}</pre></details>
-            <button type="button" disabled={aiBusy || !preview.outbound_preview} onClick={enhancePreview}>{aiBusy ? <LoaderCircle className="spin" size={14} /> : <Sparkles size={14} />}{aiBusy ? "正在增强识别" : "确认发送并增强识别"}</button>
-          </section>}
-          <div className="profile-fields">
-            {candidates.length > 0 && <label>存入<select value={candidateId} onChange={(event) => setCandidateId(event.target.value)}><option value="new">新建个人资料</option>{candidates.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name} 的资料库</option>)}</select></label>}
-            <label>姓名<input autoFocus value={name} onChange={(event) => setName(event.target.value)} /></label><label>目标方向（可选）<input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="例如：AI 产品 / 数据分析" /></label>
+        {phase === "working" && <motion.div key="working" className="import-working" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={transition("micro")}><LoaderCircle className="spin" size={24} /><h3>{preview ? "正在保存简历…" : "正在读取简历…"}</h3>{!preview && <button type="button" className="text-button" onClick={cancelPreview}>取消</button>}</motion.div>}
+        {phase === "review" && preview && <motion.div key="review" className="import-review" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={transition("micro")}>
+          <div className="file-summary"><FileText size={20} /><div><strong>{preview.filename}</strong><small>{preview.page_count ? `${preview.page_count} 页 · ` : ""}{(preview.size_bytes / 1024).toFixed(0)} KB</small></div><button onClick={chooseFile} disabled={aiBusy}>更换文件</button></div>
+          <div className="import-review-columns">
+            <aside className="import-source-pane"><h3>原文</h3><pre>{preview.text_preview}</pre></aside>
+            <div className="import-fields-pane">
+              <div className="profile-fields">
+                {candidates.length > 0 && <label className="import-destination">存入<select disabled={aiBusy} value={candidateId} onChange={(event) => setCandidateId(event.target.value)}><option value="new">新建个人资料</option>{candidates.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}</select></label>}
+                <label>姓名<input disabled={aiBusy} autoFocus value={name} onChange={(event) => setName(event.target.value)} /></label><label>求职方向<input disabled={aiBusy} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="选填" /></label>
+              </div>
+              <details className="import-profile-details"><summary>联系信息</summary><div className="profile-fields">{[["phone", "电话"], ["email", "邮箱"], ["website", "个人网站"]].map(([key,label]) => <label key={key}>{label}<input disabled={aiBusy} value={preview.profile[key] || ""} onChange={(event) => setPreview(current => ({ ...current, profile: { ...current.profile, [key]: event.target.value } }))} /></label>)}</div></details>
+              <section className="import-experience-review" aria-label="简历内容">
+                <div className="import-entries-heading"><h3>简历内容</h3><span>{preview.experiences.length} 项</span></div>
+                {preview.experiences.map((experience, index) => <article key={experience._source_index}>
+                  <header><select disabled={aiBusy} aria-label={`第 ${index + 1} 项所属模块`} value={experience.kind} onChange={(event) => updateExperience(index, { kind: event.target.value, section: event.target.options[event.target.selectedIndex].text })}><option value="education">教育背景</option><option value="experience">实习/工作经历</option><option value="project">项目经历</option><option value="research">科研经历</option><option value="campus">校园经历</option><option value="award">荣誉奖项</option><option value="skill">技能</option><option value="summary">个人总结</option><option value="other">其他经历</option></select><div><button type="button" disabled={aiBusy || index === 0} onClick={() => moveExperience(index, -1)} aria-label={`上移第 ${index + 1} 项`}><ArrowUp size={13} /></button><button type="button" disabled={aiBusy || index === preview.experiences.length - 1} onClick={() => moveExperience(index, 1)} aria-label={`下移第 ${index + 1} 项`}><ArrowDown size={13} /></button><button type="button" disabled={aiBusy} onClick={() => removeExperience(index)} aria-label={`删除第 ${index + 1} 项`}><Trash2 size={13} /></button></div></header>
+                  <div className="import-field-grid"><label>名称<input disabled={aiBusy} value={experience.title || ""} onChange={(event) => updateExperience(index, { title: event.target.value })} /></label><label>组织 / 学校<input disabled={aiBusy} value={experience.organization || ""} onChange={(event) => updateExperience(index, { organization: event.target.value })} /></label><label>角色 / 专业<input disabled={aiBusy} value={experience.role || ""} onChange={(event) => updateExperience(index, { role: event.target.value })} /></label><label>时间<div className="import-date-fields"><input disabled={aiBusy} aria-label={`第 ${index + 1} 项开始时间`} value={experience.start_date || ""} onChange={(event) => updateExperience(index, { start_date: event.target.value })} /><span>—</span><input disabled={aiBusy} aria-label={`第 ${index + 1} 项结束时间`} value={experience.end_date || ""} onChange={(event) => updateExperience(index, { end_date: event.target.value })} /></div></label></div>
+                  <label className="import-summary-field">内容<textarea disabled={aiBusy} value={experience.summary || ""} onChange={(event) => updateExperience(index, { summary: event.target.value })} /></label>
+                  <footer><label><input type="checkbox" disabled={aiBusy} checked={experience.review_status === "uncertain"} onChange={(event) => updateExperience(index, { review_status: event.target.checked ? "uncertain" : "confirmed" })} />暂无法确认</label></footer>
+                </article>)}
+                {preview.experiences.length === 0 && <p className="import-no-entries">未识别到经历条目。可尝试增强识别，或更换包含正文的文件。</p>}
+              </section>
+            </div>
           </div>
-          <div className="parse-summary"><div><strong>{preview.sections.length}</strong><small>识别章节</small></div><div><strong>{sectionTotal}</strong><small>经历条目</small></div><div><strong>{preview.profile.email || "未识别"}</strong><small>邮箱</small></div></div>
-          <div className="section-chips">{preview.sections.map((section) => <span key={section.key}>{section.title}<b>{section.entry_count}</b></span>)}</div>
-          <details className="import-experience-review">
-            <summary>逐项核对识别字段 <span>{preview.experiences.length} 项</span></summary>
-            <div>{preview.experiences.map((experience, index) => <article key={`${experience._source_index}-${index}`}>
-              <header><select aria-label={`第 ${index + 1} 项所属模块`} value={experience.kind} onChange={(event) => updateExperience(index, { kind: event.target.value, section: event.target.options[event.target.selectedIndex].text })}><option value="education">教育背景</option><option value="experience">实习/工作经历</option><option value="project">项目经历</option><option value="research">科研经历</option><option value="campus">校园经历</option><option value="award">荣誉奖项</option><option value="skill">技能</option><option value="summary">个人总结</option><option value="other">其他经历</option></select><div><button type="button" disabled={index === 0} onClick={() => moveExperience(index, -1)} aria-label="上移"><ArrowUp size={12} /></button><button type="button" disabled={index === preview.experiences.length - 1} onClick={() => moveExperience(index, 1)} aria-label="下移"><ArrowDown size={12} /></button><button type="button" onClick={() => removeExperience(index)} aria-label="删除"><Trash2 size={12} /></button></div></header>
-              <div className="import-field-grid"><label>名称<input value={experience.title || ""} onChange={(event) => updateExperience(index, { title: event.target.value })} /></label><label>组织/学校<input value={experience.organization || ""} onChange={(event) => updateExperience(index, { organization: event.target.value })} /></label><label>角色/专业<input value={experience.role || ""} onChange={(event) => updateExperience(index, { role: event.target.value })} /></label><label>开始时间<input value={experience.start_date || ""} onChange={(event) => updateExperience(index, { start_date: event.target.value })} /></label><label>结束时间<input value={experience.end_date || ""} onChange={(event) => updateExperience(index, { end_date: event.target.value })} /></label></div>
-              <label className="import-summary-field">内容<textarea value={experience.summary || ""} onChange={(event) => updateExperience(index, { summary: event.target.value })} /></label>
-              <footer><small>PDF 原文：{experience.details?.raw_text || experience.content || "未保留可定位原文"}</small><button type="button" className={experience.review_status === "uncertain" ? "active" : ""} onClick={() => updateExperience(index, { review_status: experience.review_status === "uncertain" ? "confirmed" : "uncertain" })}>{experience.review_status === "uncertain" ? "已标记无法确认" : "标记无法确认"}</button></footer>
-            </article>)}</div>
-          </details>
-          {preview.warnings?.length > 0 && <details className="recognition-warnings"><summary>识别说明</summary><ul>{preview.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details>}
-          <details className="text-preview"><summary>查看提取文本</summary><pre>{preview.text_preview}</pre></details>
+          {preview.warnings?.length > 0 && <details className="recognition-warnings"><summary>读取提示 · {preview.warnings.length}</summary><ul>{preview.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></details>}
+          {modelAvailable && <details className="outbound-preview" open={aiEnhanced} onToggle={(event) => setAiEnhanced(event.currentTarget.open)}>
+            <summary><Sparkles size={14} />{preview.recognition_mode === "ai_enhanced" ? "已增强识别" : "使用 AI 增强识别"}</summary>
+            <p>仅将以下脱敏文本发送给当前模型。增强识别会重新读取内容，请在修改字段前使用。</p>
+            <pre>{preview.outbound_preview || "当前没有可发送的文本"}</pre>
+            <button type="button" disabled={aiBusy || !preview.outbound_preview} onClick={enhancePreview}>{aiBusy ? <LoaderCircle className="spin" size={14} /> : <Sparkles size={14} />}{aiBusy ? "正在识别" : "发送并增强识别"}</button>
+          </details>}
         </motion.div>}
-        {phase === "done" && <motion.div key="done" className="import-done" initial={{ opacity: 0, scale: .98 }} animate={{ opacity: 1, scale: 1 }}><span><Check size={23} /></span><h3>个人资料库已建立</h3></motion.div>}
+        {phase === "done" && <motion.div key="done" className="import-done" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={transition("micro")}><span><Check size={23} /></span><h3>简历已导入</h3></motion.div>}
       </AnimatePresence>
       {notice && <div className="dialog-notice" role="status">{notice}</div>}
       {error && <div className="dialog-error" role="alert">{error}</div>}
-      <footer className="import-actions">{phase === "review" && <><button className="text-button" onClick={() => setPhase("select")}><ArrowLeft size={13} />返回</button><button className="primary-button" disabled={!name.trim()} onClick={confirm}>确认导入 <Check size={14} /></button></>}{phase === "done" && <button className="primary-button" onClick={onClose}>进入资料库 <Check size={14} /></button>}</footer>
+      {phase === "review" && <footer className="import-actions"><button className="text-button" disabled={aiBusy} onClick={() => setPhase("select")}><ArrowLeft size={14} />返回</button><button className="primary-button" disabled={!name.trim() || aiBusy} onClick={confirm}>确认导入 <Check size={14} /></button></footer>}
+      {phase === "done" && <footer className="import-actions"><button className="primary-button" onClick={onClose}>完成</button></footer>}
     </motion.section>
   </div>;
 }
