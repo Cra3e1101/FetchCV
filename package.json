@@ -1,6 +1,15 @@
 {
   "name": "fetchcv-desktop",
-  "description": "FetchCV local-first resume and job application agent",
+  "description": "Local-first AI job search workspace for Windows: tailored resumes, job research, and interview preparation.",
+  "license": "MIT",
+  "homepage": "https://github.com/Cra3e1101/FetchCV#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Cra3e1101/FetchCV.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Cra3e1101/FetchCV/issues"
+  },
   "author": "hesan",
   "private": true,
   "version": "0.4.19",
@@ -99,6 +108,8 @@
       "shared/vendor/cc-switch/LICENSE",
       "FetchCV_LOGO.png",
       "FetchCV_LOGO.ico",
+      "LICENSE",
+      "THIRD_PARTY_NOTICES.md",
       "package.json",
       "!node_modules/**/*"
     ],

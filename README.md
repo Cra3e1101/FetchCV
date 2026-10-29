@@ -1,281 +1,111 @@
-# FetchCV
+<div align="center">
+  <img src="FetchCV_LOGO.png" alt="FetchCV" width="88" />
+  <h1>FetchCV</h1>
+  <p><strong>从真实经历出发，为每一个目标岗位做好准备。</strong></p>
+  <p>本地优先的 AI 求职工作台 · 简历定制 · 岗位研究 · 面试准备</p>
+  <p>
+    <img src="https://img.shields.io/badge/Windows-10%20%2F%2011-0078D4" alt="Windows 10 / 11" />
+    <img src="https://img.shields.io/badge/Local--first-Desktop-2F6B50" alt="Local-first desktop" />
+    <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-3B82F6" alt="MIT License" /></a>
+  </p>
+  <p>
+    <a href="#快速开始">快速开始</a> ·
+    <a href="docs/getting-started.md">使用指南</a> ·
+    <a href="docs/README.md">项目文档</a> ·
+    <a href="https://github.com/Cra3e1101/FetchCV/issues">反馈建议</a>
+  </p>
+</div>
 
-FetchCV 是本地优先的 Windows 桌面求职 Agent。它把个人资料、目标岗位、简历版本、面试情报和真实工具记录组织在同一个岗位工作区中，帮助用户完成：
+---
 
-```text
-读取原简历
-→ 理解并调研岗位
-→ 找到可复用的真实经历
-→ 提出有证据的改写建议
-→ 请求用户确认
-→ 修改同一份简历模板
-→ 校验事实与岗位要求覆盖
-→ 导出 PDF / Word
-→ 准备面试
-```
+FetchCV 将个人资料、目标岗位、简历版本和面试材料放进同一个桌面工作台。导入已有简历，添加目标岗位，让 AI 协助理解岗位要求、整理相关经历并提出改写建议；由你确认后，再编辑、导出和准备面试。
 
-桌面端使用单一 Pi Agent Loop，由模型根据完整语义决定直接回答还是调用工具；所有工具统一经过 FetchCV ToolGateway 的权限、审批、作用域、幂等、版本和审计约束。
+**经历是基础，依据可回查，修改由你决定。** 每个岗位拥有独立工作区，方便同时推进不同求职机会。
 
-## 首版说明
+## 核心功能
 
-本仓库提供 FetchCV 的首版实现，包含桌面界面、Agent 运行时、业务后端。
+| 功能 | 你可以完成的工作 |
+| --- | --- |
+| **个人资料库** | 导入 PDF、Word、LaTeX 或 JSON 简历，核对教育、实习、项目和技能，积累可复用的经历与材料。 |
+| **岗位工作区** | 粘贴职位描述、导入文本或读取公开招聘页面，集中管理岗位对话、任务和简历版本。 |
+| **有依据的简历定制** | 查看改写建议对应的岗位要求与经历依据，采用、调整或拒绝建议，保留基础简历。 |
+| **简历编辑与导出** | 在工作台编辑和预览简历，导出排版 PDF 或单栏、可编辑的 Word 文档。 |
+| **面试情报** | 结合本地知识库与公开面经整理问题、来源引文和准备建议，随时回查原文。 |
+| **可扩展的 Agent** | 配置兼容的模型服务，通过 Skill 与 MCP 接入额外能力，并管理工具授权。 |
 
-- 构建版本号：`0.4.19`
-- 平台：Windows 10/11 x64
-- 前端：React 18、Vite、Electron、Radix UI、Framer Motion
-- Agent Runtime：`@earendil-works/pi-agent-core`、`@earendil-works/pi-ai`
-- 本地 Sidecar：FastAPI、SQLAlchemy、SQLite
+桌面支持浅色、深色和跟随系统外观。API Key 在本机加密保存，资料保存在本地；使用云端模型与网页研究时仍会产生相应网络请求，详见[数据与隐私](docs/privacy.md)。
 
-源码不包含个人数据库、模型密钥、私人测试材料、运行缓存及本地 UI 取证资源。
-
-## 核心能力
-
-### 个人资料库
-
-- 在同一入口导入 PDF、Word（`.docx`）、LaTeX（`.tex`）和 JSON 简历，本地提取个人信息、教育、实习、项目、技能和奖项。旧 `.doc` 请先另存为 `.docx`；扫描 PDF 需要先 OCR。
-- JSON 支持 FetchCV 简历快照和 JSON Resume；完整旧版工作区使用“迁移旧版工作区”。TeX 采用静态解析，不执行源码。
-- 入库前可逐项修正模块、标题、组织、角色、日期和正文，也可删除、排序或标记无法确认。
- - AI 增强识别默认关闭；选择后仍先完成本地解析，用户必须展开核对实际脱敏外发文本并再次确认，才会调用模型；不上传原 PDF、头像和本地文件路径。
-- 保存作品集、网站、代码仓库、证书和其他求职材料。
-- 基础简历与岗位简历分离，岗位优化不会覆盖原始资料。
-
-### 岗位 Agent
-
-- 每个岗位拥有独立对话、任务、活动状态、滚动位置、审批草稿和简历版本。
-- 支持粘贴 JD、导入文本文件或从公开招聘网页读取岗位内容。
-- Agent 先向用户解释岗位理解，再提出经历使用策略和改写建议。
-- 改写建议显示对应 JD、事实依据和风险级别；用户可采用、拒绝或编辑后采用。
-- 取消是明确终态；重试、暂停、恢复和进程重启不会伪装成同一个任务继续运行。
-- 任务绑定实际 Provider 与模型快照，切换默认模型不会篡改正在运行任务的身份。
-- 桌面状态由真实事件映射为连接、流式回答、工具执行、等待审批、暂停、失败和就绪，不再用一个 `busy` 文案概括所有状态。
-- 模型流式片段按动画帧批量刷新，减少长回答期间对整个对话树的重复渲染。
-
-### 简历工作台
-
-- 保留既有简历结构和成熟表达，只在有事实依据时调整重点与措辞。
-- PDF 预览与导出共用同一份 XeLaTeX 编译文件；编辑器快照提供内容与排版参数。
-- 默认采用 `didi/main.tex` 的 A4 极简排版：宋体正文、居中姓名、右上照片、黑色横线栏目与三列条目。
-- Windows 发行包自带独立 XeLaTeX 运行时，用户无需安装 LaTeX、配置 PATH 或联网下载宏包。导入的 TeX 只做静态解析，编译使用应用内固定模板和转义后的内容。
-- 已安装完整宋体与 Times New Roman 时沿用原稿字体，否则使用随包的 Fandol Song 与 TeX Gyre Termes。替代字体保持模板结构，但字形和换行可能有差异；字体与运行时版本变化会自动使旧预览缓存失效。
-- 草稿可直接预览与编辑；正式导出保留事实核验。导入原件通过单独入口下载，错误响应不会进入 PDF 预览。
-- PDF、Word 导出可选择保存位置；原文未变化的重复保存不会作废已有 PDF。
-- 独立导出单栏、可编辑、适合 ATS 解析的 Word 文件，不替代原排版 PDF。
-- 岗位要求使用可解释的“支持 / 部分支持 / 暂无证据”矩阵，不虚构 ATS 通过率。
-
-### 面试情报与知识库
-
-- 默认 Python 后端通过 SQLite FTS5/BM25 检索面经与简报，支持中文相邻双字和英文词项匹配。
-- 岗位对话、独立聊天与知识库搜索共用索引；查询先限定资料范围，再排序。命中返回摘要与片段，原文可按需分页读取。
-- 索引随资料写入、修改和删除在同一事务内同步；当前为关键词检索，不代表已提供向量语义检索。
-- 完成岗位材料后可进入独立“面试”工作区。
-- 先检索本地面试知识库，再发现公开面经来源。
-- 小红书作为重点来源时使用只读、无账号优先、有限预算和熔断策略；遇到登录、验证码或访问限制立即停止，不绕过平台控制。
-- 面经按来源、发布日期和岗位相关性保存，展示原始链接与本地证据副本。
-- 根据多篇原文归纳共性问题、出现频次、证据引文和准备建议；单一来源会明确提示证据有限。
-- 牛客、知乎等公开来源用于补充，不冒充小红书原始证据。
-
-### 通用 Agent 与网页能力
-
-- 普通问题也进入同一模型循环，而不是只允许岗位流程问题。
-- 实时天气、新闻和最新信息不注册固定业务关键词或专用天气代码。模型按语义选择通用 `search_web`、`read_web_page` 等只读工具。
-- 网页工具只允许公网 HTTPS，阻断本机、私网、URL 凭据、危险端口、超大响应和未校验重定向。
-- 动态网页可在 Agent 内使用受控浏览器读取；不会无故弹出系统浏览器。
-- Firecrawl 是可选 Web Provider，不是 Skill 本身，也不是必须的云服务。自托管实例可不使用 Firecrawl 云 API Key。
-
-### Skill、MCP 与本地工作区
-
-- 可从受控目录加载 `SKILL.md`；新 Skill 默认关闭，授权绑定文件哈希，内容变化后自动撤销信任。
-- MCP Server 可配置 stdio 或 HTTP 连接，但 Server 自报“只读”不会自动获得权限。
-- MCP 工具逐项授权；写工具还需要目标范围和运行时审批。
-- Agent 可在隔离工作区列出、读取和搜索文本文件，并运行预定义校验工具。
-- 当前不开放任意 Shell，也不允许未声明作用域的写操作。
-
-## Agent 架构
+## 一条完整的求职准备流程
 
 ```text
-React / Electron Desktop
-        │
-        ▼
-Single Pi Agent Loop
-  ├─ provider-independent model stream
-  ├─ structured tool calls
-  ├─ steering / follow-up queue
-  └─ context transformation
-        │
-        ▼
-FetchCV ToolGateway
-  ├─ permission and approval
-  ├─ candidate / job / file scope
-  ├─ stable operation_id
-  ├─ idempotency and outcome_unknown
-  ├─ trace and evidence
-  └─ version boundary
-        │
-        ▼
-FastAPI + SQLite
-  ├─ resumes / jobs / runs / proposals
-  ├─ tasks / tool invocations / approvals
-  ├─ interview sources / briefs
-  └─ PDF / DOCX / workspace adapters
+导入简历 → 核对个人资料 → 添加目标岗位 → 审阅改写建议 → 编辑与导出 → 准备面试
 ```
 
-Pi 只负责观察上下文、选择工具、读取结果并继续决策。Python Sidecar 不运行第二套模型循环。状态机、审批、事实校验、文件边界和副作用恢复由确定性代码负责。
+1. **建立自己的经历库**：导入简历并核对解析结果，补充项目、作品集和证书等材料。
+2. **围绕岗位调整表达**：添加 JD，在对话中分析岗位要求，选择有依据的改写建议。
+3. **交付求职材料**：检查简历内容和版式，导出 PDF / Word，再整理相关面经与准备重点。
 
-## 安全与隐私
+## 快速开始
 
-- API Key 由 Electron `safeStorage` / Windows DPAPI 加密，只保存在本机。
-- Key 不写入源码、业务 SQLite、Trace、任务快照或渲染页面。
-- 模型出口递归处理姓名、邮箱、电话、证件号、本地路径、Bearer/Basic、Cookie、API Key、私钥和 URL Query Secret。
-- Sidecar 只监听 loopback，并使用每次桌面进程生成的控制令牌。
-- 写操作使用稳定 `operation_id`。无法确认是否执行成功时进入 `outcome_unknown`，不得自动重放。
-- MCP Schema 或注解变化会清空旧授权；Skill 内容变化会自动停用。
-- `test use/` 包含本机真实回归材料，必须保持在 `.gitignore` 中，不得上传 GitHub。
+当前提供源码运行与 Windows 构建方式，尚未发布可下载的 GitHub Release。桌面目标平台为 **Windows 10/11 x64**。
 
-## 外观与可访问性
-
-- 浅色、深色和跟随系统三种模式保存在本地设置文件中，应用启动后立即恢复。
-- 界面密度和主题色与明暗模式共用同一外观配置，不再依赖先打开设置页才生效。
-- 深色模式只改变桌面工作区；正式简历 PDF / Word 保持文档自身的白色纸张与排版。
-- 运行状态、列表位移和折叠动效遵循 `prefers-reduced-motion`，不展示伪进度或隐藏思维链。
-
-## 开发环境
-
-在 PowerShell 中执行：
+准备 Git、**Node.js 22.19+（22.x）** 和 **Python 3.11+**，建议使用 Python 3.12。在 PowerShell 中执行：
 
 ```powershell
-Set-Location "D:\hesan\Desktop\VSCODES\FetchCV_Windows"
+git clone https://github.com/Cra3e1101/FetchCV.git
+cd FetchCV
+
 npm ci
 python -m venv backend\.venv
 backend\.venv\Scripts\python.exe -m pip install -e "backend[dev]"
-npm run desktop
-```
 
-不要复用 macOS 生成的 `node_modules`、Python 虚拟环境、Sidecar 或 `.app`。
-
-`http://127.0.0.1:8766/docs` 是 Sidecar 调试接口，不是 FetchCV 客户端。
-
-### 开发版启动缓存
-
-`打开开发版.cmd` 使用的启动器会复用工作目录中的 Electron 构建和 Vite 依赖缓存。首次启动或 Electron 源码、依赖、preload 变化时重新构建；前端修改仍由 Vite 实时加载。构建期间保存文件不会把旧输出标记为可复用。每次构建保留独立输出目录，运行中的窗口不受下一次构建影响。
-
-开发版、浏览器预检和开发模式自动化共用 Electron 路径解析：显式路径 → `FETCHCV_ELECTRON_PATH` → `.m1-work/desktop-dev-local.json` → 已安装依赖。选择失效或版本不符会直接报错，不静默切换。`npm run browser:check` 检查主进程与隔离 renderer；`npm run test:browser-bridge` 检查浏览器桥的鉴权及生命周期。
-
-`npm run desktop:dev` 启动热更新窗口，默认使用独立开发资料库；现有 `打开开发版.cmd` 继续按本机配置使用指定资料库。运行时选择本身不会读取或复制用户资料。
-
-`current.json` 中的 `runtimeReused` 和 `runtimePreparationMs` 可用于确认缓存命中。需要强制重建时，可删除该开发工作目录下的 `runtime-cache.json`，无需清理个人数据。生产包将模型 SDK 分成按需加载的模块；设置、导入和资料库界面也在打开时加载。
-
-可用以下命令测量三次运行包准备耗时（不启动窗口或访问个人资料；该指标不代表完整启动时间）：
-
-```powershell
-node scripts/benchmark-startup.mjs --runtime-only --runs 3
-```
-
-省略 `--runtime-only` 可使用独立测试资料库测量开发版窗口和界面就绪时间，并检查设置面板。可通过 `--electron` 指定 Electron 可执行文件，或用 `--software-rendering` 测试软件渲染环境。
-
-启动日志区分资料可读和 Agent 就绪两个阶段。`--sidecar-only` 可单独测量 Python 后端；`startup-report.mjs` 按 cold/warm/unclassified 分别汇总中位数与 P95。
-
-## 测试与打包
-
-排版运行时通过 `scripts/resume-runtime.lock.json` 固定版本和 SHA-512，从公开 TeX Live 镜像构建，构建过程不读取维护者本机的 TeX 安装。首次构建需要下载依赖，之后可复用经过校验的缓存：
-
-```powershell
+$env:FETCHCV_PYTHON = (Resolve-Path backend\.venv\Scripts\python.exe).Path
 npm run resume:runtime
-npm run resume:runtime -- --offline
-npm run resume:runtime:verify
+npm run desktop:dev
 ```
 
-输出为 `build/resume-runtime`，打包时复制到 `resources/resume-runtime`。完整原始宏包、字体和官方源码归档另存于 `build/resume-runtime-sources`，公开发行时应与安装包同时提供；运行时内保留许可证和来源清单。源码归档与二进制版本的逐一对应关系尚未完整验证，公开发行前仍需核对。这些构建产物不提交到 Git。
+首次准备排版运行时需要联网下载依赖。启动后，在设置中添加模型服务的请求地址、API Key 和模型，完成连接配置，再导入简历。支持 OpenAI Chat Completions 与 Anthropic Messages 兼容接口；具体工具调用能力取决于所选模型和服务。
 
-发行版只接受应用随包运行时，缺失或损坏时明确报错，不回退到某台开发机上的环境。开发调试可用 `FETCHCV_LATEX_RUNTIME` 指定一个完整运行时目录；`FETCHCV_RESUME_FONTS=bundled` 可强制测试内置字体。仅在开发模式且没有随包运行时时，才允许通过 `FETCHCV_XELATEX` 或 PATH 使用已有编译器。
+详细步骤与常见问题见[使用指南](docs/getting-started.md)，安装包构建见[开发指南](docs/development.md)。
 
-```powershell
-npm run check
-npm run build
-npm run test:unit
-npm run test:electron
-npm run desktop:package
-npm run test:packaged
-```
+## 使用说明
 
-安装包输出：
+- **导入格式**：PDF 需包含可提取文本；扫描件请先 OCR。Word 支持 `.docx`，旧 `.doc` 请先转换；TeX 仅静态解析，不执行导入源码。
+- **内容核对**：解析结果与 AI 建议均需审阅。岗位匹配以要求和经历依据呈现，不提供第三方 ATS 通过率承诺。
+- **文档输出**：PDF 使用内置简历模板；Word 为单栏可编辑版本。导入原件的版式不保证逐像素复现。
+- **模型服务**：需自行配置兼容服务，服务费用与数据处理规则由所选提供方决定。
+- **网页来源**：公开面经的可用性受来源网站限制；遇到登录、验证码或访问限制时可能无法继续读取。
+
+## 项目文档
+
+| 文档 | 内容 |
+| --- | --- |
+| [使用指南](docs/getting-started.md) | 首次运行、模型配置、简历导入与常见问题 |
+| [开发指南](docs/development.md) | 开发环境、检查命令和 Windows 安装包构建 |
+| [架构说明](docs/architecture.md) | 桌面端、Agent 循环、工具网关与本地后端 |
+| [数据与隐私](docs/privacy.md) | 本地存储、模型请求和扩展权限 |
+| [贡献指南](CONTRIBUTING.md) | 问题反馈、功能建议与代码贡献 |
+
+## 技术栈
+
+**React + Electron** 构建桌面体验，**Pi Agent Runtime** 驱动模型与工具交互，**FastAPI + SQLite** 提供本地业务服务，**XeLaTeX** 负责 PDF 排版。
 
 ```text
-release/FetchCV-Setup-0.4.19-win-x64.exe
-release/win-unpacked/FetchCV.exe
+src/                 桌面界面
+electron/            桌面宿主与 Agent 运行时
+backend/             本地 API、业务模型与文档适配
+public/resume-editor/ 简历编辑器
+scripts/             开发与构建工具
+tests/               自动化测试
+docs/                使用与开发文档
 ```
 
-只有 `npm run test:packaged` 通过后，安装包才可视为发布候选。公开分发前还需要 Windows Authenticode 代码签名。
+## 参与贡献
 
-桌面打包不会复制整棵 `node_modules`：Electron 主进程与实际使用的 Pi/OpenAI/Anthropic 路径会先编译成轻量运行时；Sidecar 也不会携带未使用的 NumPy/OpenBLAS。这样既保留离线本地 API、PDF 渲染和 MCP 能力，也避免把开发依赖、可选模型 SDK 与多余 Chromium 语言包放进安装包。
+欢迎通过 [Issues](https://github.com/Cra3e1101/FetchCV/issues) 报告问题或提出建议，也欢迎提交改进代码和文档的 Pull Request。开始前请阅读[贡献指南](CONTRIBUTING.md)；反馈问题时请使用脱敏示例。
 
-## Firecrawl（可选）
+## 许可证与致谢
 
-FetchCV 自带基础网页搜索、正文读取和受控浏览器，不配置 Firecrawl 也能工作。
+FetchCV 的原创代码以 [MIT License](LICENSE) 发布。第三方代码、字体和运行时组件遵循各自许可证，见[第三方组件说明](THIRD_PARTY_NOTICES.md)。
 
-Firecrawl 云服务：
-
-```text
-FETCHCV_FIRECRAWL_URL=https://api.firecrawl.dev
-FETCHCV_FIRECRAWL_API_KEY=fc-...
-```
-
-自托管 Firecrawl：
-
-```text
-FETCHCV_FIRECRAWL_URL=http://127.0.0.1:3002
-```
-
-自托管模式不需要 Firecrawl 云 API Key，但仍需要本机 Docker/服务依赖。`vendor/firecrawl/` 是源码参考与自托管材料，不会自动启动，也不会进入桌面安装包。
-
-## 目录
-
-```text
-src/                         React 桌面界面
-electron/                    Electron、Pi Runtime、安全存储、Sidecar 生命周期
-backend/applyos_api/         FastAPI 业务 API
-backend/applyos_domain/      SQLAlchemy 领域模型
-backend/applyos_harness/     权限、审批、状态机、版本、事实与审计
-backend/applyos_agent/       业务工具、网页、Skill、MCP 与兼容层
-backend/integrations/        PDF、DOCX、简历编辑器和外部适配
-public/resume-editor/        嵌入式简历编辑器
-tests/                       前端、Electron 和 Pi Runtime 回归测试
-backend/tests/               后端与 Agent 业务测试
-docs/                        架构与开发文档
-test use/                    本机真实材料，不进入 GitHub
-```
-
-以下内容不应提交到源码仓库：
-
-```text
-node_modules/
-backend/.venv/
-backend/data/
-backend/build/
-backend/dist/
-dist/
-release/
-artifacts/
-tmp/
-.pytest-*/
-source-references/
-test use/
-```
-
-## 已知边界与下一步
-
-- 当前任务重启对账已实现，但完整 SQLite lease、heartbeat、原子 claim 与持久消息唯一消费者仍待完成。
- - 改写审批草稿按 Run 写入 SQLite 审批记录并带递增 revision；旧 revision 写入会返回冲突，不再依赖 localStorage。完整 time-travel 事件历史仍待补齐。
-- PDF 预览请求可在客户端停止等待，但真正的服务端协作式取消需要独立导入 Worker。
- - 岗位要求证据矩阵已有稳定 requirement ID、JD 连续原文、简历 section/item 落点和命中片段；从证据卡跳到编辑器精确字符高亮仍待补齐。
- - 提案进入人工审批前会经过确定性 evaluator：校验 JD 连续引文、fact 所有权/授权、数字、日期和角色强度升级；失败会返回同一个 Pi Loop 修正，不启动第二套 Agent。
-- `outcome_unknown` 目前依赖人工核对；下一步是为支持的 ToolSpec 增加确定性 `reconcile()`。
-- MCP 与 Skill 已有应用层信任控制，但操作系统级沙箱仍待实现。
-- 长对话已减少逐 token 重绘，但尚未引入消息虚拟列表；只有在真实性能基准证明必要时才增加该依赖。
-- 审计数据已由 Trace 持久化，面向用户的搜索、筛选与脱敏导出检查器仍待完成。
-
-完整三轮研究、用户体验、产品裁决与工程落地见：
-
-- `docs/three-round-agent-audit-2026-07-28.md`
-- `docs/agent-review-round-2026-07-31.md`
-- `docs/pi_native_architecture.md`
-- `docs/interaction_audit.md`
+感谢 Pi、Electron、React、FastAPI、SQLite 与 TeX Live 等开源项目提供的基础能力。

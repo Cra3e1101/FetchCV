@@ -1,12 +1,27 @@
-# FetchCV backend
+# FetchCV 本地后端
 
-本目录提供 FetchCV 的本地 FastAPI、SQLite 领域模型、Agent 流程和简历/作品集适配器。`applyos_*` 仅作为内部 Python 包名保留，避免破坏已有迁移和数据库兼容性；产品名、进程、环境变量和用户数据均使用 FetchCV。
+本目录提供 FastAPI API、SQLite 业务模型、工具执行与简历文档适配。桌面端的交互模型循环由 Electron 中的 Pi Runtime 承载。
 
-```bash
-cd "/Users/jiujiu/Desktop/vibe coding/FetchCV"
+## 启动
+
+在项目根目录完成 Python 依赖安装后，于 PowerShell 中运行：
+
+```powershell
+$env:FETCHCV_PYTHON = (Resolve-Path backend\.venv\Scripts\python.exe).Path
 npm run backend:dev
 ```
 
-接口调试页为 `http://127.0.0.1:8766/docs`。桌面 GUI 请在项目根目录执行 `npm run desktop`。
+接口调试页默认位于 `http://127.0.0.1:8766/docs`。启动完整桌面应用请参考[开发指南](../docs/development.md)。
 
-数据库默认保存为 `backend/data/fetchcv.db`；桌面版本保存到 Electron 用户数据目录。若发现旧的 `applyos.db`，首次启动会复制迁移到 `fetchcv.db`，不会删除原文件。
+单独运行时数据库默认保存到 `backend/data/fetchcv.db`；桌面端使用相应的用户数据目录。`applyos_*` 是为兼容迁移和 Python 导入而保留的内部包名。
+
+## 模块
+
+- `applyos_api/`：HTTP API。
+- `applyos_domain/`：业务数据模型。
+- `applyos_harness/`：任务、审批、权限、版本和事实校验。
+- `applyos_agent/`：业务工具、网页与扩展适配。
+- `integrations/`：文档与编辑器适配。
+- `tests/`：后端测试。
+
+依赖以 `pyproject.toml` 为准，整体调用链见[架构说明](../docs/architecture.md)。
