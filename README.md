@@ -1,6 +1,7 @@
 <div align="center">
   <img src="FetchCV_LOGO.png" alt="FetchCV" width="88" />
   <h1>FetchCV</h1>
+  <p><strong>简体中文</strong> · <a href="README.en.md">English</a></p>
   <p><strong>从真实经历出发，为每一个目标岗位做好准备。</strong></p>
   <p>本地优先的 AI 求职工作台 · 简历定制 · 岗位研究 · 面试准备</p>
   <p>
